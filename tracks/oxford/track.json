@@ -1,0 +1,10 @@
+{
+  "id": "oxford",
+  "name": "Oxford",
+  "pxPerMeter": 10.8,
+  "files": { "background": "background.png", "mask": "mask.png", "overhead": "overhead.png" },
+  "timingLines": {},
+  "racingLine": [],
+  "grid": [],
+  "spawn": { "x": 1280, "y": 200, "heading": 1.5707963267948966 }
+}

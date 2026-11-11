@@ -11,13 +11,15 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.sim.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "vitest run",
-    "draft-mask": "node tools/draft-mask.ts public/assets/BGs/indiana.jpg tracks/indiana/mask-draft.png tracks/indiana/draft-hints.json"
+    "draft-mask": "node tools/draft-mask.ts public/assets/BGs/indiana.jpg tracks/indiana/mask-draft.png tracks/indiana/draft-hints.json",
+    "validate-track": "tsx tools/validate-track.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "@types/pngjs": "^6.0.5",
     "jpeg-js": "^0.4.4",
     "pngjs": "^7.0.0",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "vitest": "^5.1.0"
