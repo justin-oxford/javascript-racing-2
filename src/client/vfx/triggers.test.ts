@@ -1,9 +1,10 @@
 // @vitest-environment node
 // VFX triggers against real sim runs on synthetic arenas.
 import { describe, expect, it } from 'vitest';
-import physicsJson from '../../../config/physics.json';
+// Frozen baseline, not live config: these behaviours must not change while Justin tunes.
+import physicsJson from '../../../tools/fixtures/physics-baseline.json';
 import rules from '../../../config/rules.json';
-import vfx from '../../../config/vfx.json';
+import vfx from '../../../tools/fixtures/vfx-baseline.json';
 import wallTracing from '../../../config/wall-tracing.json';
 import { catalog, surfaces } from '../../../tools/load-track-node';
 import { createPhysicsCache, createSimTrack, createWorld, step, traceWalls, type CarInput, type PhysicsConfig, type SimContext, type TrackJson, type WorldState } from '../../sim';

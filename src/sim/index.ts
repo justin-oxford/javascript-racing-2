@@ -4,4 +4,5 @@ export * from './car-config';
 export * from './track';
 export * from './walls';
 export * from './planck-cache';
+export * from './timing';
 export * from './world';

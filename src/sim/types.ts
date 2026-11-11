@@ -1,4 +1,5 @@
 // All sim state is plain, JSON-serializable data. No classes, no hidden state.
+import type { LapTiming, TimingEvent } from './timing';
 // Units: metres, seconds, radians, kg, newtons. Track pixels exist only at the track boundary
 // (mask sampling, track.json) and in the client renderer.
 
@@ -84,10 +85,12 @@ export interface CarState extends Pose {
   barrierContact: boolean;
   /** Touching another car this tick. */
   carContact: boolean;
+  /** Lap/sector timing (see timing.ts). */
+  timing: LapTiming;
 }
 
 /** Things that happened this tick, for the client to react to (log, sound, HUD). */
-export type SimEvent = { type: 'outOfBounds'; car: number; x: number; y: number };
+export type SimEvent = { type: 'outOfBounds'; car: number; x: number; y: number } | TimingEvent;
 
 export interface WorldState {
   tick: number;

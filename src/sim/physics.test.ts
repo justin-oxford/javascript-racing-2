@@ -1,7 +1,8 @@
 // @vitest-environment node
 // Car physics on small synthetic arenas (built here, not real tracks), so each behaviour is isolated.
 import { describe, expect, it } from 'vitest';
-import physicsJson from '../../config/physics.json';
+// Frozen baseline, not live config: these behaviours must not change while Justin tunes.
+import physicsJson from '../../tools/fixtures/physics-baseline.json';
 import rules from '../../config/rules.json';
 import wallTracing from '../../config/wall-tracing.json';
 import { catalog, surfaces } from '../../tools/load-track-node';

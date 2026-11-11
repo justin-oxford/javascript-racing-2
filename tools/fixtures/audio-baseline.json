@@ -1,0 +1,11 @@
+{
+  "_comment": "TEST FIXTURE: frozen copy of the original config/audio.json. Sound (client only). files: set a path (relative to the site root, e.g. assets/audio/engine.ogg) to replace a synthesized placeholder with a sample; null = synth. Tune live on the panel (T).",
+  "files": { "engine": null, "squeal": null, "lockup": null, "wheelspin": null, "kerb": null, "gravel": null, "grass": null, "wall": null, "barrier": null, "carBump": null },
+  "sampleBaseRpm": { "engine": 10000 },
+  "engine": { "gears": 8, "idleRpm": 4500, "maxRpm": 14500, "shiftRpm": 10500, "gearSpread": 0.75, "cylinders": 6, "throttleCutoffHz": 4200, "liftCutoffHz": 900, "liftGain": 0.45, "crackle": 0.6, "limiterHz": 14, "limiterRpm": 9000 },
+  "tyres": { "squealGain": 0.55, "squealBaseHz": 1050, "squealPitchSpread": 0.35, "squealCurve": 0.7, "lockupGain": 0.7, "wheelspinGain": 0.6 },
+  "surfaces": { "kerbStripeM": 1, "kerbGain": 0.6, "gravelGain": 0.55, "grassGain": 0.4 },
+  "impacts": { "minKph": 8, "fullKph": 140, "wallGain": 1, "barrierGain": 0.7, "carGain": 0.6, "cooldownSec": 0.15 },
+  "pit": { "beepHz": 1320, "beepGain": 0.3 },
+  "defaultVolumes": { "master": 0.8, "engine": 0.7, "tyres": 0.8, "impacts": 0.9, "ui": 0.6 }
+}

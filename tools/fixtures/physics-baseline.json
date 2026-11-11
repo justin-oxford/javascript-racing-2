@@ -1,0 +1,46 @@
+{
+  "_comment": "TEST FIXTURE: frozen copy of the original config/physics.json defaults, so arena tests don't break while Justin tunes. Car physics, absolute values in metres, seconds, newtons, kg. Team x spec x setup multipliers (teams.json, specs.json) scale engine/topSpeed/brakes/drag/downforce/grip. Tune live with the panel (T in dev), then Save.",
+  "car": {
+    "dryMassKg": 798,
+    "lengthM": 5.6,
+    "widthM": 2,
+    "wheelbaseM": 3.6,
+    "trackWidthM": 1.6,
+    "weightFront": 0.45,
+    "cgHeightM": 0.3,
+    "inertiaScale": 1
+  },
+  "engine": {
+    "powerKW": 750,
+    "topSpeedKph": 340,
+    "maxDriveForceN": 14000,
+    "reverseForceN": 3500,
+    "maxReverseKph": 25
+  },
+  "brakes": { "maxForceN": 32000, "frontBias": 0.6 },
+  "aero": { "dragCoef": 0.9, "downforceCoef": 0.0003 },
+  "tyres": { "baseGrip": 1.6, "lateralGrip": 1, "lateralStiffness": 0.6 },
+  "steering": { "lockDeg": 20, "lockFalloffKph": 180 },
+  "input": { "steerRate": 5, "steerReturnRate": 8, "throttleRate": 6, "brakeRate": 10 },
+  "wear": {
+    "throttlePerSec": 0.005,
+    "throttleLowSpeedKph": 60,
+    "brakePerSec": 0.002,
+    "cornerPerSec": 0.001,
+    "refSpeedKph": 200
+  },
+  "fuel": {
+    "tankKg": 110,
+    "startKg": 110,
+    "burnKgPerSec": 0.55,
+    "refuelKgPerSec": 12,
+    "pitServiceMaxKph": 3
+  },
+  "walls": { "restitution": 0.1, "friction": 0.3, "barrierScrubPerSec": 2.5 },
+  "solver": { "velocityIterations": 8, "positionIterations": 3 },
+  "defaultCar": {
+    "team": "bluebull",
+    "spec": "C1",
+    "setup": { "downforce": "Med", "gearing": "Med", "brakes": "Med" }
+  }
+}

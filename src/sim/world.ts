@@ -2,6 +2,7 @@ import { buildStats, type CarCatalog, type PhysicsConfig } from './car-config';
 import { applyCarForce, prepareCache, readStateFromWorld, setCarMass, stepWorld, type PhysicsCache } from './planck-cache';
 import type { SimTrack, WallChain } from './track';
 import { surfaceAt } from './track';
+import { newTiming, updateTiming, type TimingEvent } from './timing';
 import type { CarBuild, CarInput, CarState, Pose, Rules, SimEvent, WheelState, Wheels, WorldState } from './types';
 import { NEUTRAL_INPUT } from './types';
 
@@ -87,6 +88,7 @@ export function createCar(posePx: Pose, build: CarBuild, ctx: SimContext): CarSt
     wallContact: false,
     barrierContact: false,
     carContact: false,
+    timing: newTiming(),
   };
 }
 
@@ -292,7 +294,16 @@ export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimCon
       wheels: car.wheels.map((wh, w) => ({ ...wh, surface: surfaces[w]! })) as Wheels<WheelState>,
       ...surfaceFlags(surfaces, ctx),
     };
-    const next = { ...moved, ...updateConsumables(moved, forces[i]!, ctx, dt) };
+    const timingEvents: TimingEvent[] = [];
+    const timing = updateTiming(
+      car.timing,
+      { from: car, to: b, t0: world.tick * dt, t1: (world.tick + 1) * dt, offTrack: moved.offTrack, barrierContact: moved.barrierContact },
+      ctx.track.json,
+      i,
+      timingEvents,
+    );
+    events.push(...timingEvents);
+    const next = { ...moved, ...updateConsumables(moved, forces[i]!, ctx, dt), timing };
     // Out of bounds should be unreachable behind walls. If a wheel gets there, the mask has a gap.
     if (surfaces.includes(ctx.track.index.outOfBounds)) {
       const ppm = ctx.track.json.pxPerMeter;
