@@ -43,7 +43,7 @@ Track editor (dev only): open http://localhost:5173/?edit=1. Timing lines, racin
 | `src/sim` | Pure simulation: physics, cars, timing, race rules, AI. No DOM, no clock, no unseeded randomness. Runs in browser and Node. |
 | `src/client` | Rendering, HUD, input, audio, dev tools. |
 | `src/server` | Multiplayer server (card 07). |
-| `tracks` | One JSON file per track. |
+| `tracks` | One folder per track (see Tracks above). |
 | `config` | Car / team / spec / setup tuning JSON. |
 | `tools` | Offline scripts. |
 | `public/assets` | Sprites, backgrounds, fonts (from v0.16). |
