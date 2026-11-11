@@ -1,12 +1,11 @@
 // Track editor, dev only (?edit=1). Lines and points only: timing lines, racing line, grid, spawn.
 // Edits the TrackJson object in place, so the running game sees changes immediately
 // (e.g. R uses the new spawn). Unknown keys are untouched, so export is lossless.
-import type { Point, Pose, TimingLine, TrackJson } from '../../sim';
+import { TIMING_KEYS, type Point, type Pose, type TimingKey, type TimingLine, type TrackJson } from '../../sim';
 import { drawPose, drawRacingLine, drawTimingLine, TIMING_COLORS } from '../debug-draw';
 import type { Renderer } from '../render';
 import { formatTrackJson } from './format';
 
-type TimingKey = keyof TrackJson['timingLines'];
 type Tool = 'select' | 'racing' | 'grid' | 'spawn' | TimingKey;
 
 type Handle =
@@ -76,8 +75,9 @@ export class TrackEditor {
       ctx.fill();
     });
     ctx.restore();
-    for (const key of Object.keys(j.timingLines) as TimingKey[]) {
+    for (const key of TIMING_KEYS) {
       const line = j.timingLines[key];
+      if (!line) continue;
       drawTimingLine(ctx, line, TIMING_COLORS[key] ?? '#fff', key === 'startFinish' ? 'S/F' : key.toUpperCase(), lw);
       for (const end of ['a', 'b'] as const) this.dot(ctx, line[end], lw, this.isSelected({ kind: 'timing', key, end }), TIMING_COLORS[key] ?? '#fff');
     }
@@ -126,9 +126,7 @@ export class TrackEditor {
       this.selected = { kind: 'spawn' };
       this.drag = { handle: this.selected, aim: false };
     } else if (this.isTimingTool(this.tool)) {
-      const line = j.timingLines[this.tool];
-      line.a = { x: round(p.x), y: round(p.y) };
-      line.b = { x: round(p.x), y: round(p.y) };
+      j.timingLines[this.tool] = { a: { x: round(p.x), y: round(p.y) }, b: { x: round(p.x), y: round(p.y) } };
       this.selected = { kind: 'timing', key: this.tool, end: 'b' };
       this.drag = { handle: this.selected, aim: false };
     }
@@ -183,7 +181,7 @@ export class TrackEditor {
   // ---- geometry helpers ---------------------------------------------------
 
   private isTimingTool(t: Tool): t is TimingKey {
-    return t in this.json.timingLines;
+    return (TIMING_KEYS as readonly string[]).includes(t);
   }
 
   private point(h: Handle): Point {
@@ -192,7 +190,7 @@ export class TrackEditor {
       case 'racing': return j.racingLine[h.i]!;
       case 'grid': return j.grid[h.i]!;
       case 'spawn': return j.spawn;
-      case 'timing': return j.timingLines[h.key][h.end];
+      case 'timing': return j.timingLines[h.key]![h.end];
     }
   }
 
@@ -207,7 +205,7 @@ export class TrackEditor {
     const cands: Handle[] = [
       { kind: 'spawn' },
       ...j.grid.map((_, i) => ({ kind: 'grid', i }) as const),
-      ...(Object.keys(j.timingLines) as TimingKey[]).flatMap((key) => [
+      ...TIMING_KEYS.filter((key) => j.timingLines[key]).flatMap((key) => [
         { kind: 'timing', key, end: 'a' } as const,
         { kind: 'timing', key, end: 'b' } as const,
       ]),
@@ -287,7 +285,8 @@ export class TrackEditor {
     });
     el.querySelector('[data-flip]')!.addEventListener('click', () => {
       if (this.selected?.kind !== 'timing') return;
-      const line: TimingLine = this.json.timingLines[this.selected.key];
+      const line: TimingLine | undefined = this.json.timingLines[this.selected.key];
+      if (!line) return;
       [line.a, line.b] = [line.b, line.a];
       this.refresh();
     });

@@ -1,6 +1,6 @@
 // K debug layer (and the editor's overlays): mask, walls, timing lines, racing line, grid, spawn,
 // wheel sample points. Everything in track-pixel space.
-import type { CarGeometry, Pose, TimingLine, TrackJson, WallChain, WorldState } from '../sim';
+import type { PhysicsConfig, Pose, TimingLine, TrackJson, WallChain, WorldState } from '../sim';
 import { wheelPositions } from '../sim';
 import { interpolatePose } from './render';
 import { surfaces } from './track-loader';
@@ -96,22 +96,22 @@ export function drawPose(ctx: CanvasRenderingContext2D, p: Pose, color: string, 
 
 export function drawTrackData(ctx: CanvasRenderingContext2D, json: TrackJson, lw: number): void {
   drawRacingLine(ctx, json.racingLine, lw);
-  for (const [k, line] of Object.entries(json.timingLines)) drawTimingLine(ctx, line, TIMING_COLORS[k] ?? '#fff', k === 'startFinish' ? 'S/F' : k.toUpperCase(), lw);
+  for (const [k, line] of Object.entries(json.timingLines)) if (line) drawTimingLine(ctx, line, TIMING_COLORS[k] ?? '#fff', k === 'startFinish' ? 'S/F' : k.toUpperCase(), lw);
   json.grid.forEach((g, i) => drawPose(ctx, g, '#ffffff', String(i + 1), lw));
   drawPose(ctx, json.spawn, '#39ff14', 'R', lw);
 }
 
 /** Each wheel's sample point, filled with the colour of the surface it's on. */
-export function drawWheels(ctx: CanvasRenderingContext2D, prev: WorldState, curr: WorldState, alpha: number, geom: CarGeometry, pxPerMeter: number, lw: number): void {
+export function drawWheels(ctx: CanvasRenderingContext2D, prev: WorldState, curr: WorldState, alpha: number, physics: PhysicsConfig, pxPerMeter: number, lw: number): void {
   ctx.save();
   ctx.lineWidth = lw;
   curr.cars.forEach((car, i) => {
     const pose = interpolatePose(prev.cars[i], car, alpha);
-    wheelPositions(pose, geom, pxPerMeter).forEach((p, w) => {
-      ctx.fillStyle = surfaces[car.surfaces[w] ?? -1]?.color ?? "#fff";
+    wheelPositions(pose, physics).forEach((p, w) => {
+      ctx.fillStyle = surfaces[car.wheels[w]?.surface ?? -1]?.color ?? '#fff';
       ctx.strokeStyle = '#000';
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 2.5 * lw, 0, Math.PI * 2);
+      ctx.arc(p.x * pxPerMeter, p.y * pxPerMeter, 2.5 * lw, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     });

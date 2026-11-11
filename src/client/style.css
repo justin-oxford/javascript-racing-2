@@ -49,3 +49,25 @@ body {
 .editor-panel .selection { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
 .editor-panel .help { color: #aaa; margin: 0 0 6px; }
 .editor-panel .status { color: #7f7; margin: 0; min-height: 1em; }
+
+/* Tuning panel (dev only, T) */
+.tuning-gui { position: fixed !important; top: 8px; left: 8px; max-height: calc(100vh - 16px); overflow: auto; z-index: 10; }
+.telemetry {
+  position: fixed;
+  left: 8px;
+  bottom: 8px;
+  padding: 8px 10px;
+  background: rgba(20, 20, 24, 0.9);
+  color: #ddd;
+  font: 12px/1.35 ui-monospace, Consolas, monospace;
+  border-radius: 6px;
+  white-space: pre;
+  z-index: 10;
+}
+.telemetry .speed { font-size: 22px; color: #fff; }
+.telemetry .speed small { font-size: 12px; color: #aaa; }
+.telemetry table { border-collapse: collapse; margin: 4px 0; }
+.telemetry th, .telemetry td { padding: 0 6px 0 0; text-align: right; }
+.telemetry th:nth-child(2), .telemetry td:nth-child(2) { text-align: left; }
+.telemetry td.slide { color: #ff6b6b; }
+.telemetry .flags { color: #ffd400; }

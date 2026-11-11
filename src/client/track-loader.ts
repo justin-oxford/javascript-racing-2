@@ -1,36 +1,67 @@
-// Browser track loading: track.json (bundled), background (public/), mask + overhead (tracks/<id>/,
+// Browser track loading: track.json (bundled, optional), mask + background + overhead (tracks/<id>/,
 // fetched at runtime so they can hot-reload). The mask is decoded to palette indices here,
 // before anything reaches the sim.
-import carGeometry from '../../config/car-geometry.json';
-import kinematics from '../../config/placeholder-kinematics.json';
+import trackList from 'virtual:tracks';
+import physicsJson from '../../config/physics.json';
 import rules from '../../config/rules.json';
+import specsJson from '../../config/specs.json';
 import surfacesConfig from '../../config/surfaces.json';
+import teamsJson from '../../config/teams.json';
+import trackDefaults from '../../config/track-defaults.json';
 import wallTracing from '../../config/wall-tracing.json';
 import {
+  completeTrackJson,
+  createPhysicsCache,
   createSimTrack,
+  defaultTrackId,
   hashMask,
   snapToPalette,
+  stubTrackJson,
   traceWalls,
+  type CarCatalog,
+  type PhysicsConfig,
   type SimContext,
   type SimTrack,
+  type SpecsConfig,
   type SurfaceDef,
+  type TeamDef,
+  type TrackDefaults,
   type TrackJson,
+  type TrackJsonStub,
   type TrackMask,
   type WallChain,
 } from '../sim';
 
-export const surfaces: readonly SurfaceDef[] = surfacesConfig.surfaces;
+// Live config objects. The tuning panel edits these in place; the sim reads them every tick.
+export { surfacesConfig };
+export const surfaces: SurfaceDef[] = surfacesConfig.surfaces;
+export const physics = physicsJson as PhysicsConfig;
+export const catalog: CarCatalog = { teams: teamsJson.teams as TeamDef[], specs: specsJson as unknown as SpecsConfig };
+export { rules };
+const defaults = trackDefaults as TrackDefaults;
 
 const trackJsons = import.meta.glob<TrackJson>('/tracks/*/track.json', { eager: true, import: 'default' });
 
-export function getTrackJson(id: string): TrackJson {
-  const json = trackJsons[`/tracks/${id}/track.json`];
-  if (!json) throw new Error(`No track "${id}"`);
-  return json;
+/** ?track=<id> wins (dev convenience; fixtures allowed there), else the first authored track. */
+export function chooseTrackId(): string {
+  const asked = new URLSearchParams(location.search).get('track');
+  if (asked && trackList.some((t) => t.id === asked)) return asked;
+  const id = defaultTrackId(trackList);
+  if (!id) throw new Error('No tracks found in /tracks');
+  return id;
+}
+
+/** track.json if the track has one, else a stub (blockout stage: mask only). */
+export function getTrackJsonStub(id: string): TrackJsonStub {
+  return trackJsons[`/tracks/${id}/track.json`] ?? stubTrackJson(id, defaults);
 }
 
 export const siteUrl = (path: string): string => `${import.meta.env.BASE_URL}${path}`;
-const trackFileUrl = (id: string, file: string): string => siteUrl(`tracks/${id}/${file}`);
+
+/** Track file path -> URL. Relative to the track folder; a leading "/" means site root (public/). */
+export function trackFileUrl(id: string, file: string): string {
+  return file.startsWith('/') ? siteUrl(file.slice(1)) : siteUrl(`tracks/${id}/${file}`);
+}
 
 export function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -41,8 +72,8 @@ export function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-/** Fetch a PNG, or undefined if it isn't there. Always bypasses the cache (hot reload). */
-async function fetchPng(url: string): Promise<Blob | undefined> {
+/** Fetch an image, or undefined if it isn't there. Always bypasses the cache (hot reload). */
+async function fetchImage(url: string): Promise<Blob | undefined> {
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) return undefined;
   return res.blob();
@@ -75,14 +106,14 @@ function wallsFor(track: SimTrack): WallChain[] {
   return walls;
 }
 
-/** Mask rendered back to flat palette colours, for overlays. */
-function maskToCanvas(mask: TrackMask): HTMLCanvasElement {
+/** Mask drawn as flat colours: the palette (debug overlay) or the muted blockout colours (no art yet). */
+function maskToCanvas(mask: TrackMask, colour: 'color' | 'blockout'): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = mask.width;
   canvas.height = mask.height;
   const ctx = canvas.getContext('2d')!;
   const img = ctx.createImageData(mask.width, mask.height);
-  const rgb = surfaces.map((s) => [1, 3, 5].map((i) => parseInt(s.color.slice(i, i + 2), 16)));
+  const rgb = surfaces.map((s) => [1, 3, 5].map((i) => parseInt(s[colour].slice(i, i + 2), 16)));
   for (let i = 0; i < mask.data.length; i++) {
     const c = rgb[mask.data[i]!]!;
     img.data[i * 4] = c[0]!;
@@ -97,34 +128,53 @@ function maskToCanvas(mask: TrackMask): HTMLCanvasElement {
 export interface MaskState {
   track: SimTrack;
   walls: WallChain[];
+  /** Palette colours, for the K overlay and the editor. */
   canvas: HTMLCanvasElement;
+  /** Muted colours, drawn as the track when there's no background art. */
+  blockout: HTMLCanvasElement;
   file: string;
 }
 
-/** Load (or reload) the mask: prefer files.mask, fall back to files.maskDraft. */
-export async function loadMask(json: TrackJson): Promise<MaskState> {
-  let file = json.files.mask;
-  let blob = await fetchPng(trackFileUrl(json.id, file));
-  if (!blob && json.files.maskDraft) {
-    file = json.files.maskDraft;
-    blob = await fetchPng(trackFileUrl(json.id, file));
-    console.warn(`[track] ${json.id}: ${json.files.mask} not found, using ${file}`);
+/** Load (or reload) the mask: files.mask, falling back to files.maskDraft. Completes the track.json stub. */
+export async function loadMask(stub: TrackJsonStub): Promise<MaskState> {
+  const files: TrackJson['files'] = stub.files ?? defaults.files;
+  let file = files.mask;
+  let blob = await fetchImage(trackFileUrl(stub.id, file));
+  if (!blob && files.maskDraft) {
+    file = files.maskDraft;
+    blob = await fetchImage(trackFileUrl(stub.id, file));
+    console.warn(`[track] ${stub.id}: ${files.mask} not found, using ${file}`);
   }
-  if (!blob) throw new Error(`[track] ${json.id}: no mask found`);
+  if (!blob) throw new Error(`[track] ${stub.id}: no mask found`);
   const { rgba, width, height } = await decodePng(blob);
   const { mask, offPalette } = snapToPalette(rgba, width, height, surfaces);
   const frac = offPalette / (width * height);
   if (frac > surfacesConfig.offPaletteWarnFraction)
-    console.warn(`[track] ${json.id}/${file}: ${offPalette} pixels (${(frac * 100).toFixed(1)}%) were off-palette and got snapped`);
+    console.warn(`[track] ${stub.id}/${file}: ${offPalette} pixels (${(frac * 100).toFixed(1)}%) were off-palette and got snapped`);
+  const json = completeTrackJson(stub, mask, surfaces, defaults);
   const track = createSimTrack(json, mask, surfaces);
-  return { track, walls: wallsFor(track), canvas: maskToCanvas(mask), file };
+  return { track, walls: wallsFor(track), canvas: maskToCanvas(mask, 'color'), blockout: maskToCanvas(mask, 'blockout'), file };
+}
+
+/** Background art, or undefined while the track is still a blockout. */
+export async function loadBackground(json: TrackJson): Promise<HTMLImageElement | undefined> {
+  if (!json.files.background) return undefined;
+  const blob = await fetchImage(trackFileUrl(json.id, json.files.background));
+  return blob ? loadImage(URL.createObjectURL(blob)) : undefined;
 }
 
 export async function loadOverhead(json: TrackJson): Promise<HTMLImageElement | undefined> {
   if (!json.files.overhead) return undefined;
-  return loadImage(`${trackFileUrl(json.id, json.files.overhead)}?t=${Date.now()}`);
+  const blob = await fetchImage(trackFileUrl(json.id, json.files.overhead));
+  return blob ? loadImage(URL.createObjectURL(blob)) : undefined;
 }
 
-export function simContext(track: SimTrack): SimContext {
-  return { track, kinematics, carGeometry, rules };
+/** One sprite per team (placeholder v0.16 JPGs until the livery card). */
+export async function loadTeamSprites(): Promise<Map<string, HTMLImageElement>> {
+  const entries = await Promise.all(catalog.teams.map(async (t) => [t.id, await loadImage(siteUrl(t.sprite))] as const));
+  return new Map(entries);
+}
+
+export function simContext(mask: MaskState): SimContext {
+  return { track: mask.track, walls: mask.walls, physics, catalog, rules, cache: createPhysicsCache() };
 }

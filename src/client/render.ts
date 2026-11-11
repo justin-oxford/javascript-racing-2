@@ -10,6 +10,7 @@ function lerpAngle(a: number, b: number, t: number): number {
   return a + d * t;
 }
 
+/** Sim pose between two ticks, in METRES. */
 export function interpolatePose(prev: CarState | undefined, curr: CarState, alpha: number): Pose {
   if (!prev) return curr;
   return {
@@ -30,21 +31,31 @@ export interface DrawLayers {
   text?: string | undefined;
 }
 
+export interface CarLook {
+  /** Track pixels per metre: the sim is in metres, the canvas in track pixels. */
+  pxPerMeter: number;
+  lengthM: number;
+  widthM: number;
+  sprite(car: CarState): CanvasImageSource | undefined;
+}
+
 /**
- * Canvas whose drawing space is the track's pixel space (e.g. 1280x566),
+ * Canvas whose drawing space is the track's pixel space (e.g. 2560x1440),
  * displayed fitted to the window at the track's aspect ratio, rendered at devicePixelRatio.
  */
 export class Renderer {
   private readonly ctx: CanvasRenderingContext2D;
   private scale = 1;
+  /** Background art, or the blockout canvas while a track has no art. */
+  background: CanvasImageSource;
 
   constructor(
     readonly canvas: HTMLCanvasElement,
     readonly trackWidth: number,
     readonly trackHeight: number,
-    private readonly background: HTMLImageElement,
-    private readonly carSprite: HTMLImageElement,
+    background: CanvasImageSource,
   ) {
+    this.background = background;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('2D canvas not supported');
     this.ctx = ctx;
@@ -81,21 +92,27 @@ export class Renderer {
     return this.trackWidth / this.canvas.getBoundingClientRect().width;
   }
 
-  draw(prev: WorldState, curr: WorldState, alpha: number, layers: DrawLayers = {}): void {
+  draw(prev: WorldState, curr: WorldState, alpha: number, look: CarLook, layers: DrawLayers = {}): void {
     const { ctx } = this;
     ctx.setTransform(this.scale, 0, 0, this.scale, 0, 0);
     ctx.globalAlpha = 1;
+    ctx.imageSmoothingEnabled = true;
     ctx.drawImage(this.background, 0, 0, this.trackWidth, this.trackHeight);
     layers.underCars?.(ctx);
 
-    const sw = this.carSprite.naturalWidth;
-    const sh = this.carSprite.naturalHeight;
+    const ppm = look.pxPerMeter;
+    const w = look.widthM * ppm, l = look.lengthM * ppm;
     curr.cars.forEach((car, i) => {
       const c = interpolatePose(prev.cars[i], car, alpha);
       ctx.save();
-      ctx.translate(c.x, c.y);
+      ctx.translate(c.x * ppm, c.y * ppm);
       ctx.rotate(c.heading);
-      ctx.drawImage(this.carSprite, -sw / 2, -sh / 2, sw, sh);
+      const sprite = look.sprite(car);
+      if (sprite) ctx.drawImage(sprite, -w / 2, -l / 2, w, l);
+      else {
+        ctx.fillStyle = '#e8e8e8';
+        ctx.fillRect(-w / 2, -l / 2, w, l);
+      }
       ctx.restore();
     });
 
@@ -108,11 +125,11 @@ export class Renderer {
       ctx.font = `${px}px monospace`;
       ctx.textBaseline = 'top';
       const lines = layers.text.split('\n');
-      const width = Math.max(...lines.map((l) => ctx.measureText(l).width)) + px;
+      const width = Math.max(...lines.map((line) => ctx.measureText(line).width)) + px;
       ctx.fillStyle = 'rgba(0,0,0,0.65)';
       ctx.fillRect(0, 0, width, (lines.length + 0.5) * px * 1.25);
       ctx.fillStyle = '#fff';
-      lines.forEach((l, i) => ctx.fillText(l, px / 2, px / 4 + i * px * 1.25));
+      lines.forEach((line, i) => ctx.fillText(line, px / 2, px / 4 + i * px * 1.25));
     }
   }
 }
