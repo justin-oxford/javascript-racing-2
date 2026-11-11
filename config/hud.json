@@ -1,0 +1,16 @@
+{
+  "_comment": "HUD + on-track timing lines (client). Colours from the v0.16 timing tiles. Line widths in metres.",
+  "colors": { "purple": "#cc00cc", "green": "#00a651", "yellow": "#cab230", "invalid": "#8b0000", "invalidLive": "#ca3030", "tile": "#484a47", "bar": "#252525", "text": "#f1faee" },
+  "lines": {
+    "startFinishColor": "#ffffff",
+    "startFinishWidthM": 0.7,
+    "sectorColor": "#ffffff",
+    "sectorWidthM": 0.3,
+    "sectorAlpha": 0.85,
+    "markerColor": "#ffffff",
+    "markerSizeM": 2.2,
+    "flashSec": 0.9,
+    "sampleStepPx": 0.5
+  },
+  "hudBarTrackPx": 100
+}

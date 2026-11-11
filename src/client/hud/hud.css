@@ -1,0 +1,140 @@
+/* v0.16 HUD, rebuilt. 1 --u = 1 pixel of the old 1280-wide layout (the bar was 50 px tall).
+   Colours: dark grey #484a47, bar #252525, off-white #f1faee, bold red #e63946 (v0.16 palette). */
+#hud {
+  position: fixed;
+  pointer-events: none;
+  overflow: hidden;
+  color: var(--text);
+  font-family: "Formula1 Regular", system-ui, sans-serif;
+  z-index: 5;
+}
+#hud button { font: inherit; color: inherit; pointer-events: auto; cursor: pointer; }
+#hud button:disabled { cursor: default; opacity: 0.35; }
+#hud b { font-family: "Formula1 Bold", system-ui, sans-serif; font-weight: normal; }
+
+.hud-bar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: calc(var(--u) * 50);
+  background: var(--bar);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 18);
+  padding: 0 calc(var(--u) * 12);
+  font-size: calc(var(--u) * 9);
+  pointer-events: auto;
+  z-index: 3;
+}
+.hud-icon {
+  width: calc(var(--u) * 30);
+  height: calc(var(--u) * 30);
+  border: 0;
+  background: var(--icon-menu) center / contain no-repeat;
+  opacity: 0.75;
+  flex: none;
+}
+.hud-icon.time { background-image: var(--icon-time); margin-left: auto; }
+.hud-icon:hover { opacity: 1; }
+.lap-speed b, .current b { font-size: calc(var(--u) * 20); padding: 0 calc(var(--u) * 14) 0 calc(var(--u) * 5); }
+.current { font-size: calc(var(--u) * 12); width: calc(var(--u) * 190); flex: none; white-space: nowrap; }
+.lap-speed { white-space: nowrap; flex: none; }
+.current b.invalid { color: var(--invalid-live); }
+
+.sectors { border-collapse: collapse; text-align: center; margin-left: auto; table-layout: fixed; width: calc(var(--u) * 480); flex: none; }
+.sectors td { padding: 0 calc(var(--u) * 3); white-space: nowrap; }
+.idents td { font-size: calc(var(--u) * 7); height: calc(var(--u) * 11); vertical-align: bottom; }
+.splits td { font-size: calc(var(--u) * 8); height: calc(var(--u) * 13); vertical-align: top; opacity: 0.85; }
+.tile {
+  padding: calc(var(--u) * 2) 0;
+  font-size: calc(var(--u) * 14);
+  border-radius: calc(var(--u) * 6);
+  background: var(--tile);
+}
+.tile.lap { font-family: "Formula1 Bold", system-ui, sans-serif; }
+.tile[data-color='purple'] { background: var(--purple); }
+.tile[data-color='green'] { background: var(--green); }
+.tile[data-color='yellow'] { background: var(--yellow); }
+.tile[data-color='invalid'] { background: var(--invalid); }
+
+/* Drop-down panels slide out from under the bar (v0.16 used a 0.5 s top transition). */
+.hud-drop {
+  position: absolute;
+  top: calc(var(--u) * 50);
+  background: rgba(37, 37, 37, 0.92);
+  border-bottom-left-radius: calc(var(--u) * 6);
+  border-bottom-right-radius: calc(var(--u) * 6);
+  transform: translateY(-110%);
+  transition: transform 0.5s;
+  pointer-events: auto;
+  text-align: center;
+  font-size: calc(var(--u) * 10);
+  padding: calc(var(--u) * 8) calc(var(--u) * 14) calc(var(--u) * 12);
+  z-index: 2;
+}
+.hud-drop.open { transform: translateY(0); }
+.hud-drop .title { font-size: calc(var(--u) * 12); margin: calc(var(--u) * 6) 0; letter-spacing: 0.05em; }
+.hud-drop .note, .hud-drop .hint { font-size: calc(var(--u) * 8); opacity: 0.75; margin: calc(var(--u) * 4) 0; }
+.hud-drop hr { border: 0; border-top: 1px solid #5c6d70; margin: calc(var(--u) * 8) 0; }
+
+.hud-drop.timing { right: calc(var(--u) * 10); width: calc(var(--u) * 400); }
+.pb { width: 100%; border-collapse: collapse; }
+.pb td { width: 25%; padding: 0 calc(var(--u) * 3); }
+.pbtile { padding: calc(var(--u) * 3) 0; font-size: calc(var(--u) * 13); border-radius: calc(var(--u) * 6); background: var(--tile); }
+.pb .desc td { font-size: calc(var(--u) * 7); opacity: 0.7; padding-top: calc(var(--u) * 4); vertical-align: top; }
+
+.hud-drop.menu { left: calc(var(--u) * 10); width: calc(var(--u) * 360); }
+.choices { display: flex; flex-wrap: wrap; justify-content: center; gap: calc(var(--u) * 6); }
+.choices button {
+  padding: calc(var(--u) * 6) calc(var(--u) * 10);
+  background: rgba(230, 57, 70, 0.3);
+  border: 1px solid var(--text);
+  border-radius: calc(var(--u) * 4);
+  font-size: calc(var(--u) * 10);
+}
+.choices.specs button { min-width: calc(var(--u) * 70); font-family: "Formula1 Bold", system-ui, sans-serif; font-size: calc(var(--u) * 14); }
+.choices button:hover, .choices button.active { background: rgba(230, 57, 70, 0.9); }
+
+/* Laid out so menu (left), car (middle) and timing (right) can all be open without overlapping. */
+.hud-drop.car { left: calc(var(--u) * 405); width: calc(var(--u) * 380); }
+.vehicle { display: flex; justify-content: space-around; align-items: center; }
+.tyres { display: grid; grid-template-columns: repeat(2, calc(var(--u) * 60)); gap: calc(var(--u) * 10) calc(var(--u) * 14); }
+.tyre {
+  height: calc(var(--u) * 80);
+  display: grid;
+  place-content: center;
+  border: 1px solid var(--text);
+  border-radius: calc(var(--u) * 12);
+  font-size: calc(var(--u) * 11);
+}
+.tyre small { font-size: calc(var(--u) * 7); opacity: 0.8; }
+.fuel { font-size: calc(var(--u) * 9); }
+.gauge {
+  position: relative;
+  width: calc(var(--u) * 120);
+  height: calc(var(--u) * 140);
+  margin-top: calc(var(--u) * 6);
+  border: 1px solid var(--text);
+  border-radius: calc(var(--u) * 4);
+  background: rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  display: grid;
+  place-content: center;
+  font-family: "Formula1 Bold", system-ui, sans-serif;
+  font-size: calc(var(--u) * 18);
+}
+.gauge .level { position: absolute; inset: auto 0 0 0; background: rgba(255, 255, 0, 0.5); transition: height 0.2s; }
+.gauge span { position: relative; }
+.setup-title { border-top: 1px solid grey; padding-top: calc(var(--u) * 10); }
+.setup { display: flex; justify-content: space-around; font-size: calc(var(--u) * 10); }
+.slot button, .slot .value {
+  display: block;
+  width: calc(var(--u) * 100);
+  border: 1px solid var(--text);
+  padding: calc(var(--u) * 4);
+  margin: 0 auto;
+}
+.slot button { background: rgba(230, 57, 70, 0.3); font-size: calc(var(--u) * 12); }
+.slot button:not(:disabled):hover { background: rgba(230, 57, 70, 0.9); }
+.slot .up { margin-top: calc(var(--u) * 8); border-radius: calc(var(--u) * 4) calc(var(--u) * 4) 0 0; }
+.slot .dn { border-radius: 0 0 calc(var(--u) * 4) calc(var(--u) * 4); }
+.slot .value { background: rgba(72, 74, 71, 0.5); margin-top: -1px; margin-bottom: -1px; }

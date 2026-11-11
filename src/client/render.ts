@@ -29,6 +29,8 @@ export interface DrawLayers {
   overlay?: (ctx: CanvasRenderingContext2D) => void;
   /** Screen-space text box, top-left. */
   text?: string | undefined;
+  /** Push the text box down this many backing pixels (below the HUD bar). */
+  textTop?: number;
 }
 
 export interface CarLook {
@@ -120,7 +122,7 @@ export class Renderer {
     layers.overlay?.(ctx);
 
     if (layers.text) {
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.setTransform(1, 0, 0, 1, 0, layers.textTop ?? 0);
       const px = Math.round(12 * (window.devicePixelRatio || 1));
       ctx.font = `${px}px monospace`;
       ctx.textBaseline = 'top';

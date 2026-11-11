@@ -1,4 +1,4 @@
-import { buildStats, createWorld, resetCar, setCarBuild, step, TICK_HZ, type InputSource, type SimContext, type WorldState } from '../sim';
+import { buildStats, createWorld, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type CarBuild, type InputSource, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -14,11 +14,16 @@ import {
   physics,
   rules,
   simContext,
+  siteUrl,
   surfaces,
   surfacesConfig,
   type MaskState,
 } from './track-loader';
 import audioConfig from '../../config/audio.json';
+import hudConfig from '../../config/hud.json';
+import { Hud } from './hud/hud';
+import { browserStore, Session } from './hud/session';
+import { TimingLines } from './hud/timing-lines';
 import vfxConfig from '../../config/vfx.json';
 import { GameAudio } from './audio/audio';
 import { soundTargets, topSpeedKph } from './audio/targets';
@@ -46,6 +51,42 @@ async function main(): Promise<void> {
   for (let i = 1; i <= extra; i++) drivers.push(new DonutInput(i));
   const vfx = new Vfx(mask.track.mask.width, mask.track.mask.height, vfxConfig);
   const audio = new GameAudio(audioConfig);
+  const timingLines = new TimingLines(hudConfig);
+  const startBuild = curr0Build();
+  const session = new Session(browserStore(), json.id, startBuild.spec, startBuild.team);
+  function curr0Build(): CarBuild {
+    return physics.defaultCar;
+  }
+  /** Swap the player's car build and put it back in the pits (spec/team change). */
+  const rebuildCar = (build: CarBuild): void => {
+    curr = resetCar(setCarBuild(curr, 0, build), 0, json.spawn, ctx);
+    prev = curr;
+  };
+  const stoppedInBox = (): boolean => {
+    const c = curr.cars[0];
+    return !!c && c.inPitBox && Math.abs(c.speed) * 3.6 < physics.fuel.pitServiceMaxKph;
+  };
+  const hud = new Hud(canvas, hudConfig, ctx.catalog, {
+    onSpec: (spec) => {
+      const b = curr.cars[0]!.build;
+      if (b.spec === spec) return;
+      rebuildCar({ ...b, spec });
+      session.changeSpec(spec); // spec change resets times
+    },
+    onTeam: (team) => {
+      const b = curr.cars[0]!.build;
+      if (b.team === team) return;
+      rebuildCar({ ...b, team });
+      session.changeTeam(team); // team change keeps times so teams can be compared
+    },
+    onSetup: (slot, value) => {
+      if (!stoppedInBox()) return; // setup changes only while stopped in a pit box
+      const b = curr.cars[0]!.build;
+      const build = { ...b, setup: { ...b.setup, [slot]: value } };
+      curr = setCarBuild(curr, 0, build);
+      prev = setCarBuild(prev, 0, build);
+    },
+  }, () => renderer.trackHeight, siteUrl);
 
   let prev: WorldState = createWorld(ctx, drivers.length);
   let curr: WorldState = prev;
@@ -63,7 +104,14 @@ async function main(): Promise<void> {
     } else if (a.type === 'cycleVfx') {
       console.info(`[vfx] quality: ${vfx.cycleQuality()}`);
     }
-    // gridSlot: no grid until card 06.
+    else if (a.type === 'gridSlot') {
+      // Practice: 1-9, 0 = slot 10.
+      const slot = json.grid[a.slot === 0 ? 9 : a.slot - 1];
+      if (slot) {
+        curr = resetCar(curr, 0, slot, ctx);
+        prev = curr;
+      }
+    }
   });
 
   // Dev-only tools. Dynamic imports keep them out of the production bundle.
@@ -80,8 +128,11 @@ async function main(): Promise<void> {
         audio: audioConfig,
         volumes: { values: audio.volumes, set: (bus, v) => audio.setVolume(bus, v) },
         onBuildChange: (build) => {
+          const was = curr.cars[0]!.build;
           curr = setCarBuild(curr, 0, build);
           prev = setCarBuild(prev, 0, build);
+          if (build.spec !== was.spec) session.changeSpec(build.spec);
+          else if (build.team !== was.team) session.changeTeam(build.team);
         },
       })
     : undefined;
@@ -97,6 +148,13 @@ async function main(): Promise<void> {
         tuning,
         vfx,
         audio,
+        session,
+        /** Dev: replace who drives car i (e.g. a scripted test driver). */
+        setDriver: (i: number, d: InputSource) => (drivers[i] = d),
+        grid: (n: number) => {
+          const slot = json.grid[n];
+          if (slot) { curr = resetCar(curr, 0, slot, ctx); prev = curr; }
+        },
         /** Run n full frames (sim tick + VFX + draw) synchronously; returns ms per frame. */
         benchFrame: (n = 300) => {
           const t0 = performance.now();
@@ -146,7 +204,17 @@ async function main(): Promise<void> {
   };
   const surfaceName = (car: WorldState['cars'][number], w: 0 | 1 | 2 | 3) => surfaces[car.wheels[w].surface]?.id ?? '?';
 
-  startLoop({
+  // Dev: run n real game ticks synchronously (timing, session, VFX, audio), then draw once.
+  // Lets tests drive laps even when the browser tab isn't rendering.
+  if (import.meta.env.DEV) Object.assign(window, {
+    __advance: (n: number) => {
+      for (let k = 0; k < n; k++) loopHooks.tick();
+      loopHooks.render(1, 1 / 60);
+      return curr.tick;
+    },
+  });
+
+  const loopHooks = {
     tick() {
       const inputs = drivers.map((d) => d.read(curr.tick));
       prev = curr;
@@ -155,16 +223,25 @@ async function main(): Promise<void> {
       const me = curr.cars[0], was = prev.cars[0];
       if (me && was) audio.update(soundTargets(was, me, audioConfig, vfxConfig, physics, rules, surfaces, topSpeedKph(physics, buildStats(me.build, ctx.catalog).topSpeed)));
       for (const e of curr.events) {
+        if (e.type === 'sector' || e.type === 'lap') {
+          session.onEvent(e, e.car === 0);
+          if (e.car === 0) {
+            const tile = e.type === 'lap' ? session.tiles[3]! : session.tiles[e.sector]!;
+            const key = e.type === 'lap' ? 'startFinish' : timingSequence(json)[e.sector];
+            if (key) timingLines.flashLine(key, tile.color, performance.now());
+          }
+        }
         if (e.type === 'outOfBounds')
           console.warn(`[mask bug] car ${e.car} reached out-of-bounds at (${e.x.toFixed(1)}, ${e.y.toFixed(1)}) px in ${mask.file}; reset to spawn`);
       }
     },
-    render(alpha, frameSeconds) {
+    render(alpha: number, frameSeconds: number) {
       if (frameSeconds > 0) fps += (1 / frameSeconds - fps) * 0.05;
       vfx.update(frameSeconds);
       drawFrame(alpha, frameSeconds);
     },
-  });
+  };
+  startLoop(loopHooks);
 
   function drawFrame(alpha: number, _frameSeconds: number): void {
     {
@@ -181,6 +258,7 @@ async function main(): Promise<void> {
         : undefined;
       renderer.draw(prev, curr, alpha, look, {
         underCars: (c) => {
+          timingLines.draw(c, ctx.track, performance.now()); // under rubber: it builds up over the lines
           vfx.drawUnder(c, renderer.trackWidth, renderer.trackHeight);
           if (editor) drawMask(c, mask.canvas, editor.maskOpacity);
           else if (debug) drawMask(c, mask.canvas, 0.5);
@@ -198,8 +276,14 @@ async function main(): Promise<void> {
           editor?.draw(c, lw);
         },
         text,
+        textTop: hud.barHeightBackingPx(),
       });
       tuning?.update(curr, surfaces, physics);
+      const me = curr.cars[0];
+      if (me) {
+        hud.fuelTankKg = physics.fuel.tankKg;
+        hud.update(me, (curr.tick + alpha) * TICK_DT, session, !!json.timingLines.startFinish, stoppedInBox());
+      }
     }
   }
   document.getElementById('loading')?.remove();
