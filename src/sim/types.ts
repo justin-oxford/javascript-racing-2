@@ -25,23 +25,30 @@ export interface Pose {
   heading: number;
 }
 
+/** Wheel order everywhere: front-left, front-right, rear-left, rear-right. */
+export type Wheels<T> = [T, T, T, T];
+
 export interface CarState extends Pose {
-  /** Signed speed along the heading, track units per second. */
+  /** Signed speed along the heading, track pixels per second. */
   speed: number;
+  /** Palette index of the surface under each wheel this tick. */
+  surfaces: Wheels<number>;
+  /** All four wheels off legal surface (track limits). */
+  offTrack: boolean;
+  /** Any wheel on pit lane or pit box: speed limiter applies. */
+  inPitLane: boolean;
+  /** Any wheel on the pit box: service + setup menu (card 04). */
+  inPitBox: boolean;
 }
+
+/** Things that happened this tick, for the client to react to (log, sound, HUD). */
+export type SimEvent = { type: 'outOfBounds'; car: number; x: number; y: number };
 
 export interface WorldState {
   tick: number;
   cars: CarState[];
-}
-
-/** The subset of a track file the sim needs. Format owned by card 02. */
-export interface TrackData {
-  id: string;
-  name: string;
-  width: number;
-  height: number;
-  spawn: Pose;
+  /** Events from the most recent tick only. */
+  events: SimEvent[];
 }
 
 /**
@@ -57,6 +64,15 @@ export interface PlaceholderKinematics {
   /** rad/s at full lock once above fullSteerSpeed */
   turnRate: number;
   fullSteerSpeed: number;
+}
+
+export interface CarGeometry {
+  wheelbaseM: number;
+  trackWidthM: number;
+}
+
+export interface Rules {
+  pitSpeedLimitKph: number;
 }
 
 export const NEUTRAL_INPUT: Readonly<CarInput> = Object.freeze({ throttle: 0, brake: 0, steer: 0 });

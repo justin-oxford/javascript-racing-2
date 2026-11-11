@@ -14,8 +14,9 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
-  "include": ["src/client", "src/sim", "vite.config.ts"],
+  "include": ["src/client", "src/sim"],
   "exclude": ["src/sim/**/*.test.ts"]
 }

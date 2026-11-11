@@ -15,3 +15,37 @@ body {
 #game {
   display: block;
 }
+
+/* Track editor (dev only, ?edit=1) */
+.editor-panel {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  width: 260px;
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 10px;
+  background: rgba(20, 20, 24, 0.92);
+  color: #eee;
+  font: 12px/1.4 system-ui, sans-serif;
+  border-radius: 6px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+.editor-panel h2 { margin: 0 0 8px; font-size: 13px; }
+.editor-panel .tools, .editor-panel .actions { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.editor-panel button {
+  font: inherit;
+  padding: 3px 7px;
+  background: #33343a;
+  color: #eee;
+  border: 1px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.editor-panel button.active { background: #2a6df4; border-color: #2a6df4; }
+.editor-panel button:disabled { opacity: 0.4; cursor: default; }
+.editor-panel label { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.editor-panel input[type='number'] { width: 70px; }
+.editor-panel .selection { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.editor-panel .help { color: #aaa; margin: 0 0 6px; }
+.editor-panel .status { color: #7f7; margin: 0; min-height: 1em; }

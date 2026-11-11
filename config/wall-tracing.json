@@ -1,0 +1,5 @@
+{
+  "_comment": "Mask -> wall outline tracing. Mask pixels.",
+  "simplifyTolerancePx": 1.0,
+  "minLoopAreaPx": 6
+}

@@ -1,4 +1,4 @@
-import type { CarState, WorldState } from '../sim';
+import type { CarState, Pose, WorldState } from '../sim';
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
@@ -10,14 +10,24 @@ function lerpAngle(a: number, b: number, t: number): number {
   return a + d * t;
 }
 
-function interpolateCar(prev: CarState | undefined, curr: CarState, alpha: number): CarState {
+export function interpolatePose(prev: CarState | undefined, curr: CarState, alpha: number): Pose {
   if (!prev) return curr;
   return {
     x: lerp(prev.x, curr.x, alpha),
     y: lerp(prev.y, curr.y, alpha),
     heading: lerpAngle(prev.heading, curr.heading, alpha),
-    speed: lerp(prev.speed, curr.speed, alpha),
   };
+}
+
+export interface DrawLayers {
+  /** Above the background, below cars (mask overlay). Track-pixel space. */
+  underCars?: (ctx: CanvasRenderingContext2D) => void;
+  /** Above cars (overhead layer). Track-pixel space. */
+  overCars?: (ctx: CanvasRenderingContext2D) => void;
+  /** Topmost (debug + editor). Track-pixel space. */
+  overlay?: (ctx: CanvasRenderingContext2D) => void;
+  /** Screen-space text box, top-left. */
+  text?: string | undefined;
 }
 
 /**
@@ -29,9 +39,9 @@ export class Renderer {
   private scale = 1;
 
   constructor(
-    private readonly canvas: HTMLCanvasElement,
-    private readonly trackWidth: number,
-    private readonly trackHeight: number,
+    readonly canvas: HTMLCanvasElement,
+    readonly trackWidth: number,
+    readonly trackHeight: number,
     private readonly background: HTMLImageElement,
     private readonly carSprite: HTMLImageElement,
   ) {
@@ -60,15 +70,28 @@ export class Renderer {
     this.scale = this.canvas.width / this.trackWidth;
   }
 
-  draw(prev: WorldState, curr: WorldState, alpha: number, debugText?: string): void {
+  /** Mouse event -> track pixel coordinates. */
+  toTrack(e: { clientX: number; clientY: number }): { x: number; y: number } {
+    const r = this.canvas.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * this.trackWidth, y: ((e.clientY - r.top) / r.height) * this.trackHeight };
+  }
+
+  /** How many track pixels one CSS pixel covers (for hit-testing and line widths). */
+  trackPxPerCssPx(): number {
+    return this.trackWidth / this.canvas.getBoundingClientRect().width;
+  }
+
+  draw(prev: WorldState, curr: WorldState, alpha: number, layers: DrawLayers = {}): void {
     const { ctx } = this;
     ctx.setTransform(this.scale, 0, 0, this.scale, 0, 0);
+    ctx.globalAlpha = 1;
     ctx.drawImage(this.background, 0, 0, this.trackWidth, this.trackHeight);
+    layers.underCars?.(ctx);
 
     const sw = this.carSprite.naturalWidth;
     const sh = this.carSprite.naturalHeight;
     curr.cars.forEach((car, i) => {
-      const c = interpolateCar(prev.cars[i], car, alpha);
+      const c = interpolatePose(prev.cars[i], car, alpha);
       ctx.save();
       ctx.translate(c.x, c.y);
       ctx.rotate(c.heading);
@@ -76,14 +99,18 @@ export class Renderer {
       ctx.restore();
     });
 
-    if (debugText) {
+    layers.overCars?.(ctx);
+    layers.overlay?.(ctx);
+
+    if (layers.text) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       const px = Math.round(12 * (window.devicePixelRatio || 1));
       ctx.font = `${px}px monospace`;
       ctx.textBaseline = 'top';
-      const lines = debugText.split('\n');
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(0, 0, px * 22, (lines.length + 0.5) * px * 1.25);
+      const lines = layers.text.split('\n');
+      const width = Math.max(...lines.map((l) => ctx.measureText(l).width)) + px;
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillRect(0, 0, width, (lines.length + 0.5) * px * 1.25);
       ctx.fillStyle = '#fff';
       lines.forEach((l, i) => ctx.fillText(l, px / 2, px / 4 + i * px * 1.25));
     }
