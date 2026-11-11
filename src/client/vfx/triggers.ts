@@ -32,7 +32,9 @@ export function wheelFx(prev: CarState, car: CarState, w: 0 | 1 | 2 | 3, cfg: Vf
   let slide = 0, lockup = 0, spin = 0;
   if (over > 0 && kph > 2) {
     if (front && car.controls.brake > 0.1 && longitudinal) lockup = over * Math.max(0.4, speedK);
-    else if (!front && car.controls.throttle > 0.1 && kph < t.wheelspinMaxKph && longitudinal) spin = over * Math.max(0.5, 1 - kph / t.wheelspinMaxKph);
+    // Rears over the limit under throttle with little slip angle are wheelspin at ANY speed (a traction-
+    // limited car at 150 kph isn't sliding); wheelspinMaxKph only fades its intensity with speed.
+    else if (!front && car.controls.throttle > 0.1 && longitudinal) spin = over * Math.max(0.15, 1 - kph / t.wheelspinMaxKph);
     else slide = over * Math.max(0.25, speedK);
   }
 

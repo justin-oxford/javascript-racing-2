@@ -102,20 +102,22 @@ export interface BodyReadout {
   angVel: number;
   wallContact: boolean;
   barrierContact: boolean;
+  carContact: boolean;
 }
 
 /** Read every car body back out as plain numbers. */
 export function readStateFromWorld(cache: PhysicsCache): BodyReadout[] {
   return cache.cars.map((b) => {
     const p = b.getPosition(), v = b.getLinearVelocity();
-    let wallContact = false, barrierContact = false;
+    let wallContact = false, barrierContact = false, carContact = false;
     for (let ce = b.getContactList(); ce; ce = ce.next ?? null) {
       if (!ce.contact.isTouching()) continue;
       const tag = (ce.contact.getFixtureA().getUserData() ?? ce.contact.getFixtureB().getUserData()) as WallTag | null;
       if (tag?.kind === 'barrier') barrierContact = true;
       else if (tag?.kind === 'wall') wallContact = true;
+      else if (ce.other?.isDynamic()) carContact = true;
     }
-    return { x: p.x, y: p.y, heading: b.getAngle(), vx: v.x, vy: v.y, angVel: b.getAngularVelocity(), wallContact, barrierContact };
+    return { x: p.x, y: p.y, heading: b.getAngle(), vx: v.x, vy: v.y, angVel: b.getAngularVelocity(), wallContact, barrierContact, carContact };
   });
 }
 

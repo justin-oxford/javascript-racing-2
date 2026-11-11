@@ -82,6 +82,8 @@ export interface CarState extends Pose {
   wallContact: boolean;
   /** Touching a tyre barrier this tick (invalidates the lap, card 04). */
   barrierContact: boolean;
+  /** Touching another car this tick. */
+  carContact: boolean;
 }
 
 /** Things that happened this tick, for the client to react to (log, sound, HUD). */

@@ -5,6 +5,8 @@ import GUI, { type Controller } from 'lil-gui';
 import type { CarBuild, PhysicsConfig, Rules, SurfaceDef, WorldState } from '../../sim';
 import type { VfxConfig } from '../vfx/triggers';
 import type { VfxQuality } from '../vfx/vfx';
+import type { AudioConfig } from '../audio/targets';
+import type { Volumes } from '../audio/audio';
 import { formatTrackJson } from '../editor/format';
 import { catalog } from '../track-loader';
 
@@ -54,6 +56,13 @@ const RANGES: Record<string, [number, number, number]> = {
   'rules.pitSpeedLimitKph': [20, 150, 1],
   'surface.grip': [0, 1.5, 0.01],
   'surface.rollingDrag': [0, 1.5, 0.005],
+  'audio.engine.gears': [3, 10, 1],
+  'audio.engine.idleRpm': [1000, 10000, 50],
+  'audio.engine.maxRpm': [6000, 20000, 50],
+  'audio.engine.shiftRpm': [3000, 18000, 50],
+  'audio.engine.gearSpread': [0.3, 1.5, 0.01],
+  'audio.engine.cylinders': [2, 16, 2],
+  'audio.tyres.squealCurve': [0.2, 3, 0.05],
 };
 
 const LABELS: Record<string, string> = {
@@ -70,11 +79,14 @@ export interface TuningTargets {
   /** config/vfx.json, live. */
   vfx: VfxConfig;
   vfxQuality: { get(): VfxQuality; set(q: VfxQuality): void; clear(): void };
+  /** config/audio.json, live. */
+  audio: AudioConfig;
+  volumes: { values: Volumes; set(bus: 'master' | 'engine' | 'tyres' | 'impacts' | 'ui', v: number): void };
   /** Called when the team/spec/setup changes, to rebuild the player's car. */
   onBuildChange(build: CarBuild): void;
 }
 
-async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx', value: unknown): Promise<string> {
+async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio', value: unknown): Promise<string> {
   const res = await fetch(`/__tuning/save/${name}`, { method: 'POST', headers: { 'x-tuning-panel': '1' }, body: formatTrackJson(value) });
   return res.ok ? `config/${name}.json` : `${name}: ${await res.text()}`;
 }
@@ -160,6 +172,18 @@ export class TuningPanel {
     v.close();
     setInterval(() => (q.quality = this.t.vfxQuality.get()), 500);
 
+    const snd = gui.addFolder('Sound (M mutes)');
+    const vol = snd.addFolder('Volumes (saved in this browser)');
+    for (const bus of ['master', 'engine', 'tyres', 'impacts', 'ui'] as const)
+      vol.add(this.t.volumes.values, bus, 0, 1, 0.01).onChange((x: number) => this.t.volumes.set(bus, x));
+    for (const [section, values] of Object.entries(this.t.audio)) {
+      if (section === 'files' || section === 'defaultVolumes' || typeof values !== 'object' || !values) continue;
+      const sub = snd.addFolder(section);
+      for (const [key, val] of Object.entries(values as object)) if (typeof val === 'number') this.slider(sub, values as object, key, `audio.${section}.${key}`);
+      sub.close();
+    }
+    snd.close();
+
     const io = gui.addFolder('Save / export');
     const status = { msg: '' };
     const show = (m: string) => {
@@ -167,7 +191,7 @@ export class TuningPanel {
       statusCtl.updateDisplay();
     };
     io.add({
-      save: async () => show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx)])).join(', ')),
+      save: async () => show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio)])).join(', ')),
     }, 'save').name('Save to /config');
     io.add({ copy: () => void navigator.clipboard.writeText(formatTrackJson(physics)).then(() => show('physics.json copied')) }, 'copy').name('Copy physics JSON');
     io.add({ revert: () => this.revert() && show('Reverted to last saved values') }, 'revert').name('Revert unsaved changes');

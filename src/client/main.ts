@@ -1,4 +1,4 @@
-import { createWorld, resetCar, setCarBuild, step, TICK_HZ, type InputSource, type SimContext, type WorldState } from '../sim';
+import { buildStats, createWorld, resetCar, setCarBuild, step, TICK_HZ, type InputSource, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -18,7 +18,10 @@ import {
   surfacesConfig,
   type MaskState,
 } from './track-loader';
+import audioConfig from '../../config/audio.json';
 import vfxConfig from '../../config/vfx.json';
+import { GameAudio } from './audio/audio';
+import { soundTargets, topSpeedKph } from './audio/targets';
 import { Vfx } from './vfx/vfx';
 import './style.css';
 
@@ -42,6 +45,7 @@ async function main(): Promise<void> {
   const extra = import.meta.env.DEV ? Math.min(19, Math.max(0, Number(new URLSearchParams(location.search).get('cars') ?? 1) - 1)) : 0;
   for (let i = 1; i <= extra; i++) drivers.push(new DonutInput(i));
   const vfx = new Vfx(mask.track.mask.width, mask.track.mask.height, vfxConfig);
+  const audio = new GameAudio(audioConfig);
 
   let prev: WorldState = createWorld(ctx, drivers.length);
   let curr: WorldState = prev;
@@ -54,6 +58,8 @@ async function main(): Promise<void> {
       prev = curr;
     } else if (a.type === 'toggleDebug') {
       debug = !debug;
+    } else if (a.type === 'mute') {
+      console.info(`[audio] ${audio.toggleMute() ? 'muted' : 'unmuted'}`);
     } else if (a.type === 'cycleVfx') {
       console.info(`[vfx] quality: ${vfx.cycleQuality()}`);
     }
@@ -71,6 +77,8 @@ async function main(): Promise<void> {
         rules,
         vfx: vfxConfig,
         vfxQuality: { get: () => vfx.quality, set: (q) => vfx.setQuality(q), clear: () => vfx.clear() },
+        audio: audioConfig,
+        volumes: { values: audio.volumes, set: (bus, v) => audio.setVolume(bus, v) },
         onBuildChange: (build) => {
           curr = setCarBuild(curr, 0, build);
           prev = setCarBuild(prev, 0, build);
@@ -88,6 +96,7 @@ async function main(): Promise<void> {
         editor,
         tuning,
         vfx,
+        audio,
         /** Run n full frames (sim tick + VFX + draw) synchronously; returns ms per frame. */
         benchFrame: (n = 300) => {
           const t0 = performance.now();
@@ -143,6 +152,8 @@ async function main(): Promise<void> {
       prev = curr;
       curr = step(curr, inputs, ctx);
       vfx.onTick(prev, curr, ctx.track, physics);
+      const me = curr.cars[0], was = prev.cars[0];
+      if (me && was) audio.update(soundTargets(was, me, audioConfig, vfxConfig, physics, rules, surfaces, topSpeedKph(physics, buildStats(me.build, ctx.catalog).topSpeed)));
       for (const e of curr.events) {
         if (e.type === 'outOfBounds')
           console.warn(`[mask bug] car ${e.car} reached out-of-bounds at (${e.x.toFixed(1)}, ${e.y.toFixed(1)}) px in ${mask.file}; reset to spawn`);
@@ -166,7 +177,7 @@ async function main(): Promise<void> {
           `RL ${surfaceName(car, 2)}  RR ${surfaceName(car, 3)}\n` +
           `mask ${mask.file}  walls ${mask.walls.length}${hasArt ? '' : '  (blockout: no background art)'}
 ` +
-          `vfx ${vfx.quality} (V)  particles ${vfx.particles}  cars ${curr.cars.length}   T = tuning`
+          `vfx ${vfx.quality} (V)  particles ${vfx.particles}  cars ${curr.cars.length}  sound ${audio.volumes.muted ? 'muted' : audio.running ? 'on' : 'waiting for a key'} (M)   T = tuning`
         : undefined;
       renderer.draw(prev, curr, alpha, look, {
         underCars: (c) => {

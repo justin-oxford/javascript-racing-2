@@ -86,6 +86,7 @@ export function createCar(posePx: Pose, build: CarBuild, ctx: SimContext): CarSt
     ...surfaceFlags(surfaces, ctx),
     wallContact: false,
     barrierContact: false,
+    carContact: false,
   };
 }
 
