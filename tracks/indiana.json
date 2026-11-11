@@ -1,0 +1,9 @@
+{
+  "_comment": "Minimal stub for card 01 (background + spawn only). Card 02 defines the real track format.",
+  "id": "indiana",
+  "name": "Indiana",
+  "background": "assets/BGs/indiana.jpg",
+  "width": 1280,
+  "height": 566,
+  "spawn": { "x": 450, "y": 158, "heading": 4.71238898038469 }
+}

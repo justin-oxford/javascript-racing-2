@@ -1,0 +1,10 @@
+{
+  // Tests and offline tools run in Node.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": ["src/sim", "tools"],
+  "exclude": []
+}

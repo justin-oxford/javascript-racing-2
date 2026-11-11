@@ -1,0 +1,11 @@
+{
+  // Purity guard for /src/sim: no DOM lib, no Node or Vite types.
+  // If sim code touches window, document, canvas, process, etc., this fails to typecheck.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["src/sim"],
+  "exclude": ["src/sim/**/*.test.ts"]
+}

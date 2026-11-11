@@ -1,0 +1,10 @@
+{
+  "_comment": "Card 01 throwaway driving. Track pixels and seconds. Deleted when card 03 lands real physics.",
+  "maxSpeed": 320,
+  "maxReverseSpeed": 60,
+  "accel": 160,
+  "brakeDecel": 420,
+  "coastDecel": 40,
+  "turnRate": 2.6,
+  "fullSteerSpeed": 60
+}
