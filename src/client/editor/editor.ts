@@ -50,7 +50,7 @@ export class TrackEditor {
   }
 
   private async save(): Promise<void> {
-    const res = await fetch(`/__editor/save-track/${this.json.id}`, { method: 'POST', body: this.exportText() });
+    const res = await fetch(`/__editor/save-track/${this.json.id}`, { method: 'POST', headers: { 'x-track-editor': '1' }, body: this.exportText() });
     this.setStatus(res.ok ? `Saved tracks/${this.json.id}/track.json` : `Save failed: ${await res.text()}`);
   }
 

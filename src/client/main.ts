@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   let prev: WorldState = createWorld(ctx, drivers.length);
   let curr: WorldState = prev;
   let debug = false;
-  let fps = 0;
+  let fps = TICK_HZ; // display smoothing starts at the expected rate, not 0
 
   keyboard.onAction((a) => {
     if (a.type === 'reset') {
@@ -61,6 +61,18 @@ async function main(): Promise<void> {
       } else if (file === json.files.overhead) {
         overhead = await loadOverhead(json);
       }
+    });
+  }
+
+  // Dev-only console handle for poking at the running game.
+  if (import.meta.env.DEV) {
+    Object.assign(window, {
+      __game: {
+        world: () => curr,
+        surfaceNames: () => curr.cars.map((c) => c.surfaces.map((s) => surfaces[s]!.id)),
+        mask: () => mask,
+        editor,
+      },
     });
   }
 

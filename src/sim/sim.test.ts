@@ -118,6 +118,48 @@ describe('Indiana track (mask decoded in Node)', () => {
     expect(car.speed).toBeCloseTo(limit, 5);
   });
 
+  /** First pixel of a surface whose (2r+1)^2 neighbourhood is all that surface. Found by scanning, not hardcoded. */
+  function findPatch(id: string, r: number): { x: number; y: number } {
+    const want = surfaces.findIndex((s) => s.id === id);
+    const { width: w, height: h, data } = track.mask;
+    for (let y = r; y < h - r; y++)
+      for (let x = r; x < w - r; x++) {
+        let ok = true;
+        for (let dy = -r; dy <= r && ok; dy++) for (let dx = -r; dx <= r && ok; dx++) ok = data[(y + dy) * w + x + dx] === want;
+        if (ok) return { x: x + 0.5, y: y + 0.5 };
+      }
+    throw new Error(`no ${id} patch of radius ${r} in the mask`);
+  }
+
+  it('each wheel reports the surface under it', () => {
+    const at = (x: number, y: number) => resetCar(createWorld(ctx), 0, { x, y, heading: 0 }, ctx).cars[0]!;
+    const grass = findPatch('grass', 20);
+    const g = at(grass.x, grass.y);
+    expect(g.surfaces.map(surfaceId)).toEqual(['grass', 'grass', 'grass', 'grass']);
+    expect(g.offTrack).toBe(true);
+    const pit = findPatch('pitLane', 20);
+    const p = at(pit.x, pit.y);
+    expect(p.surfaces.map(surfaceId)).toEqual(['pitLane', 'pitLane', 'pitLane', 'pitLane']);
+    expect([p.inPitLane, p.offTrack]).toEqual([true, false]);
+    // Put only the front-left wheel on a kerb pixel: heading 0, so FL is up-left of centre.
+    const kerb = findPatch('kerb', 0);
+    const half = (n: number) => (n / 2) * track.json.pxPerMeter;
+    const k = at(kerb.x + half(ctx.carGeometry.trackWidthM), kerb.y + half(ctx.carGeometry.wheelbaseM));
+    expect(surfaceId(k.surfaces[0])).toBe('kerb');
+  });
+
+  it('driving out of the pit box crosses pit lane onto the track', () => {
+    let world = createWorld(ctx);
+    const seen: string[] = [];
+    for (let t = 0; t < 120; t++) {
+      world = step(world, [{ throttle: 1, brake: 0, steer: 1 }], ctx); // right turn from facing left = towards the pit wall
+      for (const s of world.cars[0]!.surfaces.map(surfaceId)) if (seen.at(-1) !== s && !seen.includes(s)) seen.push(s);
+    }
+    expect(seen.slice(0, 2)).toEqual(['pitBox', 'pitLane']);
+    expect(seen).toContain('asphalt');
+    expect(world.events).toEqual([]);
+  });
+
   it('traces walls', () => {
     expect(walls.length).toBeGreaterThan(5);
     for (const w of walls) expect(w.points.length % 2).toBe(0);

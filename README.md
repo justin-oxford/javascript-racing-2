@@ -12,7 +12,29 @@ npm test         # steps the sim headless in Node
 npm run build    # typecheck + production build to dist/
 ```
 
-Controls: WASD / arrows drive, Z / Space / S brake, R resets to the pits, K toggles the debug overlay.
+Controls: WASD / arrows drive, Z / Space / S brake, R resets to the pits, K toggles the debug overlay
+(mask, traced walls, timing lines, racing line, grid, each wheel's surface).
+
+## Tracks
+
+Each track is a folder, `tracks/<id>/`:
+
+| File | What |
+| --- | --- |
+| `track.json` | Name, scale (`pxPerMeter`), file paths, timing lines, racing line, grid, spawn. Mask pixels. |
+| `mask.png` | Gameplay mask, same size as the background, flat palette colours (see `config/surfaces.json`). |
+| `mask-draft.png` | Auto-generated starting point (`npm run draft-mask`). Used until `mask.png` exists. |
+| `overhead.png` | Optional. Drawn above cars (bridges, canopy). |
+
+The background lives in `public/assets/BGs/` and is referenced from `track.json`.
+
+Mask palette: `#808080` asphalt, `#FF0000` kerb, `#00FF00` grass, `#FFFF00` gravel, `#000000` wall,
+`#FF00FF` tyre barrier, `#0000FF` pit lane, `#00FFFF` pit box, `#FFFFFF` out of bounds.
+Off-palette pixels are snapped to the nearest colour on load.
+
+In `npm run dev`, saving `mask.png` in an image editor updates the running game without a page reload.
+
+Track editor (dev only): open http://localhost:5173/?edit=1. Timing lines, racing line, grid, spawn; Save writes `track.json`.
 
 ## Layout
 

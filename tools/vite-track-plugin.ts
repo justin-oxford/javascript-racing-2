@@ -1,5 +1,5 @@
 // Vite plugin for /tracks:
-// - dev: tell the page when a track PNG changes or appears (hot reload of the mask, no page reload)
+// - dev: tell the page when a track PNG changes, appears or is deleted (hot reload, no page reload)
 // - dev: POST /__editor/save-track/<id> writes tracks/<id>/track.json (the editor's Save button)
 // - build: copy tracks/<id>/*.png into dist/tracks/<id>/ so the game can fetch them at runtime
 import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -26,17 +26,20 @@ export function trackPlugin(): Plugin {
     },
 
     configureServer(server) {
-      server.watcher.add(join(tracksDir(), '*', '*.png'));
+      server.watcher.add(tracksDir());
       const notify = (abs: string): void => {
         const hit = parse(abs);
         if (hit) server.ws.send({ type: 'custom', event: 'track:file-changed', data: hit });
       };
       server.watcher.on('add', notify);
       server.watcher.on('change', notify);
+      server.watcher.on('unlink', notify); // deleting mask.png falls back to the draft
 
       server.middlewares.use('/__editor/save-track/', (req, res) => {
         const id = (req.url ?? '').replace(/^\//, '').split('?')[0]!;
-        if (req.method !== 'POST' || !ID_RE.test(id) || !existsSync(join(tracksDir(), id))) {
+        // The custom header makes this a non-simple request, so other sites open in the browser
+        // can't POST here cross-origin while the dev server runs.
+        if (req.method !== 'POST' || req.headers['x-track-editor'] !== '1' || !ID_RE.test(id) || !existsSync(join(tracksDir(), id))) {
           res.statusCode = 400;
           res.end('bad request');
           return;
