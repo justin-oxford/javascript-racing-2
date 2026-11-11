@@ -1,0 +1,5 @@
+{
+  "_comment": "Input for tools/draft-mask.ts only. Pit box from the legacy indiana.html hints (x 420-470, y 150-170). pitLaneSeeds: extra points inside the pit lane, for parts cut off from the pit box by painted lines.",
+  "pitBoxes": [{ "x0": 420, "y0": 150, "x1": 470, "y1": 170 }],
+  "pitLaneSeeds": [{ "x": 200, "y": 130 }]
+}

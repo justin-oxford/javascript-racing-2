@@ -1,0 +1,15 @@
+{
+  "_comment": "Mask palette, one entry per surface. Array order = palette index the sim sees. grip is a multiplier used by card 03 physics. legal = counts as on-track for track limits.",
+  "surfaces": [
+    { "id": "asphalt",      "color": "#808080", "grip": 1.0,  "legal": true  },
+    { "id": "kerb",         "color": "#FF0000", "grip": 0.9,  "legal": true  },
+    { "id": "grass",        "color": "#00FF00", "grip": 0.45, "legal": false },
+    { "id": "gravel",       "color": "#FFFF00", "grip": 0.35, "legal": false },
+    { "id": "wall",         "color": "#000000", "grip": 1.0,  "legal": false },
+    { "id": "tyreBarrier",  "color": "#FF00FF", "grip": 1.0,  "legal": false },
+    { "id": "pitLane",      "color": "#0000FF", "grip": 1.0,  "legal": true  },
+    { "id": "pitBox",       "color": "#00FFFF", "grip": 1.0,  "legal": true  },
+    { "id": "outOfBounds",  "color": "#FFFFFF", "grip": 1.0,  "legal": false }
+  ],
+  "offPaletteWarnFraction": 0.01
+}
