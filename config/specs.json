@@ -1,0 +1,14 @@
+{
+  "_comment": "Spec levels and setups from SYS - Car model. Spec values are v0.16 raw numbers; the sim uses each one's ratio to referenceSpec. Setups are multipliers (Med = 1). Suspension is deliberately absent.",
+  "referenceSpec": "C1",
+  "specs": {
+    "C1": { "name": "C1 Max", "engine": 0.030, "topSpeed": 7.0, "brakes": 0.060, "drag": 0.001, "downforce": 0.030, "grip": 0.050 },
+    "C2": { "name": "C2 Mid", "engine": 0.025, "topSpeed": 6.0, "brakes": 0.060, "drag": 0.002, "downforce": 0.030, "grip": 0.040 },
+    "C3": { "name": "C3 Min", "engine": 0.023, "topSpeed": 5.0, "brakes": 0.060, "drag": 0.003, "downforce": 0.030, "grip": 0.030 }
+  },
+  "setups": {
+    "downforce": { "Low": { "drag": 0.95, "downforce": 0.95 }, "Med": {}, "High": { "drag": 1.05, "downforce": 1.05 } },
+    "gearing": { "Long": { "engine": 0.99, "topSpeed": 1.05 }, "Med": {}, "Short": { "engine": 1.20, "topSpeed": 0.95 } },
+    "brakes": { "Low": { "brakes": 0.95 }, "Med": {}, "High": { "brakes": 1.10 } }
+  }
+}

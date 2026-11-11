@@ -1,8 +1,9 @@
 {
   "id": "indiana",
   "name": "Indiana",
+  "fixture": true,
   "pxPerMeter": 5.4,
-  "files": { "background": "assets/BGs/indiana.jpg", "mask": "mask.png", "maskDraft": "mask-draft.png" },
+  "files": { "background": "/assets/BGs/indiana.jpg", "mask": "mask.png", "maskDraft": "mask-draft.png" },
   "timingLines": {
     "startFinish": { "a": { "x": 292, "y": 4 }, "b": { "x": 292, "y": 170 } },
     "s1": { "a": { "x": 301, "y": 562 }, "b": { "x": 301, "y": 466 } },

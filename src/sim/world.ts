@@ -1,119 +1,305 @@
-import type { SimTrack } from './track';
+import { buildStats, type CarCatalog, type PhysicsConfig } from './car-config';
+import { applyCarForce, prepareCache, readStateFromWorld, setCarMass, stepWorld, type PhysicsCache } from './planck-cache';
+import type { SimTrack, WallChain } from './track';
 import { surfaceAt } from './track';
-import type {
-  CarGeometry,
-  CarInput,
-  CarState,
-  PlaceholderKinematics,
-  Pose,
-  Rules,
-  SimEvent,
-  Wheels,
-  WorldState,
-} from './types';
+import type { CarBuild, CarInput, CarState, Pose, Rules, SimEvent, WheelState, Wheels, WorldState } from './types';
 import { NEUTRAL_INPUT } from './types';
 
 /** Fixed simulation rate. Physics is never stepped by frame time. */
 export const TICK_HZ = 60;
 export const TICK_DT = 1 / TICK_HZ;
+const G = 9.81;
+const KPH = 1 / 3.6;
 
-/** Static inputs to every step: the track and tuning. Not world state. */
+/**
+ * Everything static (or live-tuned) that a step needs. Not world state.
+ * `cache` is Planck, kept in step with WorldState; see planck-cache.ts.
+ */
 export interface SimContext {
   track: SimTrack;
-  kinematics: PlaceholderKinematics;
-  carGeometry: CarGeometry;
+  walls: readonly WallChain[];
+  physics: PhysicsConfig;
+  catalog: CarCatalog;
   rules: Rules;
+  cache: PhysicsCache;
 }
 
-/** Wheel sample points (FL, FR, RL, RR) for a pose, in track pixels. */
-export function wheelPositions(pose: Pose, geometry: CarGeometry, pxPerMeter: number): Wheels<{ x: number; y: number }> {
-  const fx = Math.sin(pose.heading), fy = -Math.cos(pose.heading); // forward
-  const rx = Math.cos(pose.heading), ry = Math.sin(pose.heading); // right
-  const hl = (geometry.wheelbaseM / 2) * pxPerMeter;
-  const hw = (geometry.trackWidthM / 2) * pxPerMeter;
-  const at = (l: number, s: number) => ({ x: pose.x + fx * l + rx * s, y: pose.y + fy * l + ry * s });
-  return [at(hl, -hw), at(hl, hw), at(-hl, -hw), at(-hl, hw)];
+// ---------------------------------------------------------------------------
+// Geometry
+
+const forward = (h: number) => ({ x: Math.sin(h), y: -Math.cos(h) });
+const right = (h: number) => ({ x: Math.cos(h), y: Math.sin(h) });
+
+/** Wheel offsets from the centre of mass: [along forward, along right], metres. FL, FR, RL, RR. */
+function wheelOffsets(cfg: PhysicsConfig): Wheels<[number, number]> {
+  const { wheelbaseM: L, trackWidthM: T, weightFront: wf } = cfg.car;
+  const a = L * (1 - wf); // CG to front axle: more weight on the front = CG nearer the front
+  const b = L * wf;
+  return [[a, -T / 2], [a, T / 2], [-b, -T / 2], [-b, T / 2]];
 }
 
-function sampleSurfaces(pose: Pose, ctx: SimContext): Pick<CarState, 'surfaces' | 'offTrack' | 'inPitLane' | 'inPitBox'> {
-  const { track } = ctx;
-  const surfaces = wheelPositions(pose, ctx.carGeometry, track.json.pxPerMeter).map((p) => surfaceAt(track, p.x, p.y)) as Wheels<number>;
-  const { pitLane, pitBox } = track.index;
+/** Wheel positions (FL, FR, RL, RR) for a pose, metres. */
+export function wheelPositions(pose: Pose, cfg: PhysicsConfig): Wheels<{ x: number; y: number }> {
+  const f = forward(pose.heading), r = right(pose.heading);
+  return wheelOffsets(cfg).map(([l, s]) => ({ x: pose.x + f.x * l + r.x * s, y: pose.y + f.y * l + r.y * s })) as Wheels<{ x: number; y: number }>;
+}
+
+/** Tyre grip vs wear: gentle down to ~40%, then a cliff, nothing left at 10% (v0.16 curve). */
+export function wearGrip(wear: number): number {
+  return Math.max(0, Math.log10(10 * wear));
+}
+
+// ---------------------------------------------------------------------------
+// Cars
+
+const newWheel = (surface: number): WheelState => ({ surface, wear: 1, slipDeg: 0, usage: 0, gripN: 0, loadN: 0 });
+
+function sampleSurfaces(car: Pick<CarState, 'x' | 'y' | 'heading'>, ctx: SimContext): Wheels<number> {
+  const ppm = ctx.track.json.pxPerMeter;
+  return wheelPositions(car, ctx.physics).map((p) => surfaceAt(ctx.track, p.x * ppm, p.y * ppm)) as Wheels<number>;
+}
+
+function surfaceFlags(surfaces: Wheels<number>, ctx: SimContext): Pick<CarState, 'offTrack' | 'inPitLane' | 'inPitBox'> {
+  const { pitLane, pitBox } = ctx.track.index;
   return {
-    surfaces,
-    offTrack: surfaces.every((s) => !track.surfaces[s]!.legal),
+    offTrack: surfaces.every((s) => !ctx.track.surfaces[s]!.legal),
     inPitLane: surfaces.some((s) => s === pitLane || s === pitBox),
     inPitBox: surfaces.some((s) => s === pitBox),
   };
 }
 
-export function createCar(pose: Pose, ctx: SimContext): CarState {
-  return { x: pose.x, y: pose.y, heading: pose.heading, speed: 0, ...sampleSurfaces(pose, ctx) };
-}
-
-export function createWorld(ctx: SimContext, carCount = 1): WorldState {
-  const cars: CarState[] = [];
-  for (let i = 0; i < carCount; i++) cars.push(createCar(ctx.track.json.spawn, ctx));
-  return { tick: 0, cars, events: [] };
-}
-
-const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
-
-/**
- * PLACEHOLDER kinematic car step. Exists only to prove the loop and the mask;
- * card 03 replaces it with real physics. Deliberately crude: no walls, no grip.
- */
-function stepCarPlaceholder(car: CarState, input: CarInput, ctx: SimContext, dt: number): Pose & { speed: number } {
-  const k = ctx.kinematics;
-  const throttle = clamp(input.throttle, 0, 1);
-  const brake = clamp(input.brake, 0, 1);
-  const steer = clamp(input.steer, -1, 1);
-
-  let speed = car.speed;
-  if (throttle > 0) speed += k.accel * throttle * dt;
-  if (brake > 0) speed -= (speed > 0 ? k.brakeDecel : k.accel) * brake * dt; // brake, then reverse
-  if (throttle === 0 && brake === 0) {
-    const coast = k.coastDecel * dt;
-    speed = Math.abs(speed) <= coast ? 0 : speed - Math.sign(speed) * coast;
-  }
-  let maxSpeed = k.maxSpeed;
-  if (car.inPitLane) maxSpeed = Math.min(maxSpeed, (ctx.rules.pitSpeedLimitKph / 3.6) * ctx.track.json.pxPerMeter);
-  speed = clamp(speed, -k.maxReverseSpeed, maxSpeed);
-
-  const steerAuthority = clamp(Math.abs(speed) / k.fullSteerSpeed, 0, 1);
-  const heading = car.heading + steer * k.turnRate * steerAuthority * Math.sign(speed) * dt;
+/** A stationary car at a pose given in TRACK PIXELS (track.json coordinates). */
+export function createCar(posePx: Pose, build: CarBuild, ctx: SimContext): CarState {
+  const ppm = ctx.track.json.pxPerMeter;
+  const pose = { x: posePx.x / ppm, y: posePx.y / ppm, heading: posePx.heading };
+  const surfaces = sampleSurfaces(pose, ctx);
   return {
-    x: car.x + Math.sin(heading) * speed * dt,
-    y: car.y - Math.cos(heading) * speed * dt,
-    heading,
-    speed,
+    ...pose,
+    build,
+    vx: 0,
+    vy: 0,
+    angVel: 0,
+    speed: 0,
+    controls: { ...NEUTRAL_INPUT },
+    fuelKg: ctx.physics.fuel.startKg,
+    wheels: surfaces.map(newWheel) as Wheels<WheelState>,
+    ...surfaceFlags(surfaces, ctx),
+    wallContact: false,
+    barrierContact: false,
   };
 }
 
+/** Starting pose for car i: grid slot i if the track has one, else lined up behind the spawn. */
+function startPose(i: number, ctx: SimContext): Pose {
+  const { grid, spawn, pxPerMeter } = ctx.track.json;
+  if (i === 0) return spawn;
+  const slot = grid[i];
+  if (slot) return slot;
+  const f = forward(spawn.heading);
+  const back = i * (ctx.physics.car.lengthM + 1.5) * pxPerMeter;
+  return { x: spawn.x - f.x * back, y: spawn.y - f.y * back, heading: spawn.heading };
+}
+
+export function createWorld(ctx: SimContext, cars: number | readonly CarBuild[] = 1): WorldState {
+  const builds = typeof cars === 'number' ? Array.from({ length: cars }, () => ctx.physics.defaultCar) : cars;
+  return { tick: 0, cars: builds.map((b, i) => createCar(startPose(i, ctx), b, ctx)), events: [] };
+}
+
+/** Put a car back at a pose (track pixels), stationary, same build (R = reset to pits). */
+export function resetCar(world: WorldState, index: number, posePx: Pose, ctx: SimContext): WorldState {
+  return {
+    tick: world.tick,
+    cars: world.cars.map((car, i) => (i === index ? createCar(posePx, car.build, ctx) : car)),
+    events: world.events,
+  };
+}
+
+/** Swap a car's team/spec/setup (tuning panel; later the garage). Keeps its position and motion. */
+export function setCarBuild(world: WorldState, index: number, build: CarBuild): WorldState {
+  return { ...world, cars: world.cars.map((car, i) => (i === index ? { ...car, build } : car)) };
+}
+
+// ---------------------------------------------------------------------------
+// Step
+
+const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
+const approach = (cur: number, target: number, maxDelta: number): number =>
+  cur < target ? Math.min(target, cur + maxDelta) : Math.max(target, cur - maxDelta);
+
+function rampControls(prev: CarInput, req: CarInput, cfg: PhysicsConfig, dt: number): CarInput {
+  const target = { throttle: clamp(req.throttle, 0, 1), brake: clamp(req.brake, 0, 1), steer: clamp(req.steer, -1, 1) };
+  const returning = Math.abs(target.steer) < Math.abs(prev.steer) || Math.sign(target.steer) !== Math.sign(prev.steer);
+  return {
+    throttle: approach(prev.throttle, target.throttle, cfg.input.throttleRate * dt),
+    brake: approach(prev.brake, target.brake, cfg.input.brakeRate * dt),
+    steer: approach(prev.steer, target.steer, (returning ? cfg.input.steerReturnRate : cfg.input.steerRate) * dt),
+  };
+}
+
+interface WheelForces {
+  lat: number;
+  usage: number;
+  slipDeg: number;
+  gripN: number;
+  loadN: number;
+}
+
+/** Work out and apply this tick's forces for one car. Returns per-wheel numbers for wear/telemetry. */
+function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimContext, dt: number): Wheels<WheelForces> {
+  const cfg = ctx.physics;
+  const stats = buildStats(car.build, ctx.catalog);
+  const mass = cfg.car.dryMassKg + Math.max(0, car.fuelKg);
+  const f = forward(car.heading), r = right(car.heading);
+  const vFwd = car.vx * f.x + car.vy * f.y;
+  const v2 = car.vx * car.vx + car.vy * car.vy;
+  const speed = Math.sqrt(v2);
+
+  // Loads: static split by weight balance, plus lateral transfer to the outside wheels.
+  const wf = cfg.car.weightFront;
+  const share: Wheels<number> = [wf / 2, wf / 2, (1 - wf) / 2, (1 - wf) / 2];
+  const aRight = vFwd * car.angVel; // centripetal acceleration, + = toward the car's right
+  const transfer = (mass * aRight * cfg.car.cgHeightM) / cfg.car.trackWidthM;
+  const side: Wheels<number> = [-1, 1, -1, 1];
+  const axle: Wheels<number> = [wf, wf, 1 - wf, 1 - wf];
+  const load = share.map((s, w) => Math.max(0, mass * G * s - side[w]! * transfer * axle[w]!)) as Wheels<number>;
+
+  // Longitudinal requests.
+  const vTop = cfg.engine.topSpeedKph * KPH * stats.topSpeed;
+  const vLimit = car.inPitLane ? Math.min(vTop, ctx.rules.pitSpeedLimitKph * KPH) : vTop;
+  const reversing = controls.brake > 0 && controls.throttle === 0 && vFwd < 0.5;
+  let drive = 0;
+  if (car.fuelKg > 0 && controls.throttle > 0) {
+    const powerN = (cfg.engine.powerKW * 1000 * stats.engine) / Math.max(Math.abs(vFwd), 1);
+    const fade = clamp((vLimit - vFwd) / (0.02 * vLimit + 0.5), 0, 1); // soft limiter at top speed / pit limit
+    drive = controls.throttle * Math.min(cfg.engine.maxDriveForceN * stats.engine, powerN) * fade;
+  } else if (reversing && car.fuelKg > 0) {
+    const vRev = cfg.engine.maxReverseKph * KPH;
+    drive = -controls.brake * cfg.engine.reverseForceN * clamp((vRev + vFwd) / 0.5, 0, 1);
+  }
+  const brakeTotal = reversing ? 0 : controls.brake * cfg.brakes.maxForceN * stats.brakes;
+  const brakeShare: Wheels<number> = [cfg.brakes.frontBias / 2, cfg.brakes.frontBias / 2, (1 - cfg.brakes.frontBias) / 2, (1 - cfg.brakes.frontBias) / 2];
+
+  // Steering: lock shrinks with speed.
+  const lock = (cfg.steering.lockDeg * Math.PI) / 180 / (1 + (speed / KPH) / cfg.steering.lockFalloffKph);
+  const delta = controls.steer * lock;
+
+  const gripBase = cfg.tyres.baseGrip * stats.grip * (1 + cfg.aero.downforceCoef * stats.downforce * v2);
+  const positions = wheelPositions(car, cfg);
+  const out = [] as unknown as Wheels<WheelForces>;
+
+  for (let w = 0; w < 4; w++) {
+    const p = positions[w]!;
+    const rx = p.x - car.x, ry = p.y - car.y;
+    const vx = car.vx - car.angVel * ry, vy = car.vy + car.angVel * rx; // v + omega x r
+    const h = w < 2 ? car.heading + delta : car.heading;
+    const wf_ = forward(h), wr = right(h);
+    const vLong = vx * wf_.x + vy * wf_.y;
+    const vLat = vx * wr.x + vy * wr.y;
+    const wheelMass = mass * share[w]!;
+    const surf = ctx.track.surfaces[car.wheels[w]!.surface]!;
+
+    const cap = gripBase * wearGrip(car.wheels[w]!.wear) * surf.grip * load[w]!;
+    const capLat = cap * cfg.tyres.lateralGrip;
+    const stopCap = (Math.abs(vLong) * wheelMass) / dt; // never push a wheel past standstill
+
+    let long = w >= 2 ? drive / 2 : 0;
+    const resist = Math.min(brakeTotal * brakeShare[w]! + surf.rollingDrag * load[w]!, stopCap);
+    long -= Math.sign(vLong) * resist;
+    let lat = (-vLat * wheelMass * cfg.tyres.lateralStiffness) / dt;
+
+    // Friction ellipse: over the cap the tyre slides and only gives what it has.
+    const usage = Math.hypot(cap > 0 ? long / cap : long ? Infinity : 0, capLat > 0 ? lat / capLat : lat ? Infinity : 0);
+    if (usage > 1) {
+      long /= usage;
+      lat /= usage;
+    }
+    applyCarForce(ctx.cache, i, wf_.x * long + wr.x * lat, wf_.y * long + wr.y * lat, p.x, p.y);
+    out[w] = {
+      lat,
+      usage: Number.isFinite(usage) ? usage : 99,
+      slipDeg: Math.abs(vLong) + Math.abs(vLat) > 0.5 ? (Math.atan2(vLat, Math.abs(vLong)) * 180) / Math.PI : 0,
+      gripN: cap,
+      loadN: load[w]!,
+    };
+  }
+
+  // Aero drag on the body, and hard scrub while rubbing a tyre barrier.
+  const dragK = cfg.aero.dragCoef * stats.drag * speed;
+  let fx = -dragK * car.vx, fy = -dragK * car.vy;
+  if (car.barrierContact) {
+    fx -= car.vx * mass * cfg.walls.barrierScrubPerSec;
+    fy -= car.vy * mass * cfg.walls.barrierScrubPerSec;
+  }
+  applyCarForce(ctx.cache, i, fx, fy, car.x, car.y);
+  setCarMass(ctx.cache, i, car, cfg);
+  return out;
+}
+
+/** Tyre wear + fuel for one tick (SYS - Car model rules), and pit service. */
+function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimContext, dt: number): Pick<CarState, 'fuelKg' | 'wheels'> {
+  const cfg = ctx.physics;
+  const kph = Math.abs(car.speed) / KPH;
+  const v4 = (kph / cfg.wear.refSpeedKph) ** 4;
+  const mass = cfg.car.dryMassKg + Math.max(0, car.fuelKg);
+  const quarterWeight = (mass * G) / 4;
+  const { throttle, brake } = car.controls;
+  const service = car.inPitBox && kph < cfg.fuel.pitServiceMaxKph;
+
+  const wheels = car.wheels.map((wheel, w) => {
+    let dw = cfg.wear.cornerPerSec * v4 * (Math.abs(forces[w]!.lat) / quarterWeight); // by actual lateral load
+    if (w >= 2) dw += cfg.wear.throttlePerSec * throttle / (1 + kph / cfg.wear.throttleLowSpeedKph); // wheelspin
+    else dw += cfg.wear.brakePerSec * brake * v4;
+    return {
+      ...wheel,
+      wear: service ? 1 : Math.max(0, wheel.wear - dw * dt),
+      slipDeg: forces[w]!.slipDeg,
+      usage: forces[w]!.usage,
+      gripN: forces[w]!.gripN,
+      loadN: forces[w]!.loadN,
+    };
+  }) as Wheels<WheelState>;
+
+  let fuelKg = Math.max(0, car.fuelKg - throttle * cfg.fuel.burnKgPerSec * dt);
+  if (service) fuelKg = Math.min(cfg.fuel.tankKg, fuelKg + cfg.fuel.refuelKgPerSec * dt);
+  return { fuelKg, wheels };
+}
+
 /**
- * Advance the world by exactly one fixed tick. Pure: returns a new state, never mutates.
+ * Advance the world by exactly one fixed tick. Returns a new state; never mutates the old one.
  * inputs[i] drives cars[i]; a missing input is treated as neutral.
+ * Uses ctx.cache (Planck) as scratch, rebuilt from `world` every tick (see planck-cache.ts).
  */
 export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimContext): WorldState {
+  const dt = TICK_DT;
+  prepareCache(ctx.cache, world, ctx.track, ctx.walls, ctx.physics);
+
+  const controls = world.cars.map((car, i) => rampControls(car.controls, inputs[i] ?? NEUTRAL_INPUT, ctx.physics, dt));
+  const forces = world.cars.map((car, i) => applyCarForces(i, car, controls[i]!, ctx, dt));
+  stepWorld(ctx.cache, dt, ctx.physics);
+  const bodies = readStateFromWorld(ctx.cache);
+
   const events: SimEvent[] = [];
-  const cars = world.cars.map((car, i) => {
-    const moved = stepCarPlaceholder(car, inputs[i] ?? NEUTRAL_INPUT, ctx, TICK_DT);
-    const next: CarState = { ...moved, ...sampleSurfaces(moved, ctx) };
+  const cars = world.cars.map((car, i): CarState => {
+    const b = bodies[i]!;
+    const f = forward(b.heading);
+    const surfaces = sampleSurfaces(b, ctx);
+    const moved: CarState = {
+      ...car,
+      ...b,
+      speed: b.vx * f.x + b.vy * f.y,
+      controls: controls[i]!,
+      wheels: car.wheels.map((wh, w) => ({ ...wh, surface: surfaces[w]! })) as Wheels<WheelState>,
+      ...surfaceFlags(surfaces, ctx),
+    };
+    const next = { ...moved, ...updateConsumables(moved, forces[i]!, ctx, dt) };
     // Out of bounds should be unreachable behind walls. If a wheel gets there, the mask has a gap.
-    if (next.surfaces.includes(ctx.track.index.outOfBounds)) {
-      events.push({ type: 'outOfBounds', car: i, x: next.x, y: next.y });
-      return createCar(ctx.track.json.spawn, ctx);
+    if (surfaces.includes(ctx.track.index.outOfBounds)) {
+      const ppm = ctx.track.json.pxPerMeter;
+      events.push({ type: 'outOfBounds', car: i, x: b.x * ppm, y: b.y * ppm });
+      return createCar(ctx.track.json.spawn, car.build, ctx);
     }
     return next;
   });
-  return { tick: world.tick + 1, cars, events };
-}
 
-/** Put a car back at a pose, stationary (R = reset to pits). */
-export function resetCar(world: WorldState, index: number, pose: Pose, ctx: SimContext): WorldState {
-  return {
-    tick: world.tick,
-    cars: world.cars.map((car, i) => (i === index ? createCar(pose, ctx) : car)),
-    events: world.events,
-  };
+  return { tick: world.tick + 1, cars, events };
 }

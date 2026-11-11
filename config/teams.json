@@ -1,0 +1,16 @@
+{
+  "_comment": "Team stat multipliers from SYS - Car model (v0.16 ratios). Motus is slow on purpose: do not normalise it. Livery card adds colours/layers here.",
+  "teams": [
+    { "id": "cavalli", "name": "Cavalli", "sprite": "assets/Cars/redCar.jpg", "stats": { "engine": 1.10, "topSpeed": 1.10, "brakes": 1.00, "drag": 0.97, "downforce": 0.96, "grip": 0.99 } },
+    { "id": "bluebull", "name": "Blue Bull", "sprite": "assets/Cars/blueCar.jpg", "stats": { "engine": 1.07, "topSpeed": 1.00, "brakes": 1.05, "drag": 1.00, "downforce": 1.00, "grip": 1.12 } },
+    { "id": "silberner", "name": "Silberner", "sprite": "assets/Cars/silverCar.jpg", "stats": { "engine": 1.10, "topSpeed": 1.10, "brakes": 1.06, "drag": 0.98, "downforce": 1.00, "grip": 1.10 } },
+    { "id": "mcfaren", "name": "McFaren", "sprite": "assets/Cars/mclarenCar.jpg", "stats": { "engine": 1.00, "topSpeed": 1.00, "brakes": 1.00, "drag": 1.05, "downforce": 1.00, "grip": 1.01 } },
+    { "id": "foucault", "name": "Foucault", "sprite": "assets/Cars/foucCar.jpg", "stats": { "engine": 1.00, "topSpeed": 1.00, "brakes": 1.00, "drag": 1.00, "downforce": 1.00, "grip": 1.00 } },
+    { "id": "betajuliet", "name": "Beta Juliet", "sprite": "assets/Cars/betaCar.jpg", "stats": { "engine": 1.01, "topSpeed": 1.00, "brakes": 1.00, "drag": 1.03, "downforce": 1.00, "grip": 0.96 } },
+    { "id": "toroblu", "name": "Toro Blu", "sprite": "assets/Cars/toroCar.jpg", "stats": { "engine": 0.97, "topSpeed": 0.98, "brakes": 1.00, "drag": 1.05, "downforce": 1.00, "grip": 1.05 } },
+    { "id": "stroll", "name": "Stroll", "sprite": "assets/Cars/strollCar.jpg", "stats": { "engine": 0.99, "topSpeed": 0.99, "brakes": 1.00, "drag": 1.08, "downforce": 1.00, "grip": 0.98 } },
+    { "id": "stewart", "name": "Stewart", "sprite": "assets/Cars/stewCar.jpg", "stats": { "engine": 0.95, "topSpeed": 0.98, "brakes": 1.00, "drag": 1.07, "downforce": 1.00, "grip": 0.95 } },
+    { "id": "trilliams", "name": "Trilliams", "sprite": "assets/Cars/trilliamsCar.jpg", "stats": { "engine": 0.93, "topSpeed": 0.94, "brakes": 1.00, "drag": 1.05, "downforce": 1.00, "grip": 0.95 } },
+    { "id": "motus", "name": "Motus", "sprite": "assets/Cars/greenCar.jpg", "stats": { "engine": 0.75, "topSpeed": 0.75, "brakes": 0.70, "drag": 0.80, "downforce": 0.80, "grip": 0.80 } }
+  ]
+}

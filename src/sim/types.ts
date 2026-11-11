@@ -1,4 +1,6 @@
 // All sim state is plain, JSON-serializable data. No classes, no hidden state.
+// Units: metres, seconds, radians, kg, newtons. Track pixels exist only at the track boundary
+// (mask sampling, track.json) and in the client renderer.
 
 /** What every driver (keyboard, AI, network) produces each tick. */
 export interface CarInput {
@@ -18,7 +20,7 @@ export interface InputSource {
   read(tick: number): CarInput;
 }
 
-/** A position + heading on the track. Heading 0 points up (-y), increases clockwise. */
+/** A position + heading. Heading 0 points up (-y), increases clockwise. */
 export interface Pose {
   x: number;
   y: number;
@@ -28,17 +30,58 @@ export interface Pose {
 /** Wheel order everywhere: front-left, front-right, rear-left, rear-right. */
 export type Wheels<T> = [T, T, T, T];
 
+export interface CarSetup {
+  downforce: string;
+  gearing: string;
+  brakes: string;
+}
+
+/** Which car this is: team x spec x setup (SYS - Car model). */
+export interface CarBuild {
+  team: string;
+  spec: string;
+  setup: CarSetup;
+}
+
+export interface WheelState {
+  /** Palette index of the surface under the wheel. */
+  surface: number;
+  /** Tyre life, 1 = new, 0 = gone. Grip follows log10(10 x wear). */
+  wear: number;
+  // ---- telemetry from the last tick (derived, but plain data so the HUD/panel can read it) ----
+  /** Slip angle, degrees. */
+  slipDeg: number;
+  /** Force asked of the tyre / force it can give. Over 1 = sliding. */
+  usage: number;
+  /** Grip cap this tick, newtons. */
+  gripN: number;
+  /** Vertical load, newtons. */
+  loadN: number;
+}
+
 export interface CarState extends Pose {
-  /** Signed speed along the heading, track pixels per second. */
+  build: CarBuild;
+  /** World-frame velocity, m/s. */
+  vx: number;
+  vy: number;
+  /** rad/s, clockwise positive (same sense as heading). */
+  angVel: number;
+  /** Signed speed along the heading, m/s (derived from vx/vy). */
   speed: number;
-  /** Palette index of the surface under each wheel this tick. */
-  surfaces: Wheels<number>;
+  /** Inputs after ramping toward the driver's request. */
+  controls: CarInput;
+  fuelKg: number;
+  wheels: Wheels<WheelState>;
   /** All four wheels off legal surface (track limits). */
   offTrack: boolean;
   /** Any wheel on pit lane or pit box: speed limiter applies. */
   inPitLane: boolean;
-  /** Any wheel on the pit box: service + setup menu (card 04). */
+  /** Any wheel on the pit box: service (tyres, fuel) when stopped. */
   inPitBox: boolean;
+  /** Touching a wall this tick. */
+  wallContact: boolean;
+  /** Touching a tyre barrier this tick (invalidates the lap, card 04). */
+  barrierContact: boolean;
 }
 
 /** Things that happened this tick, for the client to react to (log, sound, HUD). */
@@ -49,26 +92,6 @@ export interface WorldState {
   cars: CarState[];
   /** Events from the most recent tick only. */
   events: SimEvent[];
-}
-
-/**
- * Throwaway kinematic tuning (card 01 only; replaced by real physics in card 03).
- * Units: track pixels and seconds.
- */
-export interface PlaceholderKinematics {
-  maxSpeed: number;
-  maxReverseSpeed: number;
-  accel: number;
-  brakeDecel: number;
-  coastDecel: number;
-  /** rad/s at full lock once above fullSteerSpeed */
-  turnRate: number;
-  fullSteerSpeed: number;
-}
-
-export interface CarGeometry {
-  wheelbaseM: number;
-  trackWidthM: number;
 }
 
 export interface Rules {

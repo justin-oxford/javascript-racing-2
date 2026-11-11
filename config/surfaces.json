@@ -1,15 +1,78 @@
 {
-  "_comment": "Mask palette, one entry per surface. Array order = palette index the sim sees. grip is a multiplier used by card 03 physics. legal = counts as on-track for track limits.",
+  "_comment": "Mask palette, one entry per surface. Array order = palette index the sim sees. grip multiplies a wheel's grip; rollingDrag is extra resistance as a fraction of the wheel's load; legal = on track for track limits; blockout = colour drawn when a track has no background art.",
   "surfaces": [
-    { "id": "asphalt",      "color": "#808080", "grip": 1.0,  "legal": true  },
-    { "id": "kerb",         "color": "#FF0000", "grip": 0.9,  "legal": true  },
-    { "id": "grass",        "color": "#00FF00", "grip": 0.45, "legal": false },
-    { "id": "gravel",       "color": "#FFFF00", "grip": 0.35, "legal": false },
-    { "id": "wall",         "color": "#000000", "grip": 1.0,  "legal": false },
-    { "id": "tyreBarrier",  "color": "#FF00FF", "grip": 1.0,  "legal": false },
-    { "id": "pitLane",      "color": "#0000FF", "grip": 1.0,  "legal": true  },
-    { "id": "pitBox",       "color": "#00FFFF", "grip": 1.0,  "legal": true  },
-    { "id": "outOfBounds",  "color": "#FFFFFF", "grip": 1.0,  "legal": false }
+    {
+      "id": "asphalt",
+      "color": "#808080",
+      "blockout": "#5b5e63",
+      "grip": 1,
+      "rollingDrag": 0.015,
+      "legal": true
+    },
+    {
+      "id": "kerb",
+      "color": "#FF0000",
+      "blockout": "#a3545a",
+      "grip": 0.85,
+      "rollingDrag": 0.03,
+      "legal": true
+    },
+    {
+      "id": "grass",
+      "color": "#00FF00",
+      "blockout": "#4f7a4a",
+      "grip": 0.45,
+      "rollingDrag": 0.12,
+      "legal": false
+    },
+    {
+      "id": "gravel",
+      "color": "#FFFF00",
+      "blockout": "#b3a46b",
+      "grip": 0.35,
+      "rollingDrag": 0.45,
+      "legal": false
+    },
+    {
+      "id": "wall",
+      "color": "#000000",
+      "blockout": "#1d1e21",
+      "grip": 1,
+      "rollingDrag": 0.015,
+      "legal": false
+    },
+    {
+      "id": "tyreBarrier",
+      "color": "#FF00FF",
+      "blockout": "#8a4f86",
+      "grip": 1,
+      "rollingDrag": 0.015,
+      "legal": false
+    },
+    {
+      "id": "pitLane",
+      "color": "#0000FF",
+      "blockout": "#4e5d80",
+      "grip": 1,
+      "rollingDrag": 0.015,
+      "legal": true
+    },
+    {
+      "id": "pitBox",
+      "color": "#00FFFF",
+      "blockout": "#4f8087",
+      "grip": 1,
+      "rollingDrag": 0.015,
+      "legal": true
+    },
+    {
+      "id": "outOfBounds",
+      "color": "#FFFFFF",
+      "blockout": "#16171a",
+      "grip": 1,
+      "rollingDrag": 0.015,
+      "legal": false
+    }
   ],
   "offPaletteWarnFraction": 0.01
 }

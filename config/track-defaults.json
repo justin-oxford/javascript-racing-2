@@ -1,0 +1,5 @@
+{
+  "_comment": "Used for a track folder that has a mask but no track.json yet (the blockout stage). 10.8 px/m is the 2560x1440 authoring scale.",
+  "pxPerMeter": 10.8,
+  "files": { "mask": "mask.png", "background": "background.png", "overhead": "overhead.png" }
+}

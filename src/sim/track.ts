@@ -17,22 +17,30 @@ export interface TimingLine {
   b: Point;
 }
 
-/** tracks/<id>/track.json. Coordinates are mask pixels. */
+export type TimingKey = 'startFinish' | 's1' | 's2';
+export const TIMING_KEYS: readonly TimingKey[] = ['startFinish', 's1', 's2'];
+
+/**
+ * tracks/<id>/track.json. Coordinates are mask pixels.
+ * File paths are relative to the track folder; a leading "/" means relative to the site root (public/).
+ */
 export interface TrackJson {
   id: string;
   name: string;
+  /** Test fixture (Indiana): never shown in a player-facing track list. */
+  fixture?: boolean;
   pxPerMeter: number;
   files: {
-    /** Relative to the site base (public/). */
-    background: string;
-    /** Relative to the track folder. */
+    /** What players see. Missing file = blockout (the mask drawn in muted colours). */
+    background?: string;
     mask: string;
-    /** Used when `mask` doesn't exist yet. Relative to the track folder. */
+    /** Used when `mask` doesn't exist yet. */
     maskDraft?: string;
-    /** Things cars drive under. Relative to the track folder. */
+    /** Things cars drive under. */
     overhead?: string;
   };
-  timingLines: { startFinish: TimingLine; s1: TimingLine; s2: TimingLine };
+  /** Placed in the editor; a freshly blocked-out track has none yet. */
+  timingLines: Partial<Record<TimingKey, TimingLine>>;
   /** Closed polyline in driving order. */
   racingLine: Point[];
   /** Ordered grid slots. */
@@ -41,10 +49,101 @@ export interface TrackJson {
   spawn: Pose;
 }
 
+export interface TrackListing {
+  id: string;
+  /** Test fixtures (Indiana) never appear in a player-facing list. */
+  fixture: boolean;
+}
+
+/** The track the game opens on: the first authored (non-fixture) track, else the first fixture. */
+export function defaultTrackId(tracks: readonly TrackListing[]): string | undefined {
+  return (tracks.find((t) => !t.fixture) ?? tracks[0])?.id;
+}
+
+/** Tracks a player may pick from: never fixtures. */
+export function playerTracks(tracks: readonly TrackListing[]): TrackListing[] {
+  return tracks.filter((t) => !t.fixture);
+}
+
+/** What a track folder gives us before its mask is loaded: track.json if it exists, else just an id. */
+export type TrackJsonStub = Partial<TrackJson> & { id: string };
+
+export interface TrackDefaults {
+  pxPerMeter: number;
+  files: { mask: string; background: string; overhead: string };
+}
+
+/** Folder with only a mask (the blockout stage): file names we expect to find there. */
+export function stubTrackJson(id: string, defaults: TrackDefaults): TrackJsonStub {
+  return { id, files: { ...defaults.files } };
+}
+
+/**
+ * Fill in whatever a track.json doesn't have yet. Existing keys are never touched, so a complete
+ * track.json comes back unchanged (the editor's lossless export depends on this).
+ * Default spawn: the middle of the pit box nearest the image centre, else the nearest legal pixel. Heading 0.
+ */
+export function completeTrackJson(stub: TrackJsonStub, mask: TrackMask, surfaces: readonly SurfaceDef[], defaults: TrackDefaults): TrackJson {
+  const json = stub as TrackJson;
+  json.name ??= stub.id;
+  json.pxPerMeter ??= defaults.pxPerMeter;
+  json.files ??= { ...defaults.files };
+  json.timingLines ??= {};
+  json.racingLine ??= [];
+  json.grid ??= [];
+  if (!json.spawn) {
+    const idx = resolveSurfaceIndex(surfaces);
+    const box = nearestToCentre(mask, (s) => s === idx.pitBox);
+    const pick = box ? regionCentroid(mask, box) : nearestToCentre(mask, (s) => surfaces[s]!.legal);
+    json.spawn = pick ? { x: pick.x + 0.5, y: pick.y + 0.5, heading: 0 } : { x: mask.width / 2, y: mask.height / 2, heading: 0 };
+  }
+  return json;
+}
+
+/** Centre of the 4-connected same-surface region containing `seed` (so a car spawns mid-box, not on its edge). */
+function regionCentroid(mask: TrackMask, seed: Point): Point {
+  const { width: w, data } = mask;
+  const want = data[seed.y * w + seed.x]!;
+  const seen = new Uint8Array(data.length);
+  const stack = [seed.y * w + seed.x];
+  let sx = 0, sy = 0, n = 0;
+  while (stack.length) {
+    const i = stack.pop()!;
+    if (seen[i] || data[i] !== want) continue;
+    seen[i] = 1;
+    const x = i % w, y = (i - x) / w;
+    sx += x; sy += y; n++;
+    if (x > 0) stack.push(i - 1);
+    if (x < w - 1) stack.push(i + 1);
+    if (y > 0) stack.push(i - w);
+    if (i + w < data.length) stack.push(i + w);
+  }
+  return { x: Math.round(sx / n), y: Math.round(sy / n) };
+}
+
+function nearestToCentre(mask: TrackMask, want: (s: number) => boolean): Point | undefined {
+  const cx = mask.width / 2, cy = mask.height / 2;
+  let best: Point | undefined, bestD = Infinity;
+  for (let y = 0; y < mask.height; y++)
+    for (let x = 0; x < mask.width; x++) {
+      if (!want(mask.data[y * mask.width + x]!)) continue;
+      const d = (x - cx) ** 2 + (y - cy) ** 2;
+      if (d < bestD) { bestD = d; best = { x, y }; }
+    }
+  return best;
+}
+
 export interface SurfaceDef {
   id: string;
+  /** Mask palette colour. */
   color: string;
+  /** Muted colour used to draw the mask when a track has no background art yet. */
+  blockout: string;
+  /** Multiplies the grip of a wheel on this surface. */
   grip: number;
+  /** Rolling resistance of a wheel on this surface, as a fraction of its load (gravel slows hard). */
+  rollingDrag: number;
+  /** Counts as on track for track limits. */
   legal: boolean;
 }
 
