@@ -3,6 +3,8 @@
 // Tuning is Justin's job; this file's job is to be a good instrument.
 import GUI, { type Controller } from 'lil-gui';
 import type { CarBuild, PhysicsConfig, Rules, SurfaceDef, WorldState } from '../../sim';
+import type { VfxConfig } from '../vfx/triggers';
+import type { VfxQuality } from '../vfx/vfx';
 import { formatTrackJson } from '../editor/format';
 import { catalog } from '../track-loader';
 
@@ -65,11 +67,14 @@ export interface TuningTargets {
   /** The whole surfaces.json object (its other keys are saved back untouched). */
   surfacesConfig: { surfaces: SurfaceDef[] };
   rules: Rules;
+  /** config/vfx.json, live. */
+  vfx: VfxConfig;
+  vfxQuality: { get(): VfxQuality; set(q: VfxQuality): void; clear(): void };
   /** Called when the team/spec/setup changes, to rebuild the player's car. */
   onBuildChange(build: CarBuild): void;
 }
 
-async function saveConfig(name: 'physics' | 'surfaces' | 'rules', value: unknown): Promise<string> {
+async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx', value: unknown): Promise<string> {
   const res = await fetch(`/__tuning/save/${name}`, { method: 'POST', headers: { 'x-tuning-panel': '1' }, body: formatTrackJson(value) });
   return res.ok ? `config/${name}.json` : `${name}: ${await res.text()}`;
 }
@@ -141,6 +146,20 @@ export class TuningPanel {
     }
     s.close();
 
+    const v = gui.addFolder('Tyre VFX (V cycles quality)');
+    const q = { quality: this.t.vfxQuality.get() };
+    v.add(q, 'quality', ['off', 'low', 'high']).onChange((x: VfxQuality) => this.t.vfxQuality.set(x)).listen();
+    v.add({ clear: () => this.t.vfxQuality.clear() }, 'clear').name('Clear marks + rubber (green track)');
+    for (const [section, values] of Object.entries(this.t.vfx)) {
+      if (typeof values === 'number') { this.slider(v, this.t.vfx, section, `vfx.${section}`); continue; }
+      if (typeof values !== 'object') continue;
+      const sub = v.addFolder(section);
+      for (const key of Object.keys(values as object)) this.slider(sub, values as object, key, `vfx.${section}.${key}`);
+      sub.close();
+    }
+    v.close();
+    setInterval(() => (q.quality = this.t.vfxQuality.get()), 500);
+
     const io = gui.addFolder('Save / export');
     const status = { msg: '' };
     const show = (m: string) => {
@@ -148,7 +167,7 @@ export class TuningPanel {
       statusCtl.updateDisplay();
     };
     io.add({
-      save: async () => show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules)])).join(', ')),
+      save: async () => show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx)])).join(', ')),
     }, 'save').name('Save to /config');
     io.add({ copy: () => void navigator.clipboard.writeText(formatTrackJson(physics)).then(() => show('physics.json copied')) }, 'copy').name('Copy physics JSON');
     io.add({ revert: () => this.revert() && show('Reverted to last saved values') }, 'revert').name('Revert unsaved changes');

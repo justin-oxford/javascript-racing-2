@@ -4,6 +4,7 @@ import type { CarInput, InputSource } from '../../sim';
 export type KeyboardAction =
   | { type: 'reset' }
   | { type: 'toggleDebug' }
+  | { type: 'cycleVfx' }
   | { type: 'gridSlot'; slot: number };
 
 // v0.16 bindings, by physical key (e.code), so they work on any keyboard layout.
@@ -14,6 +15,7 @@ const LEFT = ['KeyA', 'ArrowLeft'];
 const RIGHT = ['KeyD', 'ArrowRight'];
 const RESET = 'KeyR';
 const DEBUG = 'KeyK';
+const VFX = 'KeyV';
 
 const DRIVING_KEYS = new Set([...THROTTLE, ...BRAKE, ...LEFT, ...RIGHT]);
 
@@ -50,6 +52,7 @@ export class KeyboardInput implements InputSource {
     let action: KeyboardAction | undefined;
     if (code === RESET) action = { type: 'reset' };
     else if (code === DEBUG) action = { type: 'toggleDebug' };
+    else if (code === VFX) action = { type: 'cycleVfx' };
     else if (/^(Digit|Numpad)[0-9]$/.test(code)) action = { type: 'gridSlot', slot: Number(code.slice(-1)) };
     if (action) for (const l of this.listeners) l(action);
   }

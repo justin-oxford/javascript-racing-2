@@ -1,5 +1,6 @@
 import { createWorld, resetCar, setCarBuild, step, TICK_HZ, type InputSource, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
+import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
 import { startLoop } from './loop';
 import { Renderer, type CarLook } from './render';
@@ -17,6 +18,8 @@ import {
   surfacesConfig,
   type MaskState,
 } from './track-loader';
+import vfxConfig from '../../config/vfx.json';
+import { Vfx } from './vfx/vfx';
 import './style.css';
 
 async function main(): Promise<void> {
@@ -35,6 +38,10 @@ async function main(): Promise<void> {
 
   const keyboard = new KeyboardInput();
   const drivers: InputSource[] = [keyboard];
+  // Dev: ?cars=N adds N-1 donut-driving test cars (VFX/sound load testing until AI lands).
+  const extra = import.meta.env.DEV ? Math.min(19, Math.max(0, Number(new URLSearchParams(location.search).get('cars') ?? 1) - 1)) : 0;
+  for (let i = 1; i <= extra; i++) drivers.push(new DonutInput(i));
+  const vfx = new Vfx(mask.track.mask.width, mask.track.mask.height, vfxConfig);
 
   let prev: WorldState = createWorld(ctx, drivers.length);
   let curr: WorldState = prev;
@@ -47,6 +54,8 @@ async function main(): Promise<void> {
       prev = curr;
     } else if (a.type === 'toggleDebug') {
       debug = !debug;
+    } else if (a.type === 'cycleVfx') {
+      console.info(`[vfx] quality: ${vfx.cycleQuality()}`);
     }
     // gridSlot: no grid until card 06.
   });
@@ -60,6 +69,8 @@ async function main(): Promise<void> {
         physics,
         surfacesConfig,
         rules,
+        vfx: vfxConfig,
+        vfxQuality: { get: () => vfx.quality, set: (q) => vfx.setQuality(q), clear: () => vfx.clear() },
         onBuildChange: (build) => {
           curr = setCarBuild(curr, 0, build);
           prev = setCarBuild(prev, 0, build);
@@ -76,6 +87,20 @@ async function main(): Promise<void> {
         ctx: () => ctx,
         editor,
         tuning,
+        vfx,
+        /** Run n full frames (sim tick + VFX + draw) synchronously; returns ms per frame. */
+        benchFrame: (n = 300) => {
+          const t0 = performance.now();
+          for (let k = 0; k < n; k++) {
+            const inputs = drivers.map((d) => d.read(curr.tick));
+            prev = curr;
+            curr = step(curr, inputs, ctx);
+            vfx.onTick(prev, curr, ctx.track, physics);
+            vfx.update(1 / 60);
+            drawFrame(1, 1 / 60);
+          }
+          return { msPerFrame: (performance.now() - t0) / n, particles: vfx.particles, dropped: vfx.dropped, cars: curr.cars.length };
+        },
       },
     });
   }
@@ -117,6 +142,7 @@ async function main(): Promise<void> {
       const inputs = drivers.map((d) => d.read(curr.tick));
       prev = curr;
       curr = step(curr, inputs, ctx);
+      vfx.onTick(prev, curr, ctx.track, physics);
       for (const e of curr.events) {
         if (e.type === 'outOfBounds')
           console.warn(`[mask bug] car ${e.car} reached out-of-bounds at (${e.x.toFixed(1)}, ${e.y.toFixed(1)}) px in ${mask.file}; reset to spawn`);
@@ -124,6 +150,13 @@ async function main(): Promise<void> {
     },
     render(alpha, frameSeconds) {
       if (frameSeconds > 0) fps += (1 / frameSeconds - fps) * 0.05;
+      vfx.update(frameSeconds);
+      drawFrame(alpha, frameSeconds);
+    },
+  });
+
+  function drawFrame(alpha: number, _frameSeconds: number): void {
+    {
       const lw = renderer.trackPxPerCssPx();
       const car = curr.cars[0];
       const text = debug && car
@@ -131,14 +164,18 @@ async function main(): Promise<void> {
           `kph ${(car.speed * 3.6).toFixed(0)}${car.inPitLane ? '  PIT LIMITER' : ''}${car.inPitBox ? '  PIT BOX' : ''}${car.offTrack ? '  OFF TRACK' : ''}${car.wallContact ? '  WALL' : ''}\n` +
           `FL ${surfaceName(car, 0)}  FR ${surfaceName(car, 1)}\n` +
           `RL ${surfaceName(car, 2)}  RR ${surfaceName(car, 3)}\n` +
-          `mask ${mask.file}  walls ${mask.walls.length}${hasArt ? '' : '  (blockout: no background art)'}   T = tuning`
+          `mask ${mask.file}  walls ${mask.walls.length}${hasArt ? '' : '  (blockout: no background art)'}
+` +
+          `vfx ${vfx.quality} (V)  particles ${vfx.particles}  cars ${curr.cars.length}   T = tuning`
         : undefined;
       renderer.draw(prev, curr, alpha, look, {
         underCars: (c) => {
+          vfx.drawUnder(c, renderer.trackWidth, renderer.trackHeight);
           if (editor) drawMask(c, mask.canvas, editor.maskOpacity);
           else if (debug) drawMask(c, mask.canvas, 0.5);
         },
         overCars: (c) => {
+          vfx.drawOver(c, json.pxPerMeter);
           if (overhead) c.drawImage(overhead, 0, 0, renderer.trackWidth, renderer.trackHeight);
         },
         overlay: (c) => {
@@ -152,8 +189,9 @@ async function main(): Promise<void> {
         text,
       });
       tuning?.update(curr, surfaces, physics);
-    },
-  });
+    }
+  }
+  document.getElementById('loading')?.remove();
 }
 
 main().catch((err: unknown) => {

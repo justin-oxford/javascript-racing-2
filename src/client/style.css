@@ -71,3 +71,5 @@ body {
 .telemetry th:nth-child(2), .telemetry td:nth-child(2) { text-align: left; }
 .telemetry td.slide { color: #ff6b6b; }
 .telemetry .flags { color: #ffd400; }
+
+#loading { position: fixed; inset: 0; display: grid; place-items: center; margin: 0; color: #888; font: 14px system-ui, sans-serif; }
