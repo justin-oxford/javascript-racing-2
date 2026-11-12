@@ -40,6 +40,8 @@ export interface PhysicsConfig {
    * relative to the front axle's travel, blending in between assistFromKph and assistFullKph.
    */
   steering: { lockDeg: number; lockFalloffKph: number; assist: boolean; assistPeakPct: number; assistFromKph: number; assistFullKph: number };
+  /** Traction assist: drive limited so a driven tyre's combined slip stays at assistPeakPct of its peak. */
+  traction: { assist: boolean; assistPeakPct: number };
   /** Ramp rates, full scale per second. */
   input: { steerRate: number; steerReturnRate: number; throttleRate: number; brakeRate: number };
   wear: { throttlePerSec: number; throttleLowSpeedKph: number; brakePerSec: number; cornerPerSec: number; refSpeedKph: number };

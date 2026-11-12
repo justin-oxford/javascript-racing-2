@@ -21,6 +21,7 @@
   "aero": { "dragCoef": 0.9, "downforceCoef": 0.0003 },
   "tyres": { "baseGrip": 1.6, "lateralGrip": 1, "lateralStiffness": 0.6, "frontGrip": 1, "rearGrip": 1, "peakSlipDeg": 7, "falloff": 0.88, "falloffSlip": 3, "lowSpeedMps": 3 },
   "steering": { "lockDeg": 20, "lockFalloffKph": 180, "assist": true, "assistPeakPct": 1, "assistFromKph": 36, "assistFullKph": 72 },
+  "traction": { "assist": false, "assistPeakPct": 0.95 },
   "input": { "steerRate": 5, "steerReturnRate": 8, "throttleRate": 6, "brakeRate": 10 },
   "wear": {
     "throttlePerSec": 0.005,

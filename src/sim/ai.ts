@@ -424,7 +424,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   st.stuckTicks = !waitingInBox && ((speed < 1.5 && car.controls.throttle > 0.1) || backwards) ? st.stuckTicks + 1 : 0;
   if (st.stuckTicks > cfg.recovery.stuckSec / TICK_DT) {
     st.stuckTicks = 0;
-    st.recoverTicks = Math.round(cfg.recovery.reverseSec / TICK_DT);
+    // Pointing well away from the line (nose in a wall): reverse longer, to have room to turn out.
+    const off = Math.abs(wrap(pathHeading - car.heading));
+    st.recoverTicks = Math.round((cfg.recovery.reverseSec * (1 + off / (Math.PI / 2))) / TICK_DT);
     st.stuckEvents++;
     return { input: { throttle: 0, brake: 1, steer: 0 }, state: st };
   }
@@ -496,8 +498,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     // computed once for its build and preset, then scaled by what's changed since: tyre wear (speed goes
     // with the square root of grip) and how much of its corner speed it has learned to trust.
     const prof = carProfile(line, car, ctx, preset);
-    // A late braker (mistake) reads the target 12 m on; attacking alongside on the inside, 8 m on.
-    const ahead = st.mistake?.kind === 'lateBrake' ? 6 : st.attack ? 4 : 1;
+    // A late braker (mistake) reads the target 12 m on. (Attacking alongside no longer brakes later: on
+    // lap one the whole field is alongside someone, and they all went wide into turn 1 together.)
+    const ahead = st.mistake?.kind === 'lateBrake' ? 6 : 1;
     allowed = prof[idx(best + ahead)]! * Math.sqrt(Math.max(0.05, tyre)) * st.trust;
     for (let q = 1, look = Math.ceil((speed * 3) / SPACING_M); q <= look; q++) if (prof[idx(best + q)]! < speed * 0.9) { brakingSoon = true; break; }
   } else {
@@ -535,7 +538,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   if (pit && myBox && !st.serviced && stopQ - best < 20 && best <= stopQ + 2) wantOffset = lateral(stopQ, myBox.x, myBox.y);
   let alongside = 0; // a car next to us: -1 left, +1 right
   let attack = false;
-  const gap = 6 + phys.car.lengthM;
+  // Following gap grows with speed (a time headway), so a queue through a slow hairpin can run close
+  // instead of everyone braking to a stop to keep a fixed 12 m.
+  const gap = phys.car.lengthM + 1 + 0.35 * speed;
   // Only start (or keep) a pass where the next ~40 m is fairly straight, not side by side into a braking zone.
   let straightAhead = true;
   for (let q = 0; q < 10; q++) if (Math.abs(path.k[idx(best + q)]!) > 0.03) straightAhead = false;
@@ -578,11 +583,26 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     const hold = tucked ? phys.car.lengthM + 1 : passSide === undefined ? gap : Math.abs(side) < 2.2 ? phys.car.lengthM + 1.5 : -Infinity;
     // Pulling out from behind a slow or stopped car: creep (it can't steer out of line standing still).
     const creep = passSide !== undefined && ahead > phys.car.lengthM + 0.05 ? clamp(2 + (ahead - phys.car.lengthM - 0.5) * 2, 2, 4) : 0;
-    allowed = Math.min(allowed, Math.max(creep, otherFwd + (ahead - hold) * 0.8));
+    // Too close: ease off toward the car ahead's speed, but don't stop dead just for being a bit close.
+    const floor = ahead > phys.car.lengthM + 0.5 ? Math.max(0, otherFwd) * 0.7 : 0;
+    allowed = Math.min(allowed, Math.max(creep, floor, otherFwd + (ahead - hold) * 0.8));
   }
   st.attack = attack;
-  if (alongside && Math.sign(wantOffset - st.offset) === alongside) wantOffset = st.offset;
-  const maxR = Math.max(0, path.right[best]! - 1.5), maxL = Math.max(0, path.left[best]! - 1.5);
+  // Room for an offset lane over the road AHEAD (the next ~2 s, at least 40 m), not just here: a car
+  // carrying a lane offset into a hairpin runs off the outside. (Half a car width + a little margin.)
+  let maxR = Math.max(0, path.right[best]! - 1.5), maxL = Math.max(0, path.left[best]! - 1.5);
+  for (let q = 1, look = Math.ceil(Math.max(40, speed * 2) / SPACING_M); q <= look; q++) {
+    const j = idx(best + q);
+    maxR = Math.min(maxR, Math.max(0, path.right[j]! - 1.5));
+    maxL = Math.min(maxL, Math.max(0, path.left[j]! - 1.5));
+  }
+  const needIn = st.offset > maxR + 0.3 ? -1 : st.offset < -maxL - 0.3 ? 1 : 0; // must move back toward the line
+  if (alongside && Math.sign(wantOffset - st.offset) === alongside) {
+    // Someone's beside us on the side we'd move to. If the road ahead runs out on our side, yield: drop
+    // back and tuck in behind instead of being squeezed off. Otherwise hold our lane.
+    if (needIn === alongside) allowed = Math.min(allowed, Math.max(0, speed - 3));
+    else wantOffset = st.offset;
+  }
   // Moving over to pass is quicker than drifting back to the line.
   const latRate = st.attack || Math.abs(wantOffset) >= preset.overtakeOffsetM - 0.01 ? 5 : 3;
   st.offset += clamp(clamp(wantOffset, -maxL, maxR) - st.offset, -latRate * TICK_DT, latRate * TICK_DT);
@@ -615,6 +635,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   st.trust = runningOut < 1.6 ? Math.max(0.85, st.trust - 0.0008) : Math.min(1, st.trust + 0.00002);
   const saturated = runningOut < 0.9;
   steer = clamp(steer, -1, 1);
+  // Slow and pointing well off the line (after a spin or reversing out): full lock toward it.
+  if (speed < 8 && Math.abs(err) > 0.8) steer = Math.sign(err);
 
   // Throttle / brake toward the allowed speed.
   let throttle = 0, brake = 0;

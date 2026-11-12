@@ -257,9 +257,22 @@ export function speedProfile(x: ArrayLike<number>, y: ArrayLike<number>, physics
   const kAero = physics.aero.downforceCoef * stats.downforce;
   const vTop = (physics.engine.topSpeedKph / 3.6) * stats.topSpeed;
   const latMax = (v: number) => muLat * G * (1 + kAero * v * v);
+  // Steering lock limits corner speed too: the front wheels must reach about wheelbase x curvature
+  // (Ackermann) within the lock available at that speed, which shrinks with speed (lockFalloffKph).
+  // A car gets round a little tighter than pure geometry (tyre slip, some rotation): half a peak slip
+  // angle of allowance. Without this the AI arrives at grip speed and simply can't turn tight enough.
+  // Floor of 6 m/s: tighter than the lock allows at all, it can still crawl round on slip and rotation.
+  const lockRad = (physics.steering.lockDeg * Math.PI) / 180;
+  const slipAllow = ((t.peakSlipDeg * Math.PI) / 180) * 0.5;
+  const lockV = (kk: number) => {
+    const need = c.wheelbaseM * Math.abs(kk) - slipAllow;
+    if (need <= 1e-6) return vTop;
+    return Math.max(6, need >= lockRad ? 0 : (physics.steering.lockFalloffKph / 3.6) * (lockRad / need - 1));
+  };
   const corner = (kk: number) => {
     const den = Math.abs(kk) - muLat * G * kAero;
-    return (den <= 0 ? vTop : Math.min(vTop, Math.sqrt((muLat * G) / den))) * opt.cornerMargin;
+    const grip = den <= 0 ? vTop : Math.min(vTop, Math.sqrt((muLat * G) / den));
+    return Math.min(grip, lockV(kk)) * opt.cornerMargin;
   };
   const brakeF = physics.brakes.maxForceN * stats.brakes, bias = physics.brakes.frontBias;
   const brakeA = (v: number) => {

@@ -1,6 +1,6 @@
 // Handling diagnostic (card 03b): N AI cars x L laps on the default track, headless, live config.
 // Usage: npm run handling-diag -- [--cars 10] [--laps 10] [--seed 1] [--corners] [--physics file.json] [--line seed|generated]
-// --clean: no AI mistakes or steering noise. --team <id>: every car from that team.
+// --where: where cars go off track and hit walls. --clean: no AI mistakes or steering noise. --team <id>: every car from that team.
 // --physics: run with another physics.json (A/B against live tuning). --line seed: drive racingLineSeed instead.
 // Reports, while cornering (|lateral accel| > 0.3 g, > 10 m/s):
 //   - per axle: % of cornering time the OUTSIDE (loaded) wheel is past its grip limit
@@ -58,6 +58,8 @@ let world: WorldState = createWorld(ctx, builds);
 const drivers = builds.map((_, i) => aiInputSource(i, () => ({ world, ctx, line }), () => preset, () => cfg, seed * 1000 + i));
 
 let cornerTicks = 0, frontPast = 0, rearPast = 0, bothPast = 0, wheelTicks = 0;
+const offAt = new Map<string, number>(), wallAt = new Map<string, number>();
+const cell = (c: { x: number; y: number }) => `${Math.round((c.x * ppm) / 100) * 100},${Math.round((c.y * ppm) / 100) * 100}`;
 let markSlide = 0, markLock = 0, markSpin = 0, walls = 0, lockFront = 0;
 const perCorner = corners.map(() => ({ front: 0, rear: 0, same: 0, neither: 0 }));
 const pass = builds.map(() => ({ corner: -1, first: '' as '' | 'front' | 'rear' | 'same' }));
@@ -73,7 +75,8 @@ for (let tick = 0; tick < 60 * 60 * 20; tick++) {
   const prev = world;
   world = step(world, drivers.map((d) => d.read(world.tick)), ctx);
   world.cars.forEach((c, i) => {
-    if (c.wallContact && !prev.cars[i]!.wallContact) walls++;
+    if (c.wallContact && !prev.cars[i]!.wallContact) { walls++; wallAt.set(cell(c), (wallAt.get(cell(c)) ?? 0) + 1); }
+    if (c.offTrack && !prev.cars[i]!.offTrack) offAt.set(cell(c), (offAt.get(cell(c)) ?? 0) + 1);
     const vFwd = c.speed, aRight = vFwd * c.angVel;
     // Which axle is past its limit (outside wheel: the loaded one).
     const outF = aRight > 0 ? 0 : 1, outR = aRight > 0 ? 2 : 3;
@@ -112,6 +115,12 @@ const passes = tot.front + tot.rear + tot.same + tot.neither;
 console.log(`first axle past the limit per corner pass:      front ${pct(tot.front, passes)}   rear ${pct(tot.rear, passes)}   same tick ${pct(tot.same, passes)}   neither ${pct(tot.neither, passes)}   (${passes} passes)`);
 console.log(`skid-mark wheel-ticks: ${pct(markSlide + markLock + markSpin, wheelTicks)} of all  (slide ${markSlide}, lockup ${markLock} [front ${lockFront} / rear ${markLock - lockFront}], wheelspin ${markSpin}; ${((markSlide + markLock + markSpin) / Math.max(1, totalLaps)).toFixed(0)} per car-lap)`);
 console.log(`pace: best laps ${best.length ? `${best[0]!.toFixed(2)}-${best[best.length - 1]!.toFixed(2)} s` : '-'}; wall hits ${walls}; stuck events ${stuck}; laps ${totalLaps}, invalid ${invalidLaps}`);
+if (args.includes('--where')) {
+  const top = (m: Map<string, number>) => [...m].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `(${k}) ${v}`).join('  ');
+  console.log(`
+where cars go off (track px, 100 px cells): ${top(offAt)}`);
+  console.log(`where cars hit walls: ${top(wallAt)}`);
+}
 if (args.includes('--corners')) {
   console.log('\ncorner  dir  min R   centre px        front  rear  same  neither');
   corners.forEach((c, k) => { const p = perCorner[k]!; console.log(`${String(k + 1).padStart(6)}  ${c.dir}   ${c.minR.toFixed(0).padStart(4)} m  ${c.at.padEnd(15)} ${String(p.front).padStart(6)} ${String(p.rear).padStart(5)} ${String(p.same).padStart(5)} ${String(p.neither).padStart(8)}`); });

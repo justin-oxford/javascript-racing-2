@@ -328,6 +328,11 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
     const t = cfg.tyres;
     const alpha = Math.atan2(Math.abs(vLat), Math.max(Math.abs(vLong), t.lowSpeedMps));
     const sLat = alpha / ((t.peakSlipDeg * Math.PI) / 180);
+    // TRACTION ASSIST (keyboard throttle is all or nothing): a driven wheel gets no more drive than keeps
+    // its combined slip at assistPeakPct of the peak, given how hard it's already cornering. Like the
+    // steering assist, it can be switched off (a gamepad later).
+    const tr = cfg.traction;
+    if (tr.assist && w >= 2 && drive > 0 && long > 0 && cap > 0) long = Math.min(long, cap * Math.sqrt(Math.max(0, tr.assistPeakPct ** 2 - sLat * sLat)));
     const sLong = cap > 0 ? Math.abs(long) / cap : long ? Infinity : 0;
     // A wheel with no grip at all (lifted, worn through, zero-grip surface) gives no force: no 0 x infinity.
     const usage = cap > 0 ? Math.hypot(sLat, sLong) : 0;
