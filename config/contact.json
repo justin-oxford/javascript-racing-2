@@ -3,5 +3,7 @@
   "carFriction": 1,
   "carRestitution": 0.1,
   "bodyFriction": 0.3,
-  "bodyRestitution": 0.1
+  "bodyRestitution": 0.1,
+  "_comment_pits": "pitLaneGhosting: cars both in the pit lane pass through each other (no contact), so a car pulling into or out of its box can't tangle with one parked next door or driving by.",
+  "pitLaneGhosting": true
 }

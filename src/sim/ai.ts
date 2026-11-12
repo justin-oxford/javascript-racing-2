@@ -30,6 +30,8 @@ export interface AiConfig {
   recovery: { stuckSec: number; reverseSec: number; backwardsDeg: number };
   /** fuelLaps: pit with this many laps of fuel left (races, practice); qualiFuelLaps: the same in qualifying (light runs). */
   pits?: { fuelLaps: number; qualiFuelLaps?: number; minWear: number; pitSpeedMarginKph: number };
+  /** Pit lane driving: fastLaneM = offset from the pit path away from the boxes when driving through; boxApproachM = distance before its box to pull across into it; laneGapM = sideways clearance (beyond a car width) under which a car ahead is "in our lane"; releaseGapM = how far back up the lane a car must be clear before pulling out of the box; latRateMps = how fast it moves across in the lane. */
+  pitLane?: { fastLaneM: number; boxApproachM: number; laneGapM: number; releaseGapM: number; latRateMps: number };
   /** Lift and coast: coast (no throttle, no brake) for drops up to coastMaxDropMps; lift liftBeforeBrakeSec before braking. */
   coast?: { coastMaxDropMps: number; liftBeforeBrakeSec: number; coastMinKph?: number };
   /** Side by side: lateral gap kept to a car alongside, beyond the cars' width (3-wide allowed if it fits). */
@@ -470,9 +472,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     const err = wrap(pathHeading - car.heading);
     return { input: { throttle: 0, brake: 1, steer: -Math.sign(err || 1) }, state: st }; // reversing: steer the tail round
   }
-  // Which box to stop in: its own in a race, otherwise the first (practice: any box services).
-  // Qualifying: car i uses box i (round-robin), so a field all running light doesn't queue for box 0.
-  const myBox = pit ? pit.boxStops[Math.max(0, world.race?.cars[i]?.box ?? (world.quali ? i % pit.boxStops.length : 0))] : undefined;
+  // Which box to stop in: its own in a race, otherwise box i (round-robin; any box services outside a
+  // race), so cars don't queue for one box.
+  const myBox = pit ? pit.boxStops[Math.max(0, world.race?.cars[i]?.box ?? i % pit.boxStops.length)] : undefined;
   const stopQ = myBox?.q ?? pit?.box ?? 0;
   const waitingInBox = !!pit && !st.serviced && Math.abs(best - stopQ) <= 2;
   st.stuckTicks = !waitingInBox && ((speed < 1.5 && car.controls.throttle > 0.1) || backwards) ? st.stuckTicks + 1 : 0;
@@ -606,14 +608,14 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // hit within ~2 s. Pass on the side they're not on if there's room; otherwise follow at a gap
   // (not "their speed minus a bit", which chains slowdowns around the whole field). No passing in pits.
   let wantOffset = !pit && st.mistake?.kind === 'wide' ? Math.sign(path.k[best]!) * -1.5 : 0;
-  // Coming up to its box: move across so the car sits in it (boxes can be beside the lane centre).
-  if (pit && myBox && !st.serviced && stopQ - best < 20 && best <= stopQ + 2) wantOffset = lateral(stopQ, myBox.x, myBox.y);
-  // Qualifying: driving through (serviced, or leaving its box) past cars parked in their boxes, keep to
-  // the fast lane, away from the box side, so a parked car isn't in the way.
-  if (world.quali && pit && st.serviced && best >= pit.laneFrom && best <= pit.laneTo && pit.boxStops[0]) {
+  // In the pit lane, keep to the FAST LANE (away from the box side) so cars parked in their boxes aren't
+  // in the way; pull across into its own box only when nearly there (pitLane.boxApproachM).
+  const pl = { fastLaneM: 1.5, boxApproachM: 24, laneGapM: 0.3, releaseGapM: 20, latRateMps: 5, ...cfg.pitLane };
+  if (pit && best >= pit.laneFrom - 3 && best <= pit.laneTo && pit.boxStops[0]) {
     const b0 = pit.boxStops[0];
-    wantOffset = -Math.sign(lateral(b0.q, b0.x, b0.y)) * 1.5;
+    wantOffset = -Math.sign(lateral(b0.q, b0.x, b0.y) || 1) * pl.fastLaneM;
   }
+  if (pit && myBox && !st.serviced && (stopQ - best) * SPACING_M < pl.boxApproachM && best <= stopQ + 2) wantOffset = lateral(stopQ, myBox.x, myBox.y);
   let alongside = 0; // a car next to us: -1 left, +1 right
   let attack = false;
   // Following gap grows with speed (a time headway), so a queue through a slow hairpin can run close
@@ -639,14 +641,44 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   let nearL = Infinity, nearR = Infinity;
   /** Whether the nearest car on that side has the right of way (it's ahead, or level and a lower number). */
   let theirsL = false, theirsR = false;
-  others.forEach((o, oi) => {
+  // (Not in the pit lane: that's single file, below; cars parked in their boxes beside it aren't "alongside".)
+  if (!pit) others.forEach((o, oi) => {
     if (!o || Math.abs(o.ahead) >= phys.car.lengthM + 1) return;
     const theirs = o.ahead > 0.5 || (Math.abs(o.ahead) <= 0.5 && oi < i);
     if (o.side < 0) { if (-o.side < nearL) { nearL = -o.side; theirsL = theirs; } }
     else if (o.side < nearR) { nearR = o.side; theirsR = theirs; }
   });
   if (nearL < 4 || nearR < 4) alongside = nearR <= nearL ? 1 : -1;
-  for (const o of others) {
+  if (pit) {
+    // PIT LANE: single file, no passing. Follow only a car actually in our lane (overlapping sideways);
+    // cars in their boxes beside the fast lane, or pulling in/out of a box clear of us, don't count.
+    const inLane = phys.car.widthM + pl.laneGapM;
+    // A car standing in its box isn't traffic: it'll stay put, and pit-lane cars ghost through each
+    // other (contact.json pitLaneGhosting), so cutting across a neighbour's box to reach ours is fine.
+    const b0 = pit.boxStops[0];
+    const boxLat = b0 ? lateral(b0.q, b0.x, b0.y) : 0;
+    const parked = (oi: number) => {
+      const c = world.cars[oi]!;
+      return !!b0 && Math.hypot(c.vx, c.vy) < 0.5 && (c.servicing || Math.abs(lateral(best, c.x, c.y) - boxLat) < 1);
+    };
+    for (const [oi, o] of others.entries()) {
+      if (!o || o.ahead <= 0 || Math.abs(o.side) >= inLane || parked(oi)) continue;
+      allowed = Math.min(allowed, Math.max(0, o.along + (o.ahead - gap) * 0.8));
+    }
+    // Leaving its box: wait for a gap. Hold while a moving car in the lane is coming up from behind or
+    // is level with us (pitLane.releaseGapM behind to a car length ahead).
+    if (st.serviced && myBox && Math.abs(best - stopQ) <= 3 && speed < 3) {
+      const boxSide = Math.sign(lateral(stopQ, myBox.x, myBox.y) || 1);
+      const traffic = world.cars.some((c, oi) => {
+        const o = others[oi];
+        if (!o || !Number.isFinite(o.ahead) || o.ahead < -pl.releaseGapM || o.ahead > phys.car.lengthM + 1) return false;
+        const moving = Math.hypot(c.vx, c.vy) > 2;
+        return moving && (lateral(best, c.x, c.y) - lateral(stopQ, myBox.x, myBox.y)) * boxSide < -(phys.car.widthM + 0.2);
+      });
+      if (traffic) allowed = 0;
+    }
+  }
+  for (const o of pit ? [] : others) {
     if (!o) continue;
     const { ahead, side, along: otherFwd } = o;
     const closing = speed - otherFwd;
@@ -702,7 +734,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     || (needIn > 0 && nearR < 4 && theirsR) || (needIn < 0 && nearL < 4 && theirsL);
   if (squeezed) allowed = Math.min(allowed, Math.max(0, speed - 2));
   // Moving over to pass is quicker than drifting back to the line.
-  const latRate = st.attack || Math.abs(wantOffset) >= preset.overtakeOffsetM - 0.01 ? 5 : 3;
+  // (Into / out of a pit box: the quick one too, so the move across happens late, past the boxes before.)
+  const latRate = st.attack || Math.abs(wantOffset) >= preset.overtakeOffsetM - 0.01 || pit ? pl.latRateMps : 3;
   st.offset += clamp(clamp(wantOffset, -maxL, maxR) - st.offset, -latRate * TICK_DT, latRate * TICK_DT);
 
   // 2. STEER: pure pursuit on a target point ahead (further at speed), shifted by the offset.

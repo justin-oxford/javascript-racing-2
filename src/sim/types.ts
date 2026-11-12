@@ -127,6 +127,8 @@ export interface ContactConfig {
   /** Car body against walls: mixed with the wall's own friction/restitution (physics.json walls). */
   bodyFriction: number;
   bodyRestitution: number;
+  /** Cars both in the pit lane don't collide (absent = true). */
+  pitLaneGhosting?: boolean;
 }
 
 export const NEUTRAL_INPUT: Readonly<CarInput> = Object.freeze({ throttle: 0, brake: 0, steer: 0 });

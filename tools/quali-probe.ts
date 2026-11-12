@@ -21,7 +21,7 @@ let w: WorldState = createQualiWorld(ctx, builds, Number(opt('seed', '1')), pose
 const w0Fuel = w.cars[0]!.fuelKg;
 const ai = builds.map((_, i) => aiInputSource(i, () => ({ world: w, ctx, line }), () => cfg.presets[cfg.defaultPreset]!, () => cfg, 1000 + i));
 const leftPits = builds.map(() => -1);
-let pitContact = 0, flagAt = -1, dry = 0;
+let overlap = 0, pitContact = 0, flagAt = -1, dry = 0;
 const stops = builds.map(() => 0), wasServicing = builds.map(() => false), burned = builds.map(() => 0);
 const prevFuel = w.cars.map((c) => c.fuelKg);
 for (let t = 0; t < 60 * (ctx.race.qualiSec + 120) && w.quali!.phase !== 'results'; t++) {
@@ -29,6 +29,8 @@ for (let t = 0; t < 60 * (ctx.race.qualiSec + 120) && w.quali!.phase !== 'result
   w.cars.forEach((c, i) => {
     if (leftPits[i]! < 0 && !c.inPitLane && w.tick > 5) leftPits[i] = w.tick / 60;
     if (c.inPitLane && c.carContact) pitContact++;
+    // Ghosted overlap: two pit-lane cars closer than a car width (they'd be touching side by side or nose to tail).
+    for (let j = i + 1; j < w.cars.length; j++) { const o = w.cars[j]!; if (c.inPitLane && o.inPitLane && Math.hypot(c.x - o.x, c.y - o.y) < 2) overlap++; }
     if (c.servicing && !wasServicing[i]) stops[i]!++;
     wasServicing[i] = c.servicing;
     burned[i]! += Math.max(0, prevFuel[i]! - c.fuelKg);
@@ -38,7 +40,7 @@ for (let t = 0; t < 60 * (ctx.race.qualiSec + 120) && w.quali!.phase !== 'result
   if (flagAt < 0 && w.quali!.phase === 'flag') flagAt = w.tick / 60;
 }
 const q = w.quali!;
-console.log(`session ${ctx.race.qualiSec} s: flag at ${flagAt.toFixed(1)} s, results at ${(w.tick / 60).toFixed(1)} s (${q.phase}); pit-lane contact ticks ${pitContact}; start fuel ${w0Fuel.toFixed(1)} kg; car-ticks out of fuel ${dry}`);
+console.log(`session ${ctx.race.qualiSec} s: flag at ${flagAt.toFixed(1)} s, results at ${(w.tick / 60).toFixed(1)} s (${q.phase}); pit-lane contact ticks ${pitContact}, overlap ticks ${overlap}; start fuel ${w0Fuel.toFixed(1)} kg; car-ticks out of fuel ${dry}`);
 console.log('pos car team         left pits  laps  best      gap   stuck  stops  kg/lap');
 for (const r of qualiResults(q)) {
   const team = catalog.teams.find((t) => t.id === w.cars[r.car]!.build.team)!.name;

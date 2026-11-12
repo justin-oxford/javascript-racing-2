@@ -29,6 +29,8 @@ export interface PhysicsCache {
   wallMaterial: { restitution: number; friction: number };
   /** Car-to-car material for this step (contact.json), applied per contact in pre-solve. */
   carCar: { friction: number; restitution: number };
+  /** Per car body: in the pit lane with ghosting on, so it passes through other such cars. */
+  ghost: boolean[];
 }
 
 export function createPhysicsCache(): PhysicsCache {
@@ -40,11 +42,18 @@ export function createPhysicsCache(): PhysicsCache {
     walls_: undefined,
     wallMaterial: { restitution: NaN, friction: NaN },
     carCar: { friction: 0, restitution: 0 },
+    ghost: [],
   };
   // Car against car: contact.json's own values, not a mix of the two bodies' materials. (A car body's
   // material still mixes with a wall's, so car-to-car tuning never changes how walls feel.)
   cache.world.on('pre-solve', (contact) => {
-    if (!contact.getFixtureA().getBody().isDynamic() || !contact.getFixtureB().getBody().isDynamic()) return;
+    const a = contact.getFixtureA().getBody(), b = contact.getFixtureB().getBody();
+    if (!a.isDynamic() || !b.isDynamic()) return;
+    // Pit lane ghosting: two cars both in the pit lane don't touch.
+    if (cache.ghost[cache.cars.indexOf(a)] && cache.ghost[cache.cars.indexOf(b)]) {
+      contact.setEnabled(false);
+      return;
+    }
     contact.setFriction(cache.carCar.friction);
     contact.setRestitution(cache.carCar.restitution);
   });
@@ -95,6 +104,7 @@ export function writeStateToWorld(cache: PhysicsCache, state: WorldState, cfg: P
     cache.cars.push(body);
   }
   state.cars.forEach((car, i) => syncBody(cache.cars[i]!, car, cfg));
+  cache.ghost = state.cars.map((car) => contact.pitLaneGhosting !== false && car.inPitLane);
 }
 
 function syncBody(body: Body, car: CarState, cfg: PhysicsConfig): void {
@@ -126,7 +136,7 @@ export function readStateFromWorld(cache: PhysicsCache): BodyReadout[] {
     const p = b.getPosition(), v = b.getLinearVelocity();
     let wallContact = false, barrierContact = false, carContact = false;
     for (let ce = b.getContactList(); ce; ce = ce.next ?? null) {
-      if (!ce.contact.isTouching()) continue;
+      if (!ce.contact.isTouching() || !ce.contact.isEnabled()) continue; // (disabled = ghosted this step)
       const tag = (ce.contact.getFixtureA().getUserData() ?? ce.contact.getFixtureB().getUserData()) as WallTag | null;
       if (tag?.kind === 'barrier') barrierContact = true;
       else if (tag?.kind === 'wall') wallContact = true;

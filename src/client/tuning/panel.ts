@@ -245,6 +245,8 @@ export class TuningPanel {
     this.slider(con, this.t.contact, 'carFriction', 'contact.carFriction', 'car friction');
     this.slider(con, this.t.contact, 'carRestitution', 'contact.carRestitution', 'car restitution (bounce)');
     this.slider(con, physics.car, 'inertiaScale', 'car.inertiaScale', 'yaw inertia scale (= Car body)');
+    this.t.contact.pitLaneGhosting ??= true;
+    con.add(this.t.contact, 'pitLaneGhosting').name('pit lane ghosting');
     con.close();
 
     const race = gui.addFolder('Race (next race)');
