@@ -20,8 +20,25 @@
   },
   "brakes": { "maxForceN": 47000, "frontBias": 0.6 },
   "aero": { "dragCoef": 0.9, "downforceCoef": 0.0003 },
-  "tyres": { "baseGrip": 3, "lateralGrip": 1.18, "lateralStiffness": 0.6, "frontGrip": 1.12, "rearGrip": 1, "peakSlipDeg": 7, "falloff": 0.88, "falloffSlip": 3, "lowSpeedMps": 3 },
-  "steering": { "lockDeg": 28.5, "lockFalloffKph": 135, "assist": true, "assistPeakPct": 1, "assistFromKph": 36, "assistFullKph": 72 },
+  "tyres": {
+    "baseGrip": 2.11,
+    "lateralGrip": 1.18,
+    "lateralStiffness": 0.6,
+    "frontGrip": 1.23,
+    "rearGrip": 1.27,
+    "peakSlipDeg": 7,
+    "falloff": 0.88,
+    "falloffSlip": 3,
+    "lowSpeedMps": 3
+  },
+  "steering": {
+    "lockDeg": 24,
+    "lockFalloffKph": 135,
+    "assist": true,
+    "assistPeakPct": 1,
+    "assistFromKph": 36,
+    "assistFullKph": 72
+  },
   "traction": { "assist": true, "assistPeakPct": 0.95 },
   "input": { "steerRate": 5, "steerReturnRate": 8, "throttleRate": 6, "brakeRate": 10 },
   "wear": {

@@ -1,13 +1,15 @@
 {
   "_comment": "Tyre VFX (client only). Tune live with the panel (T). Distances in metres unless named Px. triggers.slipThreshold: a SLIDE marks past this x the tyre peak slip (03b); lockups and wheelspin mark when the longitudinal slip alone passes the peak. skid.fadeHalfLifeSec: skid marks halve every this long (rubber stays), faded in steps every fadeEverySec.",
   "maxParticles": 2000,
-  "triggers": {
-    "slipThreshold": 1.2,
-    "wheelspinMaxKph": 90,
-    "offTrackMinKph": 12,
-    "intensitySpeedRefKph": 120
+  "triggers": { "slipThreshold": 1.2, "wheelspinMaxKph": 90, "offTrackMinKph": 12, "intensitySpeedRefKph": 120 },
+  "skid": {
+    "alpha": 0.5,
+    "widthM": 0.4,
+    "lockupDarkness": 1.6,
+    "minIntensity": 0.05,
+    "fadeHalfLifeSec": 180,
+    "fadeEverySec": 15
   },
-  "skid": { "alpha": 0.5, "widthM": 0.4, "lockupDarkness": 1.6, "minIntensity": 0.05, "fadeHalfLifeSec": 180, "fadeEverySec": 15 },
   "smoke": {
     "ratePerSec": 40,
     "sizeM": 0.9,
