@@ -26,6 +26,8 @@ import audioConfig from '../../config/audio.json';
 import hudConfig from '../../config/hud.json';
 import { Hud } from './hud/hud';
 import { RaceHud } from './hud/race-hud';
+import { drawCarLabels, LABEL_MODES, nextLabelMode, type LabelMode } from './hud/car-labels';
+import { runningOrder, teamCode } from './hud/running-order';
 import { Liveries } from './livery';
 import liveryConfig from '../../config/livery.json';
 import racingLineConfig from '../../config/racing-line.json';
@@ -162,12 +164,23 @@ async function main(): Promise<void> {
     },
     onRace: (laps, grid) => startRace(laps, grid),
     onPractice: () => startPractice(),
+    onLabels: (m) => setLabels(m),
   }, () => renderer.trackHeight, siteUrl, Object.keys(aiCfg.presets));
   hud.setRaceDefaults(ctx.race.defaultLaps);
   const raceHud: RaceHud = new RaceHud(hud.element, ctx.catalog, siteUrl, {
     onRestart: () => raceSetup && startRace(raceSetup.laps, raceSetup.grid),
     onMenu: () => { startPractice(); hud.openMenu(); },
-  });
+  }, () => ({ height: renderer.trackHeight, pxPerMeter: json.pxPerMeter }));
+
+  // Car labels: remembered per browser; position by default.
+  let labelMode: LabelMode = 'position';
+  try { const s = localStorage.getItem('jr2.labels') as LabelMode | null; if (s && LABEL_MODES.includes(s)) labelMode = s; } catch { /* private window */ }
+  function setLabels(m: LabelMode): void {
+    labelMode = m;
+    hud.setLabels(m);
+    try { localStorage.setItem('jr2.labels', m); } catch { /* private window: not remembered */ }
+  }
+  hud.setLabels(labelMode);
 
   let prev: WorldState = createWorld(ctx, drivers.length);
   let curr: WorldState = prev;
@@ -185,6 +198,8 @@ async function main(): Promise<void> {
       debug = !debug;
     } else if (a.type === 'mute') {
       console.info(`[audio] ${audio.toggleMute() ? 'muted' : 'unmuted'}`);
+    } else if (a.type === 'cycleLabels') {
+      setLabels(nextLabelMode(labelMode));
     } else if (a.type === 'cycleVfx') {
       console.info(`[vfx] quality: ${vfx.cycleQuality()}`);
     }
@@ -408,6 +423,13 @@ async function main(): Promise<void> {
             c.fillStyle = 'rgba(255, 221, 0, 0.18)';
             c.fillRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
             c.restore();
+          }
+          if (!editor) {
+            const codes = curr.cars.map((car, i) => {
+              const team = ctx.catalog.teams.find((t) => t.id === car.build.team);
+              return { code: i === 0 ? 'YOU' : teamCode(team?.name ?? '???'), swatch: team?.colors.primary ?? '#888' };
+            });
+            drawCarLabels(c, prev, curr, alpha, labelMode, runningOrder(curr, ctx.catalog), codes, json.pxPerMeter, lw, physics.car.lengthM * json.pxPerMeter * 0.55 + 3 * lw);
           }
           editor?.draw(c, lw);
         },

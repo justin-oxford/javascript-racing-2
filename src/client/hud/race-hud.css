@@ -3,7 +3,7 @@
 
 .race-hud .lights {
   position: absolute;
-  top: calc(var(--u) * 70);
+  top: calc(var(--u) * 90);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -22,36 +22,63 @@
 }
 .race-hud .light.on i { background: #ff1f2d; box-shadow: 0 0 calc(var(--u) * 14) #ff1f2d; }
 
-.race-hud .tower {
+/* Running-order ticker: a strip under the top bar instead of a tower over the track.
+   Lap | P1-P3 pinned | the rest of the field (scrolls when it doesn't fit) | your place + intervals. */
+.race-hud .ticker {
   position: absolute;
-  top: calc(var(--u) * 60);
-  left: calc(var(--u) * 8);
-  width: calc(var(--u) * 168);
+  top: calc(var(--u) * 50);
+  left: 0;
+  right: 0;
+  height: calc(var(--u) * 22);
+  display: flex;
+  align-items: stretch;
   background: rgba(20, 20, 20, 0.82);
   font-size: calc(var(--u) * 10);
+  white-space: nowrap;
+  z-index: 1;
+  transition: opacity 0.25s;
 }
-.race-hud .tower .head { font-family: "Formula1 Bold", system-ui, sans-serif; padding: calc(var(--u) * 5) calc(var(--u) * 7); background: var(--bar); }
-.race-hud .tower .row { display: flex; align-items: center; gap: calc(var(--u) * 5); padding: calc(var(--u) * 2.5) calc(var(--u) * 6); }
-.race-hud .tower .row.me { background: rgba(230, 57, 70, 0.55); }
-.race-hud .tower .pos { width: calc(var(--u) * 14); text-align: right; font-family: "Formula1 Bold", system-ui, sans-serif; }
-.race-hud .sw {
-  display: inline-block;
-  width: calc(var(--u) * 6);
-  height: calc(var(--u) * 13);
-  background: center / cover no-repeat;
-  border-radius: calc(var(--u) * 1.5);
-  vertical-align: middle;
+.race-hud .ticker.see-through { opacity: 0.3; }
+.race-hud .tk-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 calc(var(--u) * 10);
+  font-family: "Formula1 Bold", system-ui, sans-serif;
+  background: var(--bar);
+  min-width: calc(var(--u) * 62);
 }
-.race-hud .tower .name { flex: 1; white-space: nowrap; overflow: hidden; }
-.race-hud .tower .gap { font-variant-numeric: tabular-nums; }
-.race-hud .tower .pit { font-size: calc(var(--u) * 7); padding: 0 calc(var(--u) * 3); background: #1d4ed8; }
-.race-hud .tower .chq {
+.race-hud .tk-top { flex: none; display: flex; border-right: 2px solid rgba(230, 57, 70, 0.9); }
+.race-hud .tk-scroll { flex: 1; min-width: 0; overflow: hidden; display: flex; }
+.race-hud .tk-scroll.scrolling { mask-image: linear-gradient(90deg, transparent, #000 calc(var(--u) * 14), #000 calc(100% - var(--u) * 14), transparent); }
+.race-hud .tk-reel { display: flex; will-change: transform; }
+.race-hud .tk-set { display: flex; flex: none; }
+.race-hud .chip { display: flex; align-items: center; gap: calc(var(--u) * 4); padding: 0 calc(var(--u) * 8); }
+.race-hud .chip + .chip { border-left: 1px solid rgba(255, 255, 255, 0.12); }
+.race-hud .tk-set .chip:first-child { border-left: 1px solid rgba(255, 255, 255, 0.12); }
+.race-hud .chip.me { background: rgba(230, 57, 70, 0.6); }
+.race-hud .chip .p { min-width: calc(var(--u) * 12); text-align: right; }
+.race-hud .chip .n { font-family: "Formula1 Bold", system-ui, sans-serif; }
+.race-hud .chip .g { font-variant-numeric: tabular-nums; opacity: 0.8; font-size: calc(var(--u) * 9); }
+.race-hud .chip .pit { font-size: calc(var(--u) * 7); padding: 0 calc(var(--u) * 3); background: #1d4ed8; }
+.race-hud .chip .chq {
   width: calc(var(--u) * 10);
   height: calc(var(--u) * 8);
   background: repeating-conic-gradient(#fff 0 25%, #111 0 50%) 0 0 / calc(var(--u) * 5) calc(var(--u) * 4);
 }
-.race-hud .tower .ahead { padding: calc(var(--u) * 4) calc(var(--u) * 7); font-size: calc(var(--u) * 9); border-top: 1px solid rgba(255, 255, 255, 0.15); }
-.race-hud .note { position: absolute; top: calc(var(--u) * 56); left: 50%; transform: translateX(-50%); font-size: calc(var(--u) * 9); color: var(--yellow); }
+.race-hud .tk-me {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 10);
+  padding: 0 calc(var(--u) * 10);
+  background: rgba(230, 57, 70, 0.85);
+  font-variant-numeric: tabular-nums;
+}
+.race-hud .tk-me:empty { display: none; }
+.race-hud .tk-me .mp { font-family: "Formula1 Bold", system-ui, sans-serif; font-size: calc(var(--u) * 13); }
+.race-hud .tk-me small { font-size: calc(var(--u) * 7); opacity: 0.8; margin-right: calc(var(--u) * 3); }
+.race-hud .note { position: absolute; top: calc(var(--u) * 76); left: 50%; transform: translateX(-50%); font-size: calc(var(--u) * 9); color: var(--yellow); }
 
 .race-hud .results {
   display: none;

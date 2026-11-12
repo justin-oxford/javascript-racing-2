@@ -15,6 +15,8 @@ export interface HudCallbacks {
   onRace(laps: number, grid: 'random' | 'pole' | 'back'): void;
   /** Leave a race for practice. */
   onPractice(): void;
+  /** Car labels over the track: off / position / position + team code (also the L key). */
+  onLabels(mode: 'off' | 'position' | 'name'): void;
 }
 
 const fmt = (t: number | undefined, plus = false): string => {
@@ -124,6 +126,8 @@ export class Hud {
         <div class="choices race-grid">${(['random', 'pole', 'back'] as const).map((g) => `<button data-race-grid="${g}">${{ random: 'Random grid', pole: 'Pole', back: 'Back of grid' }[g]}</button>`).join('')}</div>
         <div class="choices race-go"><button data-id="raceStart">START RACE</button><button data-id="practice">PRACTICE</button></div>
         <div class="note">Races use the AI count above (at least 1) and difficulty.</div>
+        <div class="title">CAR LABELS (L)</div>
+        <div class="choices labels">${(['off', 'position', 'name'] as const).map((m) => `<button data-labels="${m}">${{ off: 'Off', position: 'Position', name: 'Position + name' }[m]}</button>`).join('')}</div>
       </div>
       <div class="hud-drop car" data-id="carPanel">
         <div class="title">Vehicle Information</div>
@@ -154,6 +158,7 @@ export class Hud {
     this.el.practice!.addEventListener('click', () => { this.closeMenu(); this.cb.onPractice(); });
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-count]').forEach((b) => b.addEventListener('click', () => this.cb.onAi(Number(b.dataset.aiCount), this.ai.preset)));
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-preset]').forEach((b) => b.addEventListener('click', () => this.cb.onAi(this.ai.count, b.dataset.aiPreset!)));
+    this.root.querySelectorAll<HTMLButtonElement>('[data-labels]').forEach((b) => b.addEventListener('click', () => this.cb.onLabels(b.dataset.labels as 'off' | 'position' | 'name')));
     this.root.querySelectorAll<HTMLButtonElement>('[data-slot]').forEach((b) =>
       b.addEventListener('click', () => {
         const slot = b.dataset.slot as keyof CarSetup;
@@ -203,6 +208,11 @@ export class Hud {
     this.ai = { count, preset };
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-count]').forEach((b) => b.classList.toggle('active', Number(b.dataset.aiCount) === count));
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-preset]').forEach((b) => b.classList.toggle('active', b.dataset.aiPreset === preset));
+  }
+
+  /** Highlight the current car-label mode. */
+  setLabels(mode: string): void {
+    this.root.querySelectorAll<HTMLButtonElement>('[data-labels]').forEach((b) => b.classList.toggle('active', b.dataset.labels === mode));
   }
 
   private toggle(p: keyof Hud['panels']): void {

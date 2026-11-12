@@ -1,6 +1,8 @@
-// Race overlay (card 06): start lights, the timing tower (P1-P10), and the results screen.
+// Race overlay (card 06): start lights, the running-order ticker under the top bar, and the results screen.
+// Ticker: lap, P1-P3 pinned, the rest of the field scrolling when it doesn't fit, your place + intervals on the right.
 // Reads world.race; never writes sim state. Restart / back-to-menu go out through callbacks.
-import { raceGap, raceResults, type CarCatalog, type Gap, type WorldState } from '../../sim';
+import { raceResults, type CarCatalog, type WorldState } from '../../sim';
+import { gapText, lapHead, playerIntervals, runningOrder, type OrderEntry } from './running-order';
 import './race-hud.css';
 
 export interface RaceHudCallbacks {
@@ -13,11 +15,16 @@ const time = (t: number): string => {
   const s = (t - m * 60).toFixed(3).padStart(6, '0');
   return m ? `${m}:${s}` : (t).toFixed(3);
 };
-const gapText = (g: Gap | undefined): string => (!g ? '' : g.laps ? `+${g.laps} LAP${g.laps > 1 ? 'S' : ''}` : `+${g.seconds.toFixed(3)}`);
 
 export class RaceHud {
   private readonly el: Record<string, HTMLElement> = {};
-  private lastTower = 0;
+  private lastTicker = 0;
+  /** Ticker scroll: one copy of the scrolling set is this wide (CSS px); 0 = it fits, no scrolling. */
+  private reelWidth = 0;
+  private scrollPx = 0;
+  private lastFrame = 0;
+  /** Ticker scroll speed, CSS px per second at 1280 wide (scales with the HUD). */
+  static scrollSpeed = 45;
   private resultsShown = false;
 
   constructor(
@@ -25,12 +32,19 @@ export class RaceHud {
     private readonly catalog: CarCatalog,
     private readonly siteUrl: (p: string) => string,
     private readonly cb: RaceHudCallbacks,
+    /** Track size in track px and its scale, so the ticker can tell when a car is underneath it. */
+    private readonly trackPx: () => { height: number; pxPerMeter: number },
   ) {
     const root = document.createElement('div');
     root.className = 'race-hud';
     root.innerHTML = `
       <div class="lights" data-id="lights">${[0, 1, 2, 3, 4].map(() => '<div class="light"><i></i><i></i></div>').join('')}</div>
-      <div class="tower" data-id="tower"></div>
+      <div class="ticker" data-id="ticker">
+        <div class="tk-head" data-id="tkHead">GRID</div>
+        <div class="tk-top" data-id="tkTop"></div>
+        <div class="tk-scroll" data-id="tkScroll"><div class="tk-reel" data-id="tkReel"><div class="tk-set" data-id="tkSetA"></div><div class="tk-set" data-id="tkSetB"></div></div></div>
+        <div class="tk-me" data-id="tkMe"></div>
+      </div>
       <div class="note" data-id="note"></div>
       <div class="results" data-id="results">
         <div class="title">RESULTS</div>
@@ -56,7 +70,7 @@ export class RaceHud {
     return { name: car === 0 ? 'YOU' : (team?.name ?? '?'), swatch: team ? team.colors.primary : '#888' };
   }
 
-  /** `note`: a line under the tower (e.g. shared pit boxes). */
+  /** `note`: a line under the ticker (e.g. shared pit boxes). */
   update(world: WorldState, note = ''): void {
     const race = world.race;
     if (!race) return this.hide();
@@ -69,29 +83,51 @@ export class RaceHud {
     this.el.lights!.style.display = lightsOn || (race.phase === 'racing' && sinceStart < 1.5) ? '' : 'none';
     this.el.lights!.querySelectorAll('.light').forEach((l, k) => l.classList.toggle('on', lightsOn && k < race.lights));
 
-    // Tower: ~8x a second is plenty for text.
+    // Ticker text: ~8x a second is plenty.
     const now = performance.now();
-    if (now - this.lastTower > 120) {
-      this.lastTower = now;
-      const leader = race.cars[race.order[0]!]!;
-      const lapNow = Math.min(race.laps, Math.max(1, Math.floor(leader.finished ? leader.finishLaps : leader.progress) + 1));
-      const head = race.phase === 'grid' || race.phase === 'lights' ? 'GRID' : race.phase === 'racing' ? `LAP ${lapNow}/${race.laps}` : 'FINISH';
-      const rows = race.order.slice(0, 10).map((car, k) => {
-        const d = this.driver(world, car), rc = race.cars[car]!;
-        const gap = k === 0 ? (rc.finished ? 'FLAG' : '') : gapText(raceGap(race, car, race.order[0]!));
-        const flag = rc.finished ? '<span class="chq"></span>' : world.cars[car]!.inPitLane ? '<span class="pit">PIT</span>' : '';
-        return `<div class="row${car === 0 ? ' me' : ''}"><span class="pos">${k + 1}</span><span class="sw" style="background:${d.swatch}"></span><span class="name">${d.name}</span>${flag}<span class="gap">${gap}</span></div>`;
-      });
-      // The player outside the top 10 still gets a row.
-      const myPos = race.order.indexOf(0);
-      if (myPos >= 10) rows.push(`<div class="row me"><span class="pos">${myPos + 1}</span><span class="sw" style="background:${this.driver(world, 0).swatch}"></span><span class="name">YOU</span><span class="gap">${gapText(raceGap(race, 0, race.order[0]!))}</span></div>`);
-      // And the player's interval to the car ahead.
-      const ahead = myPos > 0 ? gapText(raceGap(race, 0, race.order[myPos - 1]!)) : '';
-      this.el.tower!.innerHTML = `<div class="head">${head}</div>${rows.join('')}${ahead ? `<div class="ahead">to car ahead <b>${ahead}</b></div>` : ''}`;
+    if (now - this.lastTicker > 120) {
+      this.lastTicker = now;
+      this.fillTicker(world);
     }
+    // A car under the ticker (the top straight on Oxford): fade it so the car shows through.
+    const root = this.el.root!.getBoundingClientRect(), tk = this.el.ticker!.getBoundingClientRect();
+    const { height, pxPerMeter } = this.trackPx();
+    const limitM = ((tk.bottom - root.top + 10) / root.height) * height / pxPerMeter;
+    this.el.ticker!.classList.toggle('see-through', world.cars.some((c) => c.y < limitM));
+    // Ticker scroll: every frame, a seamless loop over two copies of the set.
+    const dt = this.lastFrame ? Math.min(0.1, (now - this.lastFrame) / 1000) : 0;
+    this.lastFrame = now;
+    if (this.reelWidth > 0) {
+      const u = this.el.ticker!.getBoundingClientRect().width / 1280;
+      this.scrollPx = (this.scrollPx + RaceHud.scrollSpeed * u * dt) % this.reelWidth;
+    } else this.scrollPx = 0;
+    this.el.tkReel!.style.transform = `translateX(${-this.scrollPx}px)`;
 
     if (race.phase === 'results' && !this.resultsShown) this.showResults(world);
     if (race.phase !== 'results' && this.resultsShown) { this.resultsShown = false; this.el.results!.classList.remove('open'); }
+  }
+
+  private chip(e: OrderEntry): string {
+    const flag = e.state === 'finished' ? '<span class="chq"></span>' : e.state === 'pit' ? '<span class="pit">PIT</span>' : '';
+    return `<span class="chip${e.me ? ' me' : ''}" title="${e.name}"><b class="p">${e.pos}</b><span class="sw" style="background:${e.swatch}"></span><span class="n">${e.code}</span>${flag}<span class="g">${e.gap}</span></span>`;
+  }
+
+  private fillTicker(world: WorldState): void {
+    const order = runningOrder(world, this.catalog);
+    this.el.tkHead!.textContent = lapHead(world);
+    this.el.tkTop!.innerHTML = order.slice(0, 3).map((e) => this.chip(e)).join('');
+    const rest = order.slice(3).map((e) => this.chip(e)).join('');
+    const a = this.el.tkSetA!, b = this.el.tkSetB!;
+    a.innerHTML = rest;
+    // Scroll only when the rest of the field doesn't fit; the second copy makes the loop seamless.
+    const fits = a.scrollWidth <= this.el.tkScroll!.clientWidth;
+    b.innerHTML = fits ? '' : rest;
+    this.reelWidth = fits ? 0 : a.getBoundingClientRect().width;
+    this.el.tkScroll!.classList.toggle('scrolling', !fits);
+    const me = playerIntervals(world);
+    this.el.tkMe!.innerHTML = !me ? '' : `<span class="mp">P${me.pos}<small>/${me.of}</small></span>`
+      + `<span class="iv"><small>AHEAD</small>${me.ahead || (me.pos === 1 ? 'LEADER' : '---')}</span>`
+      + `<span class="iv"><small>BEHIND</small>${me.behind || '---'}</span>`;
   }
 
   private showResults(world: WorldState): void {
