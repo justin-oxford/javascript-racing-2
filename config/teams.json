@@ -1,16 +1,16 @@
 {
-  "_comment": "Team stat multipliers from SYS - Car model (v0.16 ratios). Motus is slow on purpose: do not normalise it. Livery card adds colours/layers here.",
+  "_comment": "Team stat multipliers from SYS - Car model (v0.16 ratios). Motus is slow on purpose: do not normalise it. colors: primary tints the template bodywork (livery card); secondary is for phase 2 two-tone liveries; helmet = the AI driver's helmet. Starting colours sampled from the old v0.16 JPGs (Stewart and Trilliams by eye).",
   "teams": [
-    { "id": "cavalli", "name": "Cavalli", "sprite": "assets/Cars/redCar.jpg", "stats": { "engine": 1.10, "topSpeed": 1.10, "brakes": 1.00, "drag": 0.97, "downforce": 0.96, "grip": 0.99 } },
-    { "id": "bluebull", "name": "Blue Bull", "sprite": "assets/Cars/blueCar.jpg", "stats": { "engine": 1.07, "topSpeed": 1.00, "brakes": 1.05, "drag": 1.00, "downforce": 1.00, "grip": 1.12 } },
-    { "id": "silberner", "name": "Silberner", "sprite": "assets/Cars/silverCar.jpg", "stats": { "engine": 1.10, "topSpeed": 1.10, "brakes": 1.06, "drag": 0.98, "downforce": 1.00, "grip": 1.10 } },
-    { "id": "mcfaren", "name": "McFaren", "sprite": "assets/Cars/mclarenCar.jpg", "stats": { "engine": 1.00, "topSpeed": 1.00, "brakes": 1.00, "drag": 1.05, "downforce": 1.00, "grip": 1.01 } },
-    { "id": "foucault", "name": "Foucault", "sprite": "assets/Cars/foucCar.jpg", "stats": { "engine": 1.00, "topSpeed": 1.00, "brakes": 1.00, "drag": 1.00, "downforce": 1.00, "grip": 1.00 } },
-    { "id": "betajuliet", "name": "Beta Juliet", "sprite": "assets/Cars/betaCar.jpg", "stats": { "engine": 1.01, "topSpeed": 1.00, "brakes": 1.00, "drag": 1.03, "downforce": 1.00, "grip": 0.96 } },
-    { "id": "toroblu", "name": "Toro Blu", "sprite": "assets/Cars/toroCar.jpg", "stats": { "engine": 0.97, "topSpeed": 0.98, "brakes": 1.00, "drag": 1.05, "downforce": 1.00, "grip": 1.05 } },
-    { "id": "stroll", "name": "Stroll", "sprite": "assets/Cars/strollCar.jpg", "stats": { "engine": 0.99, "topSpeed": 0.99, "brakes": 1.00, "drag": 1.08, "downforce": 1.00, "grip": 0.98 } },
-    { "id": "stewart", "name": "Stewart", "sprite": "assets/Cars/stewCar.jpg", "stats": { "engine": 0.95, "topSpeed": 0.98, "brakes": 1.00, "drag": 1.07, "downforce": 1.00, "grip": 0.95 } },
-    { "id": "trilliams", "name": "Trilliams", "sprite": "assets/Cars/trilliamsCar.jpg", "stats": { "engine": 0.93, "topSpeed": 0.94, "brakes": 1.00, "drag": 1.05, "downforce": 1.00, "grip": 0.95 } },
-    { "id": "motus", "name": "Motus", "sprite": "assets/Cars/greenCar.jpg", "stats": { "engine": 0.75, "topSpeed": 0.75, "brakes": 0.70, "drag": 0.80, "downforce": 0.80, "grip": 0.80 } }
+    { "id": "cavalli", "name": "Cavalli", "colors": { "primary": "#e10600", "secondary": "#ffffff", "helmet": "#ffe600" }, "stats": { "engine": 1.10, "topSpeed": 1.10, "brakes": 1.00, "drag": 0.97, "downforce": 0.96, "grip": 0.99 } },
+    { "id": "bluebull", "name": "Blue Bull", "colors": { "primary": "#1a1464", "secondary": "#e10600", "helmet": "#ffd400" }, "stats": { "engine": 1.07, "topSpeed": 1.00, "brakes": 1.05, "drag": 1.00, "downforce": 1.00, "grip": 1.12 } },
+    { "id": "silberner", "name": "Silberner", "colors": { "primary": "#c8ccd0", "secondary": "#00d2be", "helmet": "#111111" }, "stats": { "engine": 1.10, "topSpeed": 1.10, "brakes": 1.06, "drag": 0.98, "downforce": 1.00, "grip": 1.10 } },
+    { "id": "mcfaren", "name": "McFaren", "colors": { "primary": "#fbb404", "secondary": "#1e88e5", "helmet": "#ffffff" }, "stats": { "engine": 1.00, "topSpeed": 1.00, "brakes": 1.00, "drag": 1.05, "downforce": 1.00, "grip": 1.01 } },
+    { "id": "foucault", "name": "Foucault", "colors": { "primary": "#fef101", "secondary": "#111111", "helmet": "#1e3a8a" }, "stats": { "engine": 1.00, "topSpeed": 1.00, "brakes": 1.00, "drag": 1.00, "downforce": 1.00, "grip": 1.00 } },
+    { "id": "betajuliet", "name": "Beta Juliet", "colors": { "primary": "#a50303", "secondary": "#ffffff", "helmet": "#ffffff" }, "stats": { "engine": 1.01, "topSpeed": 1.00, "brakes": 1.00, "drag": 1.03, "downforce": 1.00, "grip": 0.96 } },
+    { "id": "toroblu", "name": "Toro Blu", "colors": { "primary": "#0370b9", "secondary": "#e10600", "helmet": "#ffffff" }, "stats": { "engine": 0.97, "topSpeed": 0.98, "brakes": 1.00, "drag": 1.05, "downforce": 1.00, "grip": 1.05 } },
+    { "id": "stroll", "name": "Stroll", "colors": { "primary": "#ec008c", "secondary": "#111111", "helmet": "#ffffff" }, "stats": { "engine": 0.99, "topSpeed": 0.99, "brakes": 1.00, "drag": 1.08, "downforce": 1.00, "grip": 0.98 } },
+    { "id": "stewart", "name": "Stewart", "colors": { "primary": "#1c1c1c", "secondary": "#c9a227", "helmet": "#c9a227" }, "stats": { "engine": 0.95, "topSpeed": 0.98, "brakes": 1.00, "drag": 1.07, "downforce": 1.00, "grip": 0.95 } },
+    { "id": "trilliams", "name": "Trilliams", "colors": { "primary": "#f4f6f8", "secondary": "#00c8f0", "helmet": "#0a2a6b" }, "stats": { "engine": 0.93, "topSpeed": 0.94, "brakes": 1.00, "drag": 1.05, "downforce": 1.00, "grip": 0.95 } },
+    { "id": "motus", "name": "Motus", "colors": { "primary": "#15fd02", "secondary": "#111111", "helmet": "#ff6a00" }, "stats": { "engine": 0.75, "topSpeed": 0.75, "brakes": 0.70, "drag": 0.80, "downforce": 0.80, "grip": 0.80 } }
   ]
 }

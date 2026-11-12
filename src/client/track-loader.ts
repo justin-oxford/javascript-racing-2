@@ -177,12 +177,6 @@ export async function loadOverhead(json: TrackJson): Promise<HTMLImageElement | 
   return blob ? loadImage(URL.createObjectURL(blob)) : undefined;
 }
 
-/** One sprite per team (placeholder v0.16 JPGs until the livery card). */
-export async function loadTeamSprites(): Promise<Map<string, HTMLImageElement>> {
-  const entries = await Promise.all(catalog.teams.map(async (t) => [t.id, await loadImage(siteUrl(t.sprite))] as const));
-  return new Map(entries);
-}
-
 export function simContext(mask: MaskState): SimContext {
   return { track: mask.track, walls: mask.walls, physics, catalog, rules, contact, race: raceConfig, cache: createPhysicsCache() };
 }

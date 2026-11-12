@@ -38,7 +38,8 @@ export interface CarLook {
   pxPerMeter: number;
   lengthM: number;
   widthM: number;
-  sprite(car: CarState): CanvasImageSource | undefined;
+  /** Draw car `index` with ctx at its centre, rotated to its heading (track pixels). false = not drawn. */
+  drawCar(ctx: CanvasRenderingContext2D, car: CarState, index: number, lengthPx: number, devicePerTrackPx: number): boolean;
 }
 
 /**
@@ -193,9 +194,7 @@ export class Renderer {
       ctx.save();
       ctx.translate(c.x * ppm, c.y * ppm);
       ctx.rotate(c.heading);
-      const sprite = look.sprite(car);
-      if (sprite) ctx.drawImage(sprite, -w / 2, -l / 2, w, l);
-      else {
+      if (!look.drawCar(ctx, car, i, l, this.scale)) {
         ctx.fillStyle = '#e8e8e8';
         ctx.fillRect(-w / 2, -l / 2, w, l);
       }

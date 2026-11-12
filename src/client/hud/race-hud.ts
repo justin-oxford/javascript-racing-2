@@ -53,7 +53,7 @@ export class RaceHud {
 
   private driver(world: WorldState, car: number): { name: string; swatch: string } {
     const team = this.catalog.teams.find((t) => t.id === world.cars[car]!.build.team);
-    return { name: car === 0 ? 'YOU' : (team?.name ?? '?'), swatch: team ? `url("${this.siteUrl(team.sprite)}")` : 'none' };
+    return { name: car === 0 ? 'YOU' : (team?.name ?? '?'), swatch: team ? team.colors.primary : '#888' };
   }
 
   /** `note`: a line under the tower (e.g. shared pit boxes). */
@@ -80,11 +80,11 @@ export class RaceHud {
         const d = this.driver(world, car), rc = race.cars[car]!;
         const gap = k === 0 ? (rc.finished ? 'FLAG' : '') : gapText(raceGap(race, car, race.order[0]!));
         const flag = rc.finished ? '<span class="chq"></span>' : world.cars[car]!.inPitLane ? '<span class="pit">PIT</span>' : '';
-        return `<div class="row${car === 0 ? ' me' : ''}"><span class="pos">${k + 1}</span><span class="sw" style="background-image:${d.swatch}"></span><span class="name">${d.name}</span>${flag}<span class="gap">${gap}</span></div>`;
+        return `<div class="row${car === 0 ? ' me' : ''}"><span class="pos">${k + 1}</span><span class="sw" style="background:${d.swatch}"></span><span class="name">${d.name}</span>${flag}<span class="gap">${gap}</span></div>`;
       });
       // The player outside the top 10 still gets a row.
       const myPos = race.order.indexOf(0);
-      if (myPos >= 10) rows.push(`<div class="row me"><span class="pos">${myPos + 1}</span><span class="sw" style="background-image:${this.driver(world, 0).swatch}"></span><span class="name">YOU</span><span class="gap">${gapText(raceGap(race, 0, race.order[0]!))}</span></div>`);
+      if (myPos >= 10) rows.push(`<div class="row me"><span class="pos">${myPos + 1}</span><span class="sw" style="background:${this.driver(world, 0).swatch}"></span><span class="name">YOU</span><span class="gap">${gapText(raceGap(race, 0, race.order[0]!))}</span></div>`);
       // And the player's interval to the car ahead.
       const ahead = myPos > 0 ? gapText(raceGap(race, 0, race.order[myPos - 1]!)) : '';
       this.el.tower!.innerHTML = `<div class="head">${head}</div>${rows.join('')}${ahead ? `<div class="ahead">to car ahead <b>${ahead}</b></div>` : ''}`;
@@ -100,7 +100,7 @@ export class RaceHud {
     this.el.rows!.innerHTML = raceResults(race).map((r) => {
       const d = this.driver(world, r.car);
       const t = !r.finished ? 'DNF' : r.pos === 1 ? time(r.time) : gapText(r.gap);
-      return `<tr class="${r.car === 0 ? 'me' : ''}"><td>${r.pos}</td><td><span class="sw" style="background-image:${d.swatch}"></span></td><td>${d.name}</td><td>${r.laps}</td><td>${t}</td><td>${r.bestLap ? time(r.bestLap) : '---'}</td><td>${r.pitStops}</td><td>${r.jumpStart ? '<span class="jump">JUMP START</span>' : ''}</td></tr>`;
+      return `<tr class="${r.car === 0 ? 'me' : ''}"><td>${r.pos}</td><td><span class="sw" style="background:${d.swatch}"></span></td><td>${d.name}</td><td>${r.laps}</td><td>${t}</td><td>${r.bestLap ? time(r.bestLap) : '---'}</td><td>${r.pitStops}</td><td>${r.jumpStart ? '<span class="jump">JUMP START</span>' : ''}</td></tr>`;
     }).join('');
     this.el.results!.classList.add('open');
   }

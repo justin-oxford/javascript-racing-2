@@ -1,0 +1,21 @@
+{
+  "_comment": "Cars drawn from the template layers (livery card, phase 1). Template measurements are sprite pixels on the 256x512 layers: tyre centres from the card, car extent measured (x 42-213, y 6-494). The sprite is scaled so carLengthPx = physics car.lengthM and centred on the car body. helmet: shadows-layer pixels in this hue range (degrees) with at least minChroma (max-min channel) become the tintable helmet (433 px). shadow: generated soft drop shadow, offset and blur in sprite pixels. playerHelmet: your helmet; AI drivers use their team's colors.helmet.",
+  "files": {
+    "body": "assets/Cars/template/FormulaCar_bg_no_tyres.png",
+    "paint": "assets/Cars/template/FormulaCar_color.png",
+    "shadows": "assets/Cars/template/FormulaCar_shadows.png",
+    "tyre": "assets/Cars/template/Tyre.png"
+  },
+  "template": {
+    "width": 256,
+    "height": 512,
+    "carTop": 6,
+    "carBottom": 494,
+    "carLeft": 42,
+    "carRight": 213,
+    "tyres": { "fl": [58, 116], "fr": [197, 116], "rl": [60, 426], "rr": [195, 426] }
+  },
+  "helmet": { "hueMin": 290, "hueMax": 360, "minChroma": 12 },
+  "shadow": { "offsetX": 10, "offsetY": 14, "blur": 14, "alpha": 0.45 },
+  "playerHelmet": "#ffd400"
+}

@@ -36,7 +36,8 @@ export const STAT_NAMES: readonly StatName[] = ['engine', 'topSpeed', 'brakes', 
 export interface TeamDef {
   id: string;
   name: string;
-  sprite: string;
+  /** Livery colours (hex). primary tints the bodywork; helmet = the AI driver's helmet. */
+  colors: { primary: string; secondary: string; helmet: string };
   stats: Stats;
 }
 

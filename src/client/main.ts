@@ -12,7 +12,6 @@ import {
   loadBackground,
   loadMask,
   loadOverhead,
-  loadTeamSprites,
   physics,
   rules,
   simContext,
@@ -26,6 +25,8 @@ import audioConfig from '../../config/audio.json';
 import hudConfig from '../../config/hud.json';
 import { Hud } from './hud/hud';
 import { RaceHud } from './hud/race-hud';
+import { Liveries } from './livery';
+import liveryConfig from '../../config/livery.json';
 import { browserStore, Session } from './hud/session';
 import { TimingLines } from './hud/timing-lines';
 import vfxConfig from '../../config/vfx.json';
@@ -39,7 +40,7 @@ async function main(): Promise<void> {
   const stub = getTrackJsonStub(trackId);
   let mask: MaskState = await loadMask(stub);
   const json = mask.track.json; // the stub, completed in place: the editor edits this same object
-  const [background, overhead0, sprites] = await Promise.all([loadBackground(json), loadOverhead(json), loadTeamSprites()]);
+  const [background, overhead0, liveries] = await Promise.all([loadBackground(json), loadOverhead(json), new Liveries(liveryConfig).load(siteUrl)]);
   let overhead = overhead0;
   let hasArt = !!background;
   let ctx: SimContext = simContext(mask);
@@ -236,6 +237,7 @@ async function main(): Promise<void> {
         /** Dev: an AI drives your car (hands-off race tests). Undo with __game.setDriver(0, keyboard) or reload. */
         autopilot: () => (drivers[0] = aiInputSource(0, () => ({ world: curr, ctx, line: racingLine }), () => aiCfg.presets[aiPreset] ?? aiCfg.presets[aiCfg.defaultPreset]!, () => aiCfg, 999)),
         keyboard,
+        liveries,
         /** Dev: who drives each car (AI drivers expose .state). */
         drivers: () => drivers,
         /** Dev: replace who drives car i (e.g. a scripted test driver). */
@@ -292,7 +294,12 @@ async function main(): Promise<void> {
     get pxPerMeter() { return json.pxPerMeter; },
     get lengthM() { return physics.car.lengthM; },
     get widthM() { return physics.car.widthM; },
-    sprite: (car) => sprites.get(car.build.team),
+    drawCar: (c, car, index, lengthPx, devicePerTrackPx) => {
+      const team = ctx.catalog.teams.find((t) => t.id === car.build.team);
+      if (!team) return false;
+      liveries.draw(c, car, { primary: team.colors.primary, helmet: index === 0 ? liveryConfig.playerHelmet : team.colors.helmet }, lengthPx, devicePerTrackPx, physics);
+      return true;
+    },
   };
   const surfaceName = (car: WorldState['cars'][number], w: 0 | 1 | 2 | 3) => surfaces[car.wheels[w].surface]?.id ?? '?';
 

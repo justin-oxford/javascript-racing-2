@@ -50,6 +50,11 @@ export function wheelPositions(pose: Pose, cfg: PhysicsConfig): Wheels<{ x: numb
   return wheelOffsets(cfg).map(([l, s]) => ({ x: pose.x + f.x * l + r.x * s, y: pose.y + f.y * l + r.y * s })) as Wheels<{ x: number; y: number }>;
 }
 
+/** Front wheel angle, radians (+ = right), for a steer input at a speed (m/s): the lock shrinks with speed. */
+export function frontWheelAngle(steer: number, speed: number, cfg: PhysicsConfig): number {
+  return steer * ((cfg.steering.lockDeg * Math.PI) / 180) / (1 + (Math.abs(speed) / KPH) / cfg.steering.lockFalloffKph);
+}
+
 /** Tyre grip vs wear: gentle down to ~40%, then a cliff, nothing left at 10% (v0.16 curve). */
 export function wearGrip(wear: number): number {
   return Math.max(0, Math.log10(10 * wear));
@@ -235,9 +240,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
   const brakeTotal = reversing ? 0 : controls.brake * cfg.brakes.maxForceN * stats.brakes;
   const brakeShare: Wheels<number> = [cfg.brakes.frontBias / 2, cfg.brakes.frontBias / 2, (1 - cfg.brakes.frontBias) / 2, (1 - cfg.brakes.frontBias) / 2];
 
-  // Steering: lock shrinks with speed.
-  const lock = (cfg.steering.lockDeg * Math.PI) / 180 / (1 + (speed / KPH) / cfg.steering.lockFalloffKph);
-  const delta = controls.steer * lock;
+  const delta = frontWheelAngle(controls.steer, speed, cfg);
 
   const gripBase = cfg.tyres.baseGrip * stats.grip; // downforce is already in the load
   const positions = wheelPositions(car, cfg);
