@@ -46,7 +46,22 @@ export class TimingLines {
     if (hex) this.flash = { key, color: hex, until: now + this.cfg.lines.flashSec * 1000 };
   }
 
-  draw(ctx: CanvasRenderingContext2D, track: SimTrack, now: number): void {
+  /** Cheap key of where the lines are, so the static layer is rebuilt when the editor moves one. */
+  signature(track: SimTrack): string {
+    return JSON.stringify(track.json.timingLines) + JSON.stringify(this.cfg.lines);
+  }
+
+  /** The lines as part of the static layer (under rubber and skids). */
+  drawStatic(ctx: CanvasRenderingContext2D, track: SimTrack): void {
+    this.draw(ctx, track, -1, false);
+  }
+
+  /** Per frame: only a line that's currently flashing, drawn on top. */
+  drawFlash(ctx: CanvasRenderingContext2D, track: SimTrack, now: number): void {
+    if (this.flash && now < this.flash.until) this.draw(ctx, track, now, true);
+  }
+
+  private draw(ctx: CanvasRenderingContext2D, track: SimTrack, now: number, onlyFlashing: boolean): void {
     const l = this.cfg.lines;
     const ppm = track.json.pxPerMeter;
     for (const key of TIMING_KEYS) {
@@ -56,6 +71,7 @@ export class TimingLines {
       if (!runs.length) continue;
       const sf = key === 'startFinish';
       const flashing = this.flash && this.flash.key === key && now < this.flash.until ? this.flash : undefined;
+      if (onlyFlashing && !flashing) continue;
       ctx.save();
       ctx.globalAlpha = sf ? 1 : l.sectorAlpha;
       ctx.strokeStyle = flashing?.color ?? (sf ? l.startFinishColor : l.sectorColor);

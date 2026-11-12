@@ -37,6 +37,7 @@ export class GameAudio {
   private squealOsc: OscillatorNode | undefined;
   private hit = {} as Record<'wall' | 'barrier' | 'car', { filter: BiquadFilterNode; gain: GainNode; last: number }>;
   private crackleChain!: { filter: BiquadFilterNode; gain: GainNode };
+  private readonly lastTarget = new WeakMap<AudioParam, number>();
 
   constructor(private readonly cfg: AudioConfig) {
     this.volumes = loadVolumes(cfg.defaultVolumes);
@@ -336,7 +337,15 @@ export class GameAudio {
     if (!this.ctx || this.ctx.state !== 'running' || !this.eng) return;
     const now = this.ctx.currentTime;
     const e = this.cfg.engine;
-    const set = (p: AudioParam, v: number) => p.setTargetAtTime(v, now, SMOOTH);
+    // Only automate a parameter when its target really moves. Scheduling ~20 setTargetAtTime events
+    // every tick regardless piles work onto the audio thread in some browsers.
+    const set = (p: AudioParam, v: number) => {
+      const last = this.lastTarget.get(p);
+      if (last !== undefined && Math.abs(v - last) <= 1e-3 * Math.max(1, Math.abs(last))) return;
+      this.lastTarget.set(p, v);
+      p.cancelScheduledValues(now);
+      p.setTargetAtTime(v, now, SMOOTH);
+    };
 
     // Engine.
     const fire = (t.engine.rpm / 60) * (e.cylinders / 2);

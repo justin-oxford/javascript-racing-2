@@ -157,14 +157,19 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
   const v2 = car.vx * car.vx + car.vy * car.vy;
   const speed = Math.sqrt(v2);
 
-  // Loads: static split by weight balance, plus lateral transfer to the outside wheels.
+  // Vertical load per wheel: weight PLUS downforce, split by weight balance, then lateral weight
+  // transfer to the outside wheels. (The card's grip x (1 + downforce x v^2) is exactly this extra load;
+  // it has to be part of the load, or the weight transfer of a 5 g corner exceeds the inside wheels'
+  // static weight and they read as unloaded and "skidding".)
   const wf = cfg.car.weightFront;
   const share: Wheels<number> = [wf / 2, wf / 2, (1 - wf) / 2, (1 - wf) / 2];
+  const vertical = mass * G * (1 + cfg.aero.downforceCoef * stats.downforce * v2);
   const aRight = vFwd * car.angVel; // centripetal acceleration, + = toward the car's right
   const transfer = (mass * aRight * cfg.car.cgHeightM) / cfg.car.trackWidthM;
   const side: Wheels<number> = [-1, 1, -1, 1];
   const axle: Wheels<number> = [wf, wf, 1 - wf, 1 - wf];
-  const load = share.map((s, w) => Math.max(0, mass * G * s - side[w]! * transfer * axle[w]!)) as Wheels<number>;
+  const load = share.map((s, w) => Math.max(0, vertical * s - side[w]! * transfer * axle[w]!)) as Wheels<number>;
+  const totalLoad = load[0] + load[1] + load[2] + load[3] || 1;
 
   // Longitudinal requests.
   const vTop = cfg.engine.topSpeedKph * KPH * stats.topSpeed;
@@ -186,7 +191,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
   const lock = (cfg.steering.lockDeg * Math.PI) / 180 / (1 + (speed / KPH) / cfg.steering.lockFalloffKph);
   const delta = controls.steer * lock;
 
-  const gripBase = cfg.tyres.baseGrip * stats.grip * (1 + cfg.aero.downforceCoef * stats.downforce * v2);
+  const gripBase = cfg.tyres.baseGrip * stats.grip; // downforce is already in the load
   const positions = wheelPositions(car, cfg);
   const out = [] as unknown as Wheels<WheelForces>;
 
@@ -198,15 +203,20 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
     const wf_ = forward(h), wr = right(h);
     const vLong = vx * wf_.x + vy * wf_.y;
     const vLat = vx * wr.x + vy * wr.y;
-    const wheelMass = mass * share[w]!;
+    // Each wheel carries the share of the car's mass its load says it does: a light inside wheel asks
+    // its tyre for little sideways force (and doesn't read as sliding), the loaded outside wheel for more.
+    const wheelMass = (mass * load[w]!) / totalLoad;
     const surf = ctx.track.surfaces[car.wheels[w]!.surface]!;
 
     const cap = gripBase * wearGrip(car.wheels[w]!.wear) * surf.grip * load[w]!;
     const capLat = cap * cfg.tyres.lateralGrip;
     const stopCap = (Math.abs(vLong) * wheelMass) / dt; // never push a wheel past standstill
 
-    let long = w >= 2 ? drive / 2 : 0;
-    const resist = Math.min(brakeTotal * brakeShare[w]! + surf.rollingDrag * load[w]!, stopCap);
+    // Drive goes to the rears by load (limited-slip diff): a lifted inside rear doesn't get half the power.
+    const rearLoad = load[2] + load[3];
+    let long = w >= 2 ? (rearLoad > 0 ? (drive * load[w]!) / rearLoad : drive / 2) : 0;
+    // Rolling resistance on static weight: unchanged by downforce, so tuned surface drag keeps its feel.
+    const resist = Math.min(brakeTotal * brakeShare[w]! + surf.rollingDrag * mass * G * share[w]!, stopCap);
     long -= Math.sign(vLong) * resist;
     let lat = (-vLat * wheelMass * cfg.tyres.lateralStiffness) / dt;
 

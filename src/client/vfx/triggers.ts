@@ -25,11 +25,16 @@ export function wheelFx(prev: CarState, car: CarState, w: 0 | 1 | 2 | 3, cfg: Vf
   const wheel = car.wheels[w];
   const kph = Math.abs(car.speed) * 3.6;
   const speedK = clamp(kph / t.intensitySpeedRefKph, 0, 1.5);
-  const over = clamp(wheel.usage - t.slipThreshold, 0, 1);
+  const overRaw = clamp(wheel.usage - t.slipThreshold, 0, 1);
   const longitudinal = Math.abs(wheel.slipDeg) < t.lockupMaxSlipDeg;
   const front = w < 2;
+  // Marks and smoke come from the tyre scrubbing under load: a lightly loaded (lifted) wheel over its
+  // limit leaves little behind. 1 = an average wheel's share of the car's load.
+  const avgLoad = (car.wheels[0].loadN + car.wheels[1].loadN + car.wheels[2].loadN + car.wheels[3].loadN) / 4;
+  const loadK = avgLoad > 0 ? clamp(wheel.loadN / avgLoad, 0, 1.5) : 1;
 
   let slide = 0, lockup = 0, spin = 0;
+  const over = overRaw * loadK;
   if (over > 0 && kph > 2) {
     if (front && car.controls.brake > 0.1 && longitudinal) lockup = over * Math.max(0.4, speedK);
     // Rears over the limit under throttle with little slip angle are wheelspin at ANY speed (a traction-

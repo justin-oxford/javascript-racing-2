@@ -86,4 +86,27 @@ describe('tyre VFX triggers', () => {
     const { fx } = run(ctx, 60, () => ({ throttle: 0.5, brake: 0, steer: 0 }), fast);
     expect(sum(fx.flatMap((f) => f.map((x) => x.mark)))).toBe(0);
   });
+
+  it('high grip lifting the inside wheels in a hard corner: no inside-wheel skid marks, rear drive to the loaded wheel', () => {
+    // Justin's tuning on 2026-11-11 (baseGrip 3, lateralGrip 1.18) corners near 6 g, past this car's
+    // roll-over point, so the inside wheels carry ~no load. They used to read usage 99 and draw full skids.
+    const ctx = arena(300, 300, { x: 150, y: 280, heading: 0 });
+    ctx.physics.tyres.baseGrip = 3;
+    ctx.physics.tyres.lateralGrip = 1.18;
+    const fast = run(ctx, 60 * 3, () => ({ throttle: 1, brake: 0, steer: 0 }));
+    let world = fast.world;
+    const inside: number[] = [], outside: number[] = [], insideRearUsage: number[] = [];
+    for (let t = 0; t < 90; t++) {
+      const prev = world;
+      world = step(world, [{ throttle: 0.5, brake: 0, steer: 0.6 }], ctx); // right turn: inside = right wheels
+      const fx = ([0, 1, 2, 3] as const).map((w) => wheelFx(prev.cars[0]!, world.cars[0]!, w, vfx, surfaces));
+      inside.push(fx[1]!.mark + fx[3]!.mark);
+      outside.push(fx[0]!.mark + fx[2]!.mark);
+      insideRearUsage.push(world.cars[0]!.wheels[3].usage);
+    }
+    const c = world.cars[0]!;
+    expect(c.wheels[1].loadN).toBeLessThan(0.2 * c.wheels[0].loadN); // the inside really is (nearly) lifted
+    expect(Math.max(...inside)).toBeLessThan(0.05);
+    expect(Math.max(...insideRearUsage)).toBeLessThan(5); // was 99: half the drive sent to a lifted wheel
+  });
 });

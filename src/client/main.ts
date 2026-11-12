@@ -52,6 +52,15 @@ async function main(): Promise<void> {
   const vfx = new Vfx(mask.track.mask.width, mask.track.mask.height, vfxConfig);
   const audio = new GameAudio(audioConfig);
   const timingLines = new TimingLines(hudConfig);
+  // Static layer = background + timing lines + every mark so far. Rebuilt only when something moves.
+  renderer.staticPainter = (c) => {
+    timingLines.drawStatic(c, ctx.track);
+    vfx.drawHistory(c);
+  };
+  renderer.overhead = overhead;
+  vfx.paintLive = (fn) => renderer.paintStatic(fn);
+  vfx.onInvalidate = () => renderer.invalidateStatic();
+  let lineSig = timingLines.signature(ctx.track);
   const startBuild = curr0Build();
   const session = new Session(browserStore(), json.id, startBuild.spec, startBuild.team);
   function curr0Build(): CarBuild {
@@ -182,6 +191,7 @@ async function main(): Promise<void> {
           mask = await loadMask(json);
           ctx = { ...ctx, track: mask.track, walls: mask.walls };
           if (!hasArt) renderer.background = mask.blockout;
+          renderer.invalidateStatic();
           console.info(`[track] hot-reloaded ${id}/${mask.file}`);
         } else if (file === f.background) {
           const bg = await loadBackground(json);
@@ -189,6 +199,7 @@ async function main(): Promise<void> {
           renderer.background = bg ?? mask.blockout;
         } else if (file === f.overhead) {
           overhead = await loadOverhead(json);
+          renderer.overhead = overhead;
         }
       } catch (e) {
         console.error(`[track] reload of ${file} failed`, e);
@@ -258,14 +269,18 @@ async function main(): Promise<void> {
         : undefined;
       renderer.draw(prev, curr, alpha, look, {
         underCars: (c) => {
-          timingLines.draw(c, ctx.track, performance.now()); // under rubber: it builds up over the lines
-          vfx.drawUnder(c, renderer.trackWidth, renderer.trackHeight);
+          // Background, lines and marks come from the renderer's static layer; only a flash is per-frame.
+          const sig = timingLines.signature(ctx.track);
+          if (sig !== lineSig) {
+            lineSig = sig;
+            renderer.invalidateStatic(); // editor moved a line
+          }
+          timingLines.drawFlash(c, ctx.track, performance.now());
           if (editor) drawMask(c, mask.canvas, editor.maskOpacity);
           else if (debug) drawMask(c, mask.canvas, 0.5);
         },
         overCars: (c) => {
-          vfx.drawOver(c, json.pxPerMeter);
-          if (overhead) c.drawImage(overhead, 0, 0, renderer.trackWidth, renderer.trackHeight);
+          vfx.drawOver(c, json.pxPerMeter); // the renderer draws the pre-scaled overhead after this
         },
         overlay: (c) => {
           if (debug || editor) {

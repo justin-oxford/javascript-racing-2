@@ -21,11 +21,11 @@ export function interpolatePose(prev: CarState | undefined, curr: CarState, alph
 }
 
 export interface DrawLayers {
-  /** Above the background, below cars (mask overlay). Track-pixel space. */
+  /** On the dynamic layer, below cars (debug mask, line flash). Track-pixel space. */
   underCars?: (ctx: CanvasRenderingContext2D) => void;
-  /** Above cars (overhead layer). Track-pixel space. */
+  /** On the dynamic layer, above cars (smoke, dust, sparks). Track-pixel space. */
   overCars?: (ctx: CanvasRenderingContext2D) => void;
-  /** Topmost (debug + editor). Track-pixel space. */
+  /** On the dynamic layer, topmost (debug + editor). Track-pixel space. */
   overlay?: (ctx: CanvasRenderingContext2D) => void;
   /** Screen-space text box, top-left. */
   text?: string | undefined;
@@ -42,14 +42,32 @@ export interface CarLook {
 }
 
 /**
- * Canvas whose drawing space is the track's pixel space (e.g. 2560x1440),
- * displayed fitted to the window at the track's aspect ratio, rendered at devicePixelRatio.
+ * Three stacked canvases, all in the track's pixel space (e.g. 2560x1440), fitted to the window at the
+ * track's aspect ratio and rendered at devicePixelRatio:
+ *
+ *   overhead  (top)    bridges/canopy, pre-scaled once; pointer-events off
+ *   dynamic   (middle) the `canvas` passed in: cleared and redrawn every frame (cars, smoke, overlays)
+ *   static    (bottom) background + timing lines + rubber + skid marks
+ *
+ * PERFORMANCE: drawing big track-sized images every frame is what made the game lag (each 2560x1440
+ * layer cost ~15 ms/frame to scale down, and even 1:1 screen-sized copies cost several ms each).
+ * Now the browser's compositor layers the canvases for free; each frame only touches the small
+ * moving things. The static layer is rebuilt only when something moves (resize, editor line drag,
+ * hot reload, marks cleared); new skid marks are painted straight into it.
  */
 export class Renderer {
   private readonly ctx: CanvasRenderingContext2D;
   private scale = 1;
-  /** Background art, or the blockout canvas while a track has no art. */
-  background: CanvasImageSource;
+  private bg: CanvasImageSource;
+  private readonly staticCanvas = document.createElement('canvas');
+  private readonly staticCtx: CanvasRenderingContext2D;
+  private staticDirty = true;
+  /** Draws timing lines, marks history etc. onto the static layer during a rebuild (track px space). */
+  staticPainter: ((ctx: CanvasRenderingContext2D) => void) | undefined;
+  private overheadImg: CanvasImageSource | undefined;
+  private readonly overheadCanvas = document.createElement('canvas');
+  private overheadDirty = true;
+  rebuilds = 0;
 
   constructor(
     readonly canvas: HTMLCanvasElement,
@@ -57,10 +75,19 @@ export class Renderer {
     readonly trackHeight: number,
     background: CanvasImageSource,
   ) {
-    this.background = background;
+    this.bg = background;
+    this.staticCtx = this.staticCanvas.getContext('2d', { alpha: false })!;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('2D canvas not supported');
     this.ctx = ctx;
+    // Stack: static under the dynamic canvas, overhead above it.
+    const stage = document.createElement('div');
+    stage.className = 'stage';
+    canvas.replaceWith(stage);
+    this.staticCanvas.className = 'layer static';
+    this.overheadCanvas.className = 'layer overhead';
+    canvas.classList.add('layer', 'dynamic');
+    stage.append(this.staticCanvas, canvas, this.overheadCanvas);
     this.resize();
     window.addEventListener('resize', () => this.resize());
     // Fires when the window moves between screens with different DPR.
@@ -76,11 +103,65 @@ export class Renderer {
       cssW = cssH * aspect;
     }
     const dpr = window.devicePixelRatio || 1;
-    this.canvas.style.width = `${cssW}px`;
-    this.canvas.style.height = `${cssH}px`;
-    this.canvas.width = Math.round(cssW * dpr);
-    this.canvas.height = Math.round(cssH * dpr);
-    this.scale = this.canvas.width / this.trackWidth;
+    const w = Math.round(cssW * dpr), h = Math.round(cssH * dpr);
+    const stage = this.canvas.parentElement!;
+    stage.style.width = `${cssW}px`;
+    stage.style.height = `${cssH}px`;
+    for (const c of [this.canvas, this.staticCanvas, this.overheadCanvas]) {
+      c.style.width = `${cssW}px`;
+      c.style.height = `${cssH}px`;
+      c.width = w;
+      c.height = h;
+    }
+    this.scale = w / this.trackWidth;
+    this.staticDirty = true;
+    this.overheadDirty = true;
+  }
+
+  /** Background art, or the blockout canvas while a track has no art. */
+  get background(): CanvasImageSource {
+    return this.bg;
+  }
+  set background(b: CanvasImageSource) {
+    this.bg = b;
+    this.invalidateStatic();
+  }
+
+  set overhead(img: CanvasImageSource | undefined) {
+    this.overheadImg = img;
+    this.overheadDirty = true;
+  }
+
+  /** Rebuild the static layer before the next frame (lines moved, marks cleared, hot reload...). */
+  invalidateStatic(): void {
+    this.staticDirty = true;
+  }
+
+  /** Paint straight onto the static layer (new skid marks), in track-pixel space. Skipped if a rebuild is due anyway. */
+  paintStatic(fn: (ctx: CanvasRenderingContext2D) => void): void {
+    if (this.staticDirty) return;
+    const c = this.staticCtx;
+    c.setTransform(this.scale, 0, 0, this.scale, 0, 0);
+    fn(c);
+  }
+
+  private rebuildStatic(): void {
+    const c = this.staticCtx;
+    c.setTransform(this.scale, 0, 0, this.scale, 0, 0);
+    c.globalAlpha = 1;
+    c.imageSmoothingEnabled = true;
+    c.drawImage(this.bg, 0, 0, this.trackWidth, this.trackHeight);
+    this.staticPainter?.(c);
+    this.staticDirty = false;
+    this.rebuilds++;
+  }
+
+  private rebuildOverhead(): void {
+    this.overheadDirty = false;
+    const c = this.overheadCanvas.getContext('2d')!;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, this.overheadCanvas.width, this.overheadCanvas.height);
+    if (this.overheadImg) c.drawImage(this.overheadImg, 0, 0, this.overheadCanvas.width, this.overheadCanvas.height);
   }
 
   /** Mouse event -> track pixel coordinates. */
@@ -96,10 +177,13 @@ export class Renderer {
 
   draw(prev: WorldState, curr: WorldState, alpha: number, look: CarLook, layers: DrawLayers = {}): void {
     const { ctx } = this;
-    ctx.setTransform(this.scale, 0, 0, this.scale, 0, 0);
+    if (this.staticDirty) this.rebuildStatic();
+    if (this.overheadDirty) this.rebuildOverhead();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.setTransform(this.scale, 0, 0, this.scale, 0, 0);
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(this.background, 0, 0, this.trackWidth, this.trackHeight);
     layers.underCars?.(ctx);
 
     const ppm = look.pxPerMeter;

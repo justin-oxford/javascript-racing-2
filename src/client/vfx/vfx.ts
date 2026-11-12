@@ -27,13 +27,25 @@ function saveQuality(q: VfxQuality): void {
 
 const enum Kind { Smoke, Grass, Gravel, Stone, Spark }
 const COLOURS = ['220,220,220', '96,112,58', '186,166,116', '92,84,72', '255,196,80'];
+const SPARK = `rgb(${COLOURS[4]})`;
+const FILLS = COLOURS.map((c) => `rgb(${c})`);
+
+
+
+/** Marks history is kept at this fraction of track resolution (it's only replayed on static-layer rebuilds). */
+const HISTORY_SCALE = 0.5;
+/** Rubber stamps converge to this tone, so built-up rubber darkens asphalt but never turns black. */
+const RUBBER_RGB = '38,38,40';
 
 export class Vfx {
   quality: VfxQuality = loadQuality();
-  readonly skid: HTMLCanvasElement;
-  readonly rubber: HTMLCanvasElement;
-  private readonly skidCtx: CanvasRenderingContext2D;
-  private readonly rubberCtx: CanvasRenderingContext2D;
+  /** Every mark ever laid (rubber + skids + turf), half resolution, transparent elsewhere. */
+  readonly history: HTMLCanvasElement;
+  private readonly historyCtx: CanvasRenderingContext2D;
+  /** Paints onto the renderer's static layer (track px space); set by main. */
+  paintLive: (fn: (ctx: CanvasRenderingContext2D) => void) => void = () => {};
+  /** Ask for a static-layer rebuild (marks cleared, quality changed). */
+  onInvalidate: () => void = () => {};
   // Particle pool, struct of arrays. Positions/velocities in metres.
   private readonly cap: number;
   private readonly px: Float32Array; private readonly py: Float32Array;
@@ -46,18 +58,13 @@ export class Vfx {
   private carry = new Map<string, number>();
   dropped = 0;
 
-  constructor(width: number, height: number, private readonly cfg: VfxConfig) {
-    const make = () => {
-      const c = document.createElement('canvas');
-      c.width = width;
-      c.height = height;
-      return c;
-    };
-    this.skid = make();
-    this.rubber = make();
-    this.skidCtx = this.skid.getContext('2d')!;
-    this.rubberCtx = this.rubber.getContext('2d')!;
-    for (const c of [this.skidCtx, this.rubberCtx]) c.lineCap = 'round';
+  constructor(private readonly width: number, private readonly height: number, private readonly cfg: VfxConfig) {
+    this.history = document.createElement('canvas');
+    this.history.width = Math.ceil(width * HISTORY_SCALE);
+    this.history.height = Math.ceil(height * HISTORY_SCALE);
+    this.historyCtx = this.history.getContext('2d')!;
+    this.historyCtx.setTransform(HISTORY_SCALE, 0, 0, HISTORY_SCALE, 0, 0);
+    this.historyCtx.lineCap = 'round';
     this.cap = cfg.maxParticles;
     const f = () => new Float32Array(this.cap);
     this.px = f(); this.py = f(); this.vx = f(); this.vy = f(); this.age = f(); this.life = f();
@@ -69,6 +76,7 @@ export class Vfx {
     this.quality = q;
     saveQuality(q);
     if (q === 'off') this.count = 0;
+    this.onInvalidate(); // marks shown/hidden
   }
 
   cycleQuality(): VfxQuality {
@@ -78,9 +86,18 @@ export class Vfx {
 
   /** Green track: wipe marks and rubber (new session). */
   clear(): void {
-    this.skidCtx.clearRect(0, 0, this.skid.width, this.skid.height);
-    this.rubberCtx.clearRect(0, 0, this.rubber.width, this.rubber.height);
+    this.historyCtx.save();
+    this.historyCtx.setTransform(1, 0, 0, 1, 0, 0);
+    this.historyCtx.clearRect(0, 0, this.history.width, this.history.height);
+    this.historyCtx.restore();
     this.count = 0;
+    this.onInvalidate();
+  }
+
+  /** Replay all marks onto a static-layer rebuild (track px space). */
+  drawHistory(ctx: CanvasRenderingContext2D): void {
+    if (this.quality === 'off') return;
+    ctx.drawImage(this.history, 0, 0, this.width, this.height);
   }
 
   get particles(): number {
@@ -120,18 +137,28 @@ export class Vfx {
       for (const w of [0, 1, 2, 3] as const) {
         const fx = wheelFx(before, car, w, c, track.surfaces);
         const a = p0[w], b = p1[w];
-        // Rubber: faint stamps that only build up where tyres are loaded.
-        if (fx.rubber > 0 && this.quality === 'high') this.line(this.rubberCtx, a, b, ppm, c.skid.widthM, `rgba(18,18,18,${fx.rubber})`);
+        const l = c.layers;
+        // Rubber: faint stamps toward a fixed dark tone, only where tyres are loaded.
+        if (fx.rubber > 0 && this.quality === 'high') this.mark(a, b, ppm, c.skid.widthM, `rgba(${RUBBER_RGB},${fx.rubber * l.rubberOpacity})`);
         // Skid marks.
         if (fx.mark > c.skid.minIntensity) {
           const dark = fx.lockup > 0 ? c.skid.lockupDarkness : 1;
-          this.line(this.skidCtx, a, b, ppm, c.skid.widthM * (fx.lockup > 0 ? 1.1 : 1), `rgba(12,12,12,${Math.min(1, c.skid.alpha * fx.mark * dark)})`);
+          this.mark(a, b, ppm, c.skid.widthM * (fx.lockup > 0 ? 1.1 : 1), `rgba(12,12,12,${Math.min(1, c.skid.alpha * fx.mark * dark) * l.skidOpacity})`);
         }
         // Torn turf on grass.
-        if (fx.offTrack === 'grass') this.line(this.skidCtx, a, b, ppm, c.skid.widthM * 1.2, `rgba(70,52,28,${c.dust.turfAlpha * fx.offIntensity})`);
+        if (fx.offTrack === 'grass') this.mark(a, b, ppm, c.skid.widthM * 1.2, `rgba(70,52,28,${c.dust.turfAlpha * fx.offIntensity * l.skidOpacity})`);
         this.emitWheel(ci, w, car, b, fx);
       }
       this.emitSparks(ci, car, track, physics);
+    });
+  }
+
+  /** A mark: into the history (for rebuilds) and live onto the screen's static layer. */
+  private mark(a: { x: number; y: number }, b: { x: number; y: number }, ppm: number, widthM: number, style: string): void {
+    this.line(this.historyCtx, a, b, ppm, widthM, style);
+    this.paintLive((ctx) => {
+      ctx.lineCap = 'round';
+      this.line(ctx, a, b, ppm, widthM, style);
     });
   }
 
@@ -208,18 +235,6 @@ export class Vfx {
     }
   }
 
-  /** Marks and rubber: above the background, below cars. */
-  drawUnder(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-    if (this.quality === 'off') return;
-    const l = this.cfg.layers;
-    ctx.save();
-    ctx.globalAlpha = l.rubberOpacity;
-    ctx.drawImage(this.rubber, 0, 0, w, h);
-    ctx.globalAlpha = l.skidOpacity;
-    ctx.drawImage(this.skid, 0, 0, w, h);
-    ctx.restore();
-  }
-
   /** Smoke, dust, stones, sparks: above cars. */
   drawOver(ctx: CanvasRenderingContext2D, ppm: number): void {
     if (this.quality === 'off' || !this.count) return;
@@ -229,7 +244,8 @@ export class Vfx {
       const k = this.kind[i]!;
       const x = this.px[i]! * ppm, y = this.py[i]! * ppm;
       if (k === Kind.Spark) {
-        ctx.strokeStyle = `rgba(${COLOURS[k]},${1 - t})`;
+        ctx.globalAlpha = 1 - t;
+        ctx.strokeStyle = SPARK;
         ctx.lineWidth = 0.12 * ppm;
         ctx.beginPath();
         ctx.moveTo(x, y);
@@ -237,9 +253,10 @@ export class Vfx {
         ctx.stroke();
         continue;
       }
-      // Puffs fade in fast, then out.
-      const a = this.alpha[i]! * Math.min(1, t * 6) * (1 - t);
-      ctx.fillStyle = `rgba(${COLOURS[k]},${a})`;
+      // Puffs fade in fast, then out. Plain filled circles: cheap on both GPU and software canvases
+      // (scaled sprite images measured far slower in software rendering).
+      ctx.globalAlpha = this.alpha[i]! * Math.min(1, t * 6) * (1 - t);
+      ctx.fillStyle = FILLS[k]!;
       ctx.beginPath();
       ctx.arc(x, y, Math.max(0.05, this.size[i]!) * ppm * 0.5, 0, Math.PI * 2);
       ctx.fill();
