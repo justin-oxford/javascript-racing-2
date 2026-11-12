@@ -14,7 +14,9 @@
     "draft-mask": "node tools/draft-mask.ts public/assets/BGs/indiana.jpg tracks/indiana/mask-draft.png tracks/indiana/draft-hints.json",
     "validate-track": "tsx tools/validate-track.ts",
     "suggest-timing-lines": "tsx tools/suggest-timing-lines.ts",
-    "drive-laps": "tsx tools/drive-laps.ts"
+    "drive-laps": "tsx tools/drive-laps.ts",
+    "suggest-racing-line": "tsx tools/suggest-racing-line.ts",
+    "ai-run": "tsx tools/ai-run.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

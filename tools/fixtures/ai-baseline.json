@@ -1,0 +1,11 @@
+{
+  "_comment": "AI drivers (card 05). cornerMargin = fraction of the computed safe corner speed it uses; brakeMargin = fraction of its estimated max braking it plans with (lower = brakes earlier); lookahead = baseM + perMps x speed; steerKp = gain on the pure-pursuit wheel angle (1 = geometric), steerKd = damping on heading-error change; noise = random steer jitter; mistakesPerMin = chance of a late brake or a wide line; traffic = forward cone and overtaking offset. pits: stop when fuel < fuelLaps laps or any tyre < minWear; drive the pit lane pitSpeedMarginKph under the limit. Tune by racing them (panel: T).",
+  "defaultPreset": "hard",
+  "presets": {
+    "easy": { "cornerMargin": 0.78, "brakeMargin": 0.5, "lookaheadBaseM": 7, "lookaheadPerMps": 0.3, "steerKp": 0.95, "steerKd": 0.02, "noise": 0.08, "mistakesPerMin": 1.5, "trafficConeM": 30, "overtakeOffsetM": 3, "throttleCap": 0.85 },
+    "medium": { "cornerMargin": 0.88, "brakeMargin": 0.58, "lookaheadBaseM": 7, "lookaheadPerMps": 0.28, "steerKp": 1, "steerKd": 0.02, "noise": 0.04, "mistakesPerMin": 0.6, "trafficConeM": 35, "overtakeOffsetM": 3.5, "throttleCap": 1 },
+    "hard": { "cornerMargin": 0.96, "brakeMargin": 0.65, "lookaheadBaseM": 7, "lookaheadPerMps": 0.26, "steerKp": 1.05, "steerKd": 0.02, "noise": 0.015, "mistakesPerMin": 0.2, "trafficConeM": 40, "overtakeOffsetM": 4, "throttleCap": 1 }
+  },
+  "recovery": { "stuckSec": 2, "reverseSec": 1.4, "backwardsDeg": 120 },
+  "pits": { "fuelLaps": 2.2, "minWear": 0.45, "pitSpeedMarginKph": 4 }
+}

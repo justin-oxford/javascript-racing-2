@@ -92,15 +92,27 @@ export function createCar(posePx: Pose, build: CarBuild, ctx: SimContext): CarSt
   };
 }
 
-/** Starting pose for car i: grid slot i if the track has one, else lined up behind the spawn. */
+/**
+ * Starting pose for car i: grid slot i if the track has one, else a staggered two-wide grid behind the
+ * spawn (one row every 8 m, the second column 4 m to the side and 4 m back, on whichever side is legal
+ * surface). Nose-to-tail single file piled up at the first corner.
+ */
 function startPose(i: number, ctx: SimContext): Pose {
-  const { grid, spawn, pxPerMeter } = ctx.track.json;
+  const { grid, spawn, pxPerMeter: ppm } = ctx.track.json;
   if (i === 0) return spawn;
   const slot = grid[i];
   if (slot) return slot;
-  const f = forward(spawn.heading);
-  const back = i * (ctx.physics.car.lengthM + 1.5) * pxPerMeter;
-  return { x: spawn.x - f.x * back, y: spawn.y - f.y * back, heading: spawn.heading };
+  const f = forward(spawn.heading), r = right(spawn.heading);
+  const legal = (x: number, y: number) => ctx.track.surfaces[surfaceAt(ctx.track, x, y)]?.legal ?? false;
+  const clear = (x: number, y: number) => [-1.5, 0, 1.5].every((o) => legal(x + r.x * o * ppm, y + r.y * o * ppm));
+  const back = (Math.floor(i / 2) * 8 + (i % 2) * 4) * ppm;
+  const bx = spawn.x - f.x * back, by = spawn.y - f.y * back;
+  if (i % 2)
+    for (const side of [1, -1]) {
+      const x = bx + r.x * side * 4 * ppm, y = by + r.y * side * 4 * ppm;
+      if (clear(x, y)) return { x, y, heading: spawn.heading };
+    }
+  return { x: bx, y: by, heading: spawn.heading };
 }
 
 export function createWorld(ctx: SimContext, cars: number | readonly CarBuild[] = 1): WorldState {

@@ -2,7 +2,7 @@
 // tick, so changes apply to the running car immediately. Save writes them back to /config.
 // Tuning is Justin's job; this file's job is to be a good instrument.
 import GUI, { type Controller } from 'lil-gui';
-import type { CarBuild, PhysicsConfig, Rules, SurfaceDef, WorldState } from '../../sim';
+import type { AiConfig, CarBuild, PhysicsConfig, Rules, SurfaceDef, WorldState } from '../../sim';
 import type { VfxConfig } from '../vfx/triggers';
 import type { VfxQuality } from '../vfx/vfx';
 import type { AudioConfig } from '../audio/targets';
@@ -54,6 +54,23 @@ const RANGES: Record<string, [number, number, number]> = {
   'solver.velocityIterations': [1, 20, 1],
   'solver.positionIterations': [1, 20, 1],
   'rules.pitSpeedLimitKph': [20, 150, 1],
+  'ai.cornerMargin': [0.5, 1.1, 0.01],
+  'ai.brakeMargin': [0.3, 1.1, 0.01],
+  'ai.lookaheadBaseM': [2, 20, 0.5],
+  'ai.lookaheadPerMps': [0, 0.8, 0.01],
+  'ai.steerKp': [0.3, 2, 0.01],
+  'ai.steerKd': [0, 0.2, 0.005],
+  'ai.noise': [0, 0.3, 0.005],
+  'ai.mistakesPerMin': [0, 6, 0.1],
+  'ai.trafficConeM': [10, 80, 1],
+  'ai.overtakeOffsetM': [1, 8, 0.1],
+  'ai.throttleCap': [0.3, 1, 0.01],
+  'ai.pits.fuelLaps': [1, 5, 0.1],
+  'ai.pits.minWear': [0.1, 0.9, 0.01],
+  'ai.pits.pitSpeedMarginKph': [0, 20, 0.5],
+  'ai.recovery.stuckSec': [0.5, 10, 0.1],
+  'ai.recovery.reverseSec': [0.3, 5, 0.1],
+  'ai.recovery.backwardsDeg': [60, 180, 5],
   'surface.grip': [0, 1.5, 0.01],
   'surface.rollingDrag': [0, 1.5, 0.005],
   'audio.engine.gears': [3, 10, 1],
@@ -82,11 +99,13 @@ export interface TuningTargets {
   /** config/audio.json, live. */
   audio: AudioConfig;
   volumes: { values: Volumes; set(bus: 'master' | 'engine' | 'tyres' | 'impacts' | 'ui', v: number): void };
+  /** config/ai.json, live (AI drivers read it every tick). */
+  ai: AiConfig;
   /** Called when the team/spec/setup changes, to rebuild the player's car. */
   onBuildChange(build: CarBuild): void;
 }
 
-async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio', value: unknown): Promise<string> {
+async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai', value: unknown): Promise<string> {
   const res = await fetch(`/__tuning/save/${name}`, { method: 'POST', headers: { 'x-tuning-panel': '1' }, body: formatTrackJson(value) });
   return res.ok ? `config/${name}.json` : `${name}: ${await res.text()}`;
 }
@@ -184,6 +203,21 @@ export class TuningPanel {
     }
     snd.close();
 
+    const ai = gui.addFolder('AI drivers (HUD menu: count + difficulty)');
+    for (const [name, preset] of Object.entries(this.t.ai.presets)) {
+      const sub = ai.addFolder(name);
+      for (const key of Object.keys(preset)) this.slider(sub, preset, key, `ai.${key}`);
+      sub.close();
+    }
+    for (const section of ['pits', 'recovery'] as const) {
+      const values = this.t.ai[section];
+      if (!values) continue;
+      const sub = ai.addFolder(section);
+      for (const key of Object.keys(values)) this.slider(sub, values, key, `ai.${section}.${key}`);
+      sub.close();
+    }
+    ai.close();
+
     const io = gui.addFolder('Save / export');
     const status = { msg: '' };
     const show = (m: string) => {
@@ -191,7 +225,7 @@ export class TuningPanel {
       statusCtl.updateDisplay();
     };
     io.add({
-      save: async () => show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio)])).join(', ')),
+      save: async () => show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai)])).join(', ')),
     }, 'save').name('Save to /config');
     io.add({ copy: () => void navigator.clipboard.writeText(formatTrackJson(physics)).then(() => show('physics.json copied')) }, 'copy').name('Copy physics JSON');
     io.add({ revert: () => this.revert() && show('Reverted to last saved values') }, 'revert').name('Revert unsaved changes');

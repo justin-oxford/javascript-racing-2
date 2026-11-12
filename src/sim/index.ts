@@ -5,4 +5,5 @@ export * from './track';
 export * from './walls';
 export * from './planck-cache';
 export * from './timing';
+export * from './ai';
 export * from './world';

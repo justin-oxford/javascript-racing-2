@@ -91,6 +91,7 @@
   border-radius: calc(var(--u) * 4);
   font-size: calc(var(--u) * 10);
 }
+.choices.ai-count button { min-width: calc(var(--u) * 40); }
 .choices.specs button { min-width: calc(var(--u) * 70); font-family: "Formula1 Bold", system-ui, sans-serif; font-size: calc(var(--u) * 14); }
 .choices button:hover, .choices button.active { background: rgba(230, 57, 70, 0.9); }
 
