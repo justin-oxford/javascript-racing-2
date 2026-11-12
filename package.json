@@ -20,7 +20,8 @@
     "contact-probe": "tsx tools/contact-probe.ts",
     "handling-diag": "tsx tools/handling-diag.ts",
     "optimize-racing-line": "tsx tools/optimize-racing-line.ts",
-    "tow-probe": "tsx tools/tow-probe.ts"
+    "tow-probe": "tsx tools/tow-probe.ts",
+    "start-probe": "tsx tools/start-probe.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

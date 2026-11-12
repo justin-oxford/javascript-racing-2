@@ -1,5 +1,5 @@
 {
-  "_comment": "AI drivers (card 05). cornerMargin = fraction of the computed safe corner speed it uses; brakeMargin = fraction of its estimated max braking it plans with (lower = brakes earlier); lookahead = baseM + perMps x speed; steerKp = gain on the pure-pursuit wheel angle (1 = geometric), steerKd = damping on heading-error change; noise = random steer jitter; mistakesPerMin = chance of a late brake or a wide line; traffic = forward cone and overtaking offset. pits: stop when fuel < fuelLaps laps or any tyre < minWear; drive the pit lane pitSpeedMarginKph under the limit. start: reaction to lights out, random in min..max per driver. aids: traction control on the rears' slip as a fraction of peak (03b). Tune by racing them (panel: T).",
+  "_comment": "AI drivers (card 05). cornerMargin = fraction of the computed safe corner speed it uses; brakeMargin = fraction of its estimated max braking it plans with (lower = brakes earlier); lookahead = baseM + perMps x speed; steerKp = gain on the pure-pursuit wheel angle (1 = geometric), steerKd = damping on heading-error change; noise = random steer jitter; mistakesPerMin = chance of a late brake or a wide line; traffic = forward cone and overtaking offset. pits: stop when fuel < fuelLaps laps or any tyre < minWear; drive the pit lane pitSpeedMarginKph under the limit. start: reaction to lights out, random in min..max per driver. aids: traction control on the rears' slip, as a fraction of peak (03b); trail*: steering more than trailSteer and over its target speed, the AI brakes in proportion to the overspeed (full trailMaxPedal at trailOverspeedMps) instead of a firm 30%+, so the unloaded inside front doesn't lock. Tune by racing them (panel: T).",
   "defaultPreset": "hard",
   "presets": {
     "easy": { "cornerMargin": 0.78, "brakeMargin": 0.5, "lookaheadBaseM": 7, "lookaheadPerMps": 0.3, "steerKp": 0.95, "steerKd": 0.02, "noise": 0.08, "mistakesPerMin": 1.5, "trafficConeM": 30, "overtakeOffsetM": 3, "throttleCap": 0.85 },
@@ -9,5 +9,7 @@
   "recovery": { "stuckSec": 2, "reverseSec": 1.4, "backwardsDeg": 120 },
   "pits": { "fuelLaps": 2.2, "minWear": 0.45, "pitSpeedMarginKph": 4 },
   "start": { "reactionMinSec": 0.15, "reactionMaxSec": 0.4 },
-  "aids": { "tcSlip": 0.9, "tcRange": 0.35 }
+  "aids": { "tcSlip": 0.9, "tcRange": 0.35, "trailSteer": 0.25, "trailOverspeedMps": 4, "trailMaxPedal": 0.6 },
+  "traffic": { "sideGapM": 1.2 },
+  "coast": { "coastMaxDropMps": 0, "liftBeforeBrakeSec": 0.2, "coastMinKph": 100 }
 }

@@ -29,8 +29,12 @@ export interface AiConfig {
   presets: Record<string, AiPreset>;
   recovery: { stuckSec: number; reverseSec: number; backwardsDeg: number };
   pits?: { fuelLaps: number; minWear: number; pitSpeedMarginKph: number };
+  /** Lift and coast: coast (no throttle, no brake) for drops up to coastMaxDropMps; lift liftBeforeBrakeSec before braking. */
+  coast?: { coastMaxDropMps: number; liftBeforeBrakeSec: number; coastMinKph?: number };
+  /** Side by side: lateral gap kept to a car alongside, beyond the cars' width (3-wide allowed if it fits). */
+  traffic?: { sideGapM: number };
   /** Traction control: from tcSlip (rear longitudinal slip as a fraction of peak), fully off tcRange later. */
-  aids?: { tcSlip: number; tcRange: number };
+  aids?: { tcSlip: number; tcRange: number; trailSteer?: number; trailOverspeedMps?: number; trailMaxPedal?: number };
   /** Race starts: reaction to lights out, a random delay in this range per driver. */
   start?: { reactionMinSec: number; reactionMaxSec: number };
 }
@@ -493,6 +497,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   let allowed: number;
   /** A braking zone within ~1.5 s: the moment to pull out of a tow and go for the pass. */
   let brakingSoon = false;
+  /** LIFT AND COAST: the speed that, coasting on drag alone from here, just meets every target ahead. */
+  let coastLimit = Infinity;
   if (!pit) {
     // ON THE RACING LINE: this car's own speed profile round the whole line (racing line optimizer card),
     // computed once for its build and preset, then scaled by what's changed since: tyre wear (speed goes
@@ -503,6 +509,20 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     const ahead = st.mistake?.kind === 'lateBrake' ? 6 : 1;
     allowed = prof[idx(best + ahead)]! * Math.sqrt(Math.max(0.05, tyre)) * st.trust;
     for (let q = 1, look = Math.ceil((speed * 3) / SPACING_M); q <= look; q++) if (prof[idx(best + q)]! < speed * 0.9) { brakingSoon = true; break; }
+    // Coasting decel ~ aero drag (+ a little rolling resistance). Two uses, both short:
+    //  - a SMALL drop ahead (a fast kink, <= coastMaxDropMps): coast down to it instead of braking at all;
+    //  - a real braking zone: lift liftBeforeBrakeSec before the braking point, then brake.
+    const lc = { coastMaxDropMps: 6, liftBeforeBrakeSec: 0.4, coastMinKph: 100, ...cfg.coast };
+    const coastA = (v: number) => (phys.aero.dragCoef * stats.drag * v * v) / mass + 0.15;
+    const scale = Math.sqrt(Math.max(0.05, tyre)) * st.trust;
+    const liftAhead = Math.ceil((speed * lc.liftBeforeBrakeSec) / SPACING_M);
+    for (let q = 1, look = Math.ceil((speed * 4) / SPACING_M); q <= look; q++) {
+      const target = prof[idx(best + q)]! * scale;
+      if (target >= speed - 0.3) continue;
+      if (q <= liftAhead) { coastLimit = 0; break; } // the braking curve starts within ~0.4 s: lift now
+      // Only where coasting costs almost nothing: at speed (real drag) and within ~1.5 s of the drop.
+      if (speed - target <= lc.coastMaxDropMps && speed * 3.6 > lc.coastMinKph && q * SPACING_M <= speed * 1.5) coastLimit = Math.min(coastLimit, Math.sqrt(target * target + 2 * coastA(target) * q * SPACING_M));
+    }
   } else {
     // In the pit lane: a short backward scan, since the path is short and has the limiter and the stop.
     const scanM = (speed * speed) / (2 * Math.max(1, brakeA(speed) * 0.4)) + 40;
@@ -554,8 +574,20 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     for (const o of others) if (o && o.ahead >= towCfg.tow.minRangeM && o.ahead <= towCfg.tow.maxRangeM && Math.abs(o.side) < 4 && o.ahead < towBest) { towBest = o.ahead; towSide = o.side; }
     if (towBest < Infinity) wantOffset = clamp((crossErr + towSide) * eager, -4, 4);
   }
-  // A car next to us blocks moving over on its side.
-  for (const o of others) if (o && Math.abs(o.ahead) < phys.car.lengthM && Math.abs(o.side) < 4) alongside = Math.sign(o.side) || 1;
+  // Cars alongside (overlapping lengthwise), tracked on EACH side: 3-wide is fine as long as everyone
+  // keeps a car width + sideGapM apart. Nearest lateral distance to a car on the left / right.
+  const trafficCfg = cfg.traffic ?? { sideGapM: 0.8 };
+  const needSide = phys.car.widthM + trafficCfg.sideGapM;
+  let nearL = Infinity, nearR = Infinity;
+  /** Whether the nearest car on that side has the right of way (it's ahead, or level and a lower number). */
+  let theirsL = false, theirsR = false;
+  others.forEach((o, oi) => {
+    if (!o || Math.abs(o.ahead) >= phys.car.lengthM + 1) return;
+    const theirs = o.ahead > 0.5 || (Math.abs(o.ahead) <= 0.5 && oi < i);
+    if (o.side < 0) { if (-o.side < nearL) { nearL = -o.side; theirsL = theirs; } }
+    else if (o.side < nearR) { nearR = o.side; theirsR = theirs; }
+  });
+  if (nearL < 4 || nearR < 4) alongside = nearR <= nearL ? 1 : -1;
   for (const o of others) {
     if (!o) continue;
     const { ahead, side, along: otherFwd } = o;
@@ -597,12 +629,20 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     maxL = Math.min(maxL, Math.max(0, path.left[j]! - 1.5));
   }
   const needIn = st.offset > maxR + 0.3 ? -1 : st.offset < -maxL - 0.3 ? 1 : 0; // must move back toward the line
-  if (alongside && Math.sign(wantOffset - st.offset) === alongside) {
-    // Someone's beside us on the side we'd move to. If the road ahead runs out on our side, yield: drop
-    // back and tuck in behind instead of being squeezed off. Otherwise hold our lane.
-    if (needIn === alongside) allowed = Math.min(allowed, Math.max(0, speed - 3));
-    else wantOffset = st.offset;
-  }
+  // Never move toward a car that's alongside on that side.
+  if (wantOffset > st.offset && nearR < 4) wantOffset = st.offset;
+  if (wantOffset < st.offset && nearL < 4) wantOffset = st.offset;
+  // Keep the side-by-side gap: ease away from a car that's too close on one side; in the middle of three,
+  // centre between them. Lateral room here is relative to our current lane (offset).
+  const pushL = Math.max(0, needSide - nearL), pushR = Math.max(0, needSide - nearR);
+  if (pushL > 0 || pushR > 0) wantOffset = st.offset + (pushL - pushR) * 0.5 + (pushL > 0 && pushR > 0 ? 0 : (pushL - pushR) * 0.5);
+  // No room to keep the gap (the road ahead runs out on the side we must go, or squeezed both sides):
+  // yield, drop back and tuck in behind instead of leaning on the other car.
+  // Only the car without the right of way yields (both yielding = both stop).
+  const squeezed = (pushL > 0 && pushR > 0 && nearL + nearR < 2 * needSide && (theirsL || theirsR))
+    || (pushL > 0 && theirsL && st.offset >= maxR - 0.1) || (pushR > 0 && theirsR && st.offset <= -maxL + 0.1)
+    || (needIn > 0 && nearR < 4 && theirsR) || (needIn < 0 && nearL < 4 && theirsL);
+  if (squeezed) allowed = Math.min(allowed, Math.max(0, speed - 2));
   // Moving over to pass is quicker than drifting back to the line.
   const latRate = st.attack || Math.abs(wantOffset) >= preset.overtakeOffsetM - 0.01 ? 5 : 3;
   st.offset += clamp(clamp(wantOffset, -maxL, maxR) - st.offset, -latRate * TICK_DT, latRate * TICK_DT);
@@ -639,9 +679,16 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   if (speed < 8 && Math.abs(err) > 0.8) steer = Math.sign(err);
 
   // Throttle / brake toward the allowed speed.
+  const aids = { tcSlip: 0.9, tcRange: 0.35, trailSteer: 0.25, trailOverspeedMps: 4, trailMaxPedal: 0.6, ...cfg.aids };
   let throttle = 0, brake = 0;
   if (holdInBox) brake = speed > 0.5 ? 1 : 0; // brake held at a standstill means reverse: let go once stopped
-  else if (speed > allowed + 0.3) brake = clamp((speed - allowed) / 2, 0.3, 1);
+  else if (speed > allowed + 0.3) {
+    // Firm braking in a straight line; turning in and only a little too fast, a light touch that grows
+    // with the overspeed (a fixed 30% minimum locked the unloaded inside front at every turn-in).
+    const turning = Math.abs(car.controls.steer) > aids.trailSteer;
+    brake = turning ? clamp((speed - allowed) / aids.trailOverspeedMps, 0, 1) * aids.trailMaxPedal : clamp((speed - allowed) / 2, 0.3, 1);
+  }
+  else if (speed >= coastLimit) throttle = 0; // lift and coast: drag alone will bring it down to what's coming
   else if (speed < allowed - 1) throttle = preset.throttleCap;
   else throttle = allowed > 0.5 ? preset.throttleCap * 0.5 : 0;
   if (saturated && !holdInBox) {
@@ -655,7 +702,6 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // Traction control on the tyres (card 03b: wheel.usage = slip as a fraction of the tyre's peak):
   // rears nearing their peak -> less throttle. (An ABS the same way was tried and dropped:
   // it let cars overshoot corners into walls; the brake cap below already keeps the fronts honest.)
-  const aids = cfg.aids ?? { tcSlip: 0.9, tcRange: 0.35 };
   // Combined slip (ellipse): throttle is what eats the rears' sideways grip on exit, so cut it on either.
   const rearUse = Math.max(car.wheels[2].usage, car.wheels[3].usage);
   if (rearUse > aids.tcSlip) throttle *= clamp(1 - (rearUse - aids.tcSlip) / aids.tcRange, 0, 1);
@@ -666,7 +712,17 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // cornering uses (the speed profile above), so the pedal isn't reduced again here.
   if (brake > 0 && !holdInBox) {
     const grip = mu * mass * G * (1 + kAero * speed * speed);
-    brake = Math.min(brake, Math.max(0.3, Math.min(1, (grip * wf) / (brakeF * bias))));
+    brake = Math.min(brake, Math.min(1, (grip * wf) / (brakeF * bias)));
+    // Turning in: never press past what the lighter (inside) front can take on top of its cornering,
+    // from last tick's telemetry (its grip, the slip angle it's using). Both fronts get the same force.
+    if (Math.abs(car.controls.steer) > aids.trailSteer) {
+      const perWheel = (brakeF * bias) / 2;
+      for (const w of [car.wheels[0], car.wheels[1]]) {
+        const lat = Math.min(1, Math.abs(w.slipDeg) / phys.tyres.peakSlipDeg);
+        if (w.gripN > 0) brake = Math.min(brake, (w.gripN * Math.sqrt(Math.max(0, 1 - lat * lat))) / perWheel);
+      }
+    }
+
   }
   return { input: { throttle, brake, steer }, state: st };
 }

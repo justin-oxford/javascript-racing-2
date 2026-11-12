@@ -285,11 +285,15 @@ export function speedProfile(x: ArrayLike<number>, y: ArrayLike<number>, physics
     return (Math.min(drive, rearGrip) - physics.aero.dragCoef * stats.drag * v * v) / mass;
   };
   const circle = (v: number, kk: number) => { const u = Math.min(1, (v * v * Math.abs(kk)) / latMax(v)); return Math.sqrt(Math.max(0.05, 1 - u * u)); };
+  // Braking while cornering, planned conservatively (linear, not the friction circle): cornering unloads
+  // the inside front, and both fronts get the same brake force, so it locks long before the circle says.
+  // Braking mostly happens before turn-in.
+  const brakeCircle = (v: number, kk: number) => Math.max(0.05, 1 - Math.min(1, (v * v * Math.abs(kk)) / latMax(v)));
   const v = Float64Array.from(k, corner);
   for (let lap = 0; lap < 2; lap++) {
     for (let q = 2 * n - 1; q >= 0; q--) {
       const i = q % n, j = (i + 1) % n;
-      v[i] = Math.min(v[i]!, Math.sqrt(v[j]! * v[j]! + 2 * brakeA(v[j]!) * circle(v[j]!, k[j]!) * ds[i]!));
+      v[i] = Math.min(v[i]!, Math.sqrt(v[j]! * v[j]! + 2 * brakeA(v[j]!) * brakeCircle(v[j]!, k[j]!) * ds[i]!));
     }
     for (let q = 0; q < 2 * n; q++) {
       const i = q % n, j = (i + 1) % n;
