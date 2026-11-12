@@ -1,10 +1,11 @@
 {
-  "_comment": "Race mode (card 06). gridSec = time on the grid before the lights; lights come on one per lightIntervalSec, then a random hold of holdMinSec..holdMaxSec before lights out. Throttle above jumpStartThrottle while the lights are on = jump start (flagged on the results, no penalty yet). finishTimeoutSec = how long after the winner the race waits for stragglers.",
+  "_comment": "Race mode (card 06). gridSec = time on the grid before the lights; lights come on one per lightIntervalSec, then a random hold of holdMinSec..holdMaxSec before lights out. Throttle above jumpStartThrottle while the lights are on = jump start (flagged on the results, no penalty yet). finishTimeoutSec = how long after the winner the race waits for stragglers. timingLineReachM: timing lines (practice and race) also count a crossing this far past either end, like a loop across the run-off, so a car running wide where a line meets the track edge still gets timed.",
   "defaultLaps": 5,
   "gridSec": 2,
   "lightIntervalSec": 1,
   "holdMinSec": 1,
   "holdMaxSec": 3,
   "jumpStartThrottle": 0.1,
-  "finishTimeoutSec": 60
+  "finishTimeoutSec": 60,
+  "timingLineReachM": 4
 }

@@ -37,6 +37,8 @@ export class GameAudio {
   private squealOsc: OscillatorNode | undefined;
   private hit = {} as Record<'wall' | 'barrier' | 'car', { filter: BiquadFilterNode; gain: GainNode; last: number }>;
   private crackleChain!: { filter: BiquadFilterNode; gain: GainNode };
+  /** Wind (slipstream card): rushing air with speed; dips and darkens when tucked into a tow. */
+  private wind?: { filter: BiquadFilterNode; gain: GainNode };
   private readonly lastTarget = new WeakMap<AudioParam, number>();
 
   constructor(private readonly cfg: AudioConfig) {
@@ -275,6 +277,12 @@ export class GameAudio {
     const gain = this.gain(0.5);
     filter.connect(gain).connect(this.bus.engine);
     this.crackleChain = { filter, gain };
+    // Wind: band-passed noise, level and pitch set each tick by setWind().
+    const n = this.noiseSource();
+    const wf = this.filter('bandpass', 1100, 0.7);
+    const wg = this.gain(0);
+    n.connect(wf).connect(wg).connect(this.bus.engine);
+    this.wind = { filter: wf, gain: wg };
   }
 
   /** Short noise burst + body thump, through the kind's reused chain. */
@@ -371,6 +379,14 @@ export class GameAudio {
 
     for (const i of t.impacts) this.impact(i.kind, i.strength);
     if (t.pitBeep) this.beep();
+  }
+
+  /** Wind level (0..1) and band centre (Hz), from speed and tow (main.ts, slipstream.json wind). */
+  setWind(level: number, hz: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.wind) return;
+    this.wind.gain.gain.setTargetAtTime(level, ctx.currentTime, 0.08);
+    this.wind.filter.frequency.setTargetAtTime(hz, ctx.currentTime, 0.08);
   }
 
   // ---- volumes ----

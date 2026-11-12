@@ -259,6 +259,8 @@ export interface AiState {
   stuckEvents: number;
   mistakes: number;
   pitStops: number;
+  /** Passing on the inside into a corner: brakes a little later (set by traffic, used next tick). */
+  attack: boolean;
   /** Race start: the tick it goes after lights out (-1 = not drawn yet). */
   launchTick: number;
   /** How much of its computed corner speed it trusts (learned: drops when it runs wide), 0.85..1. */
@@ -270,7 +272,7 @@ export interface AiState {
 export function newAiState(seed: number): AiState {
   return {
     mode: 'race', near: -1, lastErr: 0, stuckTicks: 0, recoverTicks: 0, offset: 0, mistake: undefined, rng: seed >>> 0 || 1,
-    pitWanted: false, serviced: false, fuelAtLap: -1, fuelPerLap: 0, stuckEvents: 0, mistakes: 0, pitStops: 0, launchTick: -1, trust: 1, lastAllowed: 0,
+    pitWanted: false, serviced: false, fuelAtLap: -1, fuelPerLap: 0, stuckEvents: 0, mistakes: 0, pitStops: 0, attack: false, launchTick: -1, trust: 1, lastAllowed: 0,
   };
 }
 
@@ -487,13 +489,17 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     return v;
   };
   let allowed: number;
+  /** A braking zone within ~1.5 s: the moment to pull out of a tow and go for the pass. */
+  let brakingSoon = false;
   if (!pit) {
     // ON THE RACING LINE: this car's own speed profile round the whole line (racing line optimizer card),
     // computed once for its build and preset, then scaled by what's changed since: tyre wear (speed goes
     // with the square root of grip) and how much of its corner speed it has learned to trust.
     const prof = carProfile(line, car, ctx, preset);
-    const ahead = st.mistake?.kind === 'lateBrake' ? 6 : 1; // a late braker reads the target a few metres on
+    // A late braker (mistake) reads the target 12 m on; attacking alongside on the inside, 8 m on.
+    const ahead = st.mistake?.kind === 'lateBrake' ? 6 : st.attack ? 4 : 1;
     allowed = prof[idx(best + ahead)]! * Math.sqrt(Math.max(0.05, tyre)) * st.trust;
+    for (let q = 1, look = Math.ceil((speed * 3) / SPACING_M); q <= look; q++) if (prof[idx(best + q)]! < speed * 0.9) { brakingSoon = true; break; }
   } else {
     // In the pit lane: a short backward scan, since the path is short and has the limiter and the stop.
     const scanM = (speed * speed) / (2 * Math.max(1, brakeA(speed) * 0.4)) + 40;
@@ -528,10 +534,21 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // Coming up to its box: move across so the car sits in it (boxes can be beside the lane centre).
   if (pit && myBox && !st.serviced && stopQ - best < 20 && best <= stopQ + 2) wantOffset = lateral(stopQ, myBox.x, myBox.y);
   let alongside = 0; // a car next to us: -1 left, +1 right
+  let attack = false;
   const gap = 6 + phys.car.lengthM;
   // Only start (or keep) a pass where the next ~40 m is fairly straight, not side by side into a braking zone.
   let straightAhead = true;
   for (let q = 0; q < 10; q++) if (Math.abs(path.k[idx(best + q)]!) > 0.03) straightAhead = false;
+  // SLIPSTREAM: on a straight, tuck in behind a car within tow range (move toward its lane). Closing on it,
+  // the passing below pulls out into the offset lane before the braking zone. Eagerness by difficulty.
+  const towCfg = ctx.slipstream;
+  const presetName = Object.keys(cfg.presets).find((k) => cfg.presets[k] === preset);
+  const eager = towCfg.aiTowEagerness[presetName ?? ''] ?? towCfg.aiTowEagerness.default ?? 0;
+  if (!pit && straightAhead && eager > 0 && !st.mistake) {
+    let towBest = Infinity, towSide = 0;
+    for (const o of others) if (o && o.ahead >= towCfg.tow.minRangeM && o.ahead <= towCfg.tow.maxRangeM && Math.abs(o.side) < 4 && o.ahead < towBest) { towBest = o.ahead; towSide = o.side; }
+    if (towBest < Infinity) wantOffset = clamp((crossErr + towSide) * eager, -4, 4);
+  }
   // A car next to us blocks moving over on its side.
   for (const o of others) if (o && Math.abs(o.ahead) < phys.car.lengthM && Math.abs(o.side) < 4) alongside = Math.sign(o.side) || 1;
   for (const o of others) {
@@ -543,20 +560,32 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     if (ahead <= 0 || ahead > cone || Math.abs(side) > 2.8) continue;
     const ttc = closing > 0.3 ? (ahead - gap) / closing : Infinity;
     if (ttc > 2 && ahead > gap * 1.5 && (closing * closing) / (2 * brakeA(speed) * 0.8) < ahead - gap - 5) continue;
-    const sides = side >= 0 ? [-1, 1] : [1, -1];
-    const passSide = pit || !straightAhead ? undefined
+    // Pass on the INSIDE of the next corner if there's room (that's where a pass sticks), else the free side.
+    let nextTurn = 0;
+    for (let q = 0; q < 80 && !nextTurn; q++) if (Math.abs(path.k[idx(best + q)]!) > 0.02) nextTurn = Math.sign(path.k[idx(best + q)]!);
+    const sides = nextTurn ? [nextTurn, -nextTurn] : side >= 0 ? [-1, 1] : [1, -1];
+    let passSide = pit || !straightAhead ? undefined
       : sides.find((sd) => sd !== alongside && (sd > 0 ? path.right[best]! : path.left[best]!) > preset.overtakeOffsetM + 0.5);
+    // In a tow with no braking zone yet: stay tucked in and let it pull us up; pull out when the braking
+    // point is near (before the braking zone), not the moment we're close.
+    const tucked = passSide !== undefined && car.tow > 0.05 && !brakingSoon && closing < 1.5 && ahead > phys.car.lengthM + 0.8;
+    if (tucked) passSide = undefined;
     if (passSide !== undefined) wantOffset = passSide * preset.overtakeOffsetM;
-    // Following: hold a gap. Passing: still never drive into it while we overlap it sideways (a car
-    // is ~2 m wide); once we're out of line, the short gap stops mattering.
-    const hold = passSide === undefined ? gap : Math.abs(side) < 2.2 ? phys.car.lengthM + 1.5 : -Infinity;
+    // Alongside (or nearly) on the inside of the coming corner: attack, braking a little later.
+    if (passSide !== undefined && passSide === nextTurn && ahead < phys.car.lengthM * 1.5) attack = true;
+    // Following: hold a gap (tucked into a tow: just a safe car length or so). Passing: still never drive
+    // into it while we overlap it sideways (a car is ~2 m wide); once out of line, the gap stops mattering.
+    const hold = tucked ? phys.car.lengthM + 1 : passSide === undefined ? gap : Math.abs(side) < 2.2 ? phys.car.lengthM + 1.5 : -Infinity;
     // Pulling out from behind a slow or stopped car: creep (it can't steer out of line standing still).
     const creep = passSide !== undefined && ahead > phys.car.lengthM + 0.05 ? clamp(2 + (ahead - phys.car.lengthM - 0.5) * 2, 2, 4) : 0;
     allowed = Math.min(allowed, Math.max(creep, otherFwd + (ahead - hold) * 0.8));
   }
+  st.attack = attack;
   if (alongside && Math.sign(wantOffset - st.offset) === alongside) wantOffset = st.offset;
   const maxR = Math.max(0, path.right[best]! - 1.5), maxL = Math.max(0, path.left[best]! - 1.5);
-  st.offset += clamp(clamp(wantOffset, -maxL, maxR) - st.offset, -3 * TICK_DT, 3 * TICK_DT);
+  // Moving over to pass is quicker than drifting back to the line.
+  const latRate = st.attack || Math.abs(wantOffset) >= preset.overtakeOffsetM - 0.01 ? 5 : 3;
+  st.offset += clamp(clamp(wantOffset, -maxL, maxR) - st.offset, -latRate * TICK_DT, latRate * TICK_DT);
 
   // 2. STEER: pure pursuit on a target point ahead (further at speed), shifted by the offset.
   const look = preset.lookaheadBaseM + preset.lookaheadPerMps * speed;

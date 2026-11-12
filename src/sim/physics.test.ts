@@ -1,5 +1,6 @@
 // @vitest-environment node
 // Car physics on small synthetic arenas (built here, not real tracks), so each behaviour is isolated.
+import slipstreamJson from '../../tools/fixtures/slipstream-baseline.json';
 import contactJson from '../../tools/fixtures/contact-baseline.json';
 import raceJson from '../../config/race.json';
 import { describe, expect, it } from 'vitest';
@@ -48,7 +49,7 @@ function arena(wM: number, hM: number, spawnM: Pose, paint?: (xM: number, yM: nu
     physics: structuredClone(physicsJson) as PhysicsConfig,
     catalog,
     rules,
-    contact: contactJson, race: raceJson, cache: createPhysicsCache(),
+    contact: contactJson, race: raceJson, slipstream: slipstreamJson, cache: createPhysicsCache(),
   };
 }
 

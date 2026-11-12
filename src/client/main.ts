@@ -8,6 +8,7 @@ import {
   chooseTrackId,
   contact,
   raceConfig,
+  slipstream,
   getTrackJsonStub,
   loadBackground,
   loadMask,
@@ -223,6 +224,7 @@ async function main(): Promise<void> {
         ai: aiCfg,
         contact,
         race: raceConfig,
+        slipstream,
         volumes: { values: audio.volumes, set: (bus, v) => audio.setVolume(bus, v) },
         onBuildChange: (build) => {
           const was = curr.cars[0]!.build;
@@ -333,7 +335,12 @@ async function main(): Promise<void> {
       curr = step(curr, inputs, ctx);
       vfx.onTick(prev, curr, ctx.track, physics);
       const me = curr.cars[0], was = prev.cars[0];
-      if (me && was) audio.update(soundTargets(was, me, audioConfig, vfxConfig, physics, rules, surfaces, topSpeedKph(physics, buildStats(me.build, ctx.catalog).topSpeed)));
+      if (me && was) {
+        audio.update(soundTargets(was, me, audioConfig, vfxConfig, physics, rules, surfaces, topSpeedKph(physics, buildStats(me.build, ctx.catalog).topSpeed)));
+        // Wind: grows with speed; tucked into a tow it drops and darkens (slipstream.json wind).
+        const wd = slipstream.wind, sp = Math.min(1, (Math.abs(me.speed) * 3.6) / wd.fullKph), tuck = me.tow / Math.max(0.01, slipstream.tow.maxDragReduction);
+        audio.setWind(wd.gain * sp * sp * (1 - wd.towDuck * tuck), wd.baseHz * (0.6 + 0.6 * sp) * (1 - wd.towHzDrop * tuck));
+      }
       for (const e of curr.events) {
         if (e.type === 'sector' || e.type === 'lap') {
           session.onEvent(e, e.car === 0);
@@ -381,6 +388,7 @@ async function main(): Promise<void> {
           else if (debug) drawMask(c, mask.canvas, 0.5);
         },
         overCars: (c) => {
+          vfx.drawWakes(c, curr, physics, json.pxPerMeter, slipstream.wake);
           vfx.drawOver(c, json.pxPerMeter); // the renderer draws the pre-scaled overhead after this
         },
         overlay: (c) => {

@@ -85,6 +85,7 @@ export class Hud {
         <button class="hud-icon menu" data-id="menuBtn" title="Menu"></button>
         <div class="lap-speed">Lap:<b data-id="lap">0</b>Speed:<b data-id="speed">--</b>kph</div>
         <div class="current">Time:<b data-id="time">---</b></div>
+        <div class="tow" data-id="tow" title="Slipstream: less drag behind another car">TOW</div>
         <table class="sectors">
           <tr class="idents">${tiles.map((t) => `<td>${t}</td>`).join('')}</tr>
           <tr>${tiles.map((_, i) => `<td><div class="tile${i === 3 ? ' lap' : ''}" data-id="tile${i}">---</div></td>`).join('')}</tr>
@@ -245,6 +246,10 @@ export class Hud {
     else if (!car.timing.started) time.textContent = 'OUT LAP';
     else time.textContent = car.timing.lapInvalid ? 'INVALID' : fmt(simTime - car.timing.lapStart);
     time.classList.toggle('invalid', car.timing.started && car.timing.lapInvalid);
+    // Slipstream: a small tag while you're in a tow.
+    const tow = this.el.tow!;
+    tow.classList.toggle('on', car.tow > 0.02);
+    if (car.tow > 0.02) tow.textContent = `TOW ${Math.round(car.tow * 100)}%`;
     session.tiles.forEach((t, i) => this.tile(i, t));
 
     const pb = session.personalBest;

@@ -19,7 +19,8 @@
     "ai-run": "tsx tools/ai-run.ts",
     "contact-probe": "tsx tools/contact-probe.ts",
     "handling-diag": "tsx tools/handling-diag.ts",
-    "optimize-racing-line": "tsx tools/optimize-racing-line.ts"
+    "optimize-racing-line": "tsx tools/optimize-racing-line.ts",
+    "tow-probe": "tsx tools/tow-probe.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

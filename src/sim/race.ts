@@ -15,6 +15,8 @@ export interface RaceConfig {
   holdMaxSec: number;
   jumpStartThrottle: number;
   finishTimeoutSec: number;
+  /** Timing lines also count crossings this far past their ends (metres): run-off, practice and race. */
+  timingLineReachM: number;
 }
 
 export type RacePhase = 'grid' | 'lights' | 'racing' | 'finishing' | 'results';

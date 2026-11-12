@@ -2,7 +2,7 @@
 // tick, so changes apply to the running car immediately. Save writes them back to /config.
 // Tuning is Justin's job; this file's job is to be a good instrument.
 import GUI, { type Controller } from 'lil-gui';
-import type { AiConfig, CarBuild, ContactConfig, PhysicsConfig, RaceConfig, Rules, SurfaceDef, WorldState } from '../../sim';
+import type { AiConfig, CarBuild, ContactConfig, PhysicsConfig, RaceConfig, Rules, SlipstreamConfig, SurfaceDef, WorldState } from '../../sim';
 import type { VfxConfig } from '../vfx/triggers';
 import type { VfxQuality } from '../vfx/vfx';
 import type { AudioConfig } from '../audio/targets';
@@ -90,6 +90,19 @@ const RANGES: Record<string, [number, number, number]> = {
   'race.holdMaxSec': [0, 5, 0.1],
   'race.jumpStartThrottle': [0, 1, 0.01],
   'race.finishTimeoutSec': [10, 300, 5],
+  'slipstream.tow.maxDragReduction': [0, 0.8, 0.01],
+  'slipstream.tow.minRangeM': [0, 20, 0.5],
+  'slipstream.tow.maxRangeM': [10, 100, 1],
+  'slipstream.tow.wakeWidthCars': [0.5, 4, 0.05],
+  'slipstream.tow.wakeWiden': [0, 3, 0.05],
+  'slipstream.tow.maxAngleDeg': [2, 60, 1],
+  'slipstream.dirtyAir.maxDownforceLoss': [0, 0.5, 0.01],
+  'slipstream.dirtyAir.dirtyRangeM': [0, 60, 1],
+  'slipstream.dirtyAir.cornerG': [0, 3, 0.05],
+  'slipstream.aiTowEagerness.easy': [0, 1, 0.05],
+  'slipstream.aiTowEagerness.medium': [0, 1, 0.05],
+  'slipstream.aiTowEagerness.hard': [0, 1, 0.05],
+  'slipstream.aiTowEagerness.default': [0, 1, 0.05],
   'surface.grip': [0, 1.5, 0.01],
   'surface.rollingDrag': [0, 1.5, 0.005],
   'audio.engine.gears': [3, 10, 1],
@@ -124,11 +137,13 @@ export interface TuningTargets {
   contact: ContactConfig;
   /** config/race.json: start lights, finish timeout (applies from the next race). */
   race: RaceConfig;
+  /** config/slipstream.json, live: tow, dirty air, AI eagerness, wind + wake feedback. */
+  slipstream: SlipstreamConfig & Record<string, unknown>;
   /** Called when the team/spec/setup changes, to rebuild the player's car. */
   onBuildChange(build: CarBuild): void;
 }
 
-async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai' | 'contact' | 'race', value: unknown): Promise<string> {
+async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai' | 'contact' | 'race' | 'slipstream', value: unknown): Promise<string> {
   const res = await fetch(`/__tuning/save/${name}`, { method: 'POST', headers: { 'x-tuning-panel': '1' }, body: formatTrackJson(value) });
   return res.ok ? `config/${name}.json` : `${name}: ${await res.text()}`;
 }
@@ -236,6 +251,15 @@ export class TuningPanel {
     for (const key of Object.keys(this.t.race)) if (key !== '_comment') this.slider(race, this.t.race, key, `race.${key}`);
     race.close();
 
+    const slip = gui.addFolder('Slipstream + dirty air');
+    for (const [section, values] of Object.entries(this.t.slipstream)) {
+      if (typeof values !== 'object' || !values) continue;
+      const sub = slip.addFolder(section);
+      for (const key of Object.keys(values)) this.slider(sub, values, key, `slipstream.${section}.${key}`);
+      sub.close();
+    }
+    slip.close();
+
     const ai = gui.addFolder('AI drivers (HUD menu: count + difficulty)');
     for (const [name, preset] of Object.entries(this.t.ai.presets)) {
       const sub = ai.addFolder(name);
@@ -258,7 +282,7 @@ export class TuningPanel {
       statusCtl.updateDisplay();
     };
     io.add({
-      save: async () => show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai), saveConfig('contact', this.t.contact), saveConfig('race', this.t.race)])).join(', ')),
+      save: async () => show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai), saveConfig('contact', this.t.contact), saveConfig('race', this.t.race), saveConfig('slipstream', this.t.slipstream)])).join(', ')),
     }, 'save').name('Save to /config');
     io.add({ copy: () => void navigator.clipboard.writeText(formatTrackJson(physics)).then(() => show('physics.json copied')) }, 'copy').name('Copy physics JSON');
     io.add({ revert: () => this.revert() && show('Reverted to last saved values') }, 'revert').name('Revert unsaved changes');
@@ -304,6 +328,7 @@ export class TuningPanel {
       <div class="speed">${kph} <small>kph</small></div>
       <div>throttle ${bar(c.controls.throttle)}  brake ${bar(c.controls.brake)}</div>
       <div>steer ${c.controls.steer >= 0 ? '+' : ''}${c.controls.steer.toFixed(2)}   yaw ${(c.angVel * 57.3).toFixed(0)}°/s</div>
+      <div>tow ${pct(c.tow)} less drag   dirty air ${pct(c.dirtyAir)} less downforce</div>
       <div>fuel ${c.fuelKg.toFixed(1)} kg (${pct(c.fuelKg / physics.fuel.tankKg)})   mass ${(physics.car.dryMassKg + c.fuelKg).toFixed(0)} kg</div>
       <table><tr><th></th><th>surface</th><th>wear</th><th>slip</th><th>slip/peak</th><th>grip kN</th><th>load kN</th></tr>${rows}</table>
       <div class="flags">${flags || '&nbsp;'}</div>`;

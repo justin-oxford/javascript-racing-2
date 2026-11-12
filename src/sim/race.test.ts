@@ -6,6 +6,7 @@ import aiJson from '../../tools/fixtures/ai-baseline.json';
 import contactJson from '../../tools/fixtures/contact-baseline.json';
 import physicsJson from '../../tools/fixtures/physics-baseline.json';
 import raceJson from '../../config/race.json';
+import slipstreamJson from '../../tools/fixtures/slipstream-baseline.json';
 import { loadTrackNode, simContextNode } from '../../tools/load-track-node';
 import {
   aiInputSource,
@@ -25,7 +26,7 @@ import {
 
 const loaded = loadTrackNode('oxford');
 const race: RaceConfig = { ...raceJson, gridSec: 1, holdMinSec: 1, holdMaxSec: 1 };
-const ctx: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as PhysicsConfig)), contact: contactJson, race };
+const ctx: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as PhysicsConfig)), contact: contactJson, race, slipstream: slipstreamJson };
 const ppm = ctx.track.json.pxPerMeter;
 const idle: CarInput = { throttle: 0, brake: 0, steer: 0 };
 const build = ctx.physics.defaultCar;

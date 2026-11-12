@@ -92,6 +92,10 @@ export interface CarState extends Pose {
   barrierContact: boolean;
   /** Touching another car this tick. */
   carContact: boolean;
+  /** Slipstream this tick: fraction of aero drag removed (0 = none). Telemetry + HUD. */
+  tow: number;
+  /** Dirty air this tick: fraction of downforce lost following closely through a corner. */
+  dirtyAir: number;
   /** Lap/sector timing (see timing.ts). */
   timing: LapTiming;
 }

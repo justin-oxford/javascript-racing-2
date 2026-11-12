@@ -3,6 +3,7 @@ import { applyCarForce, prepareCache, readStateFromWorld, setCarMass, stepWorld,
 import type { SimTrack, WallChain } from './track';
 import { boxAt, surfaceAt } from './track';
 import { gridOrder, newRaceState, raceHolds, updateRace, type RaceConfig } from './race';
+import { wakeEffects, type SlipstreamConfig } from './slipstream';
 import { newTiming, updateTiming, type TimingEvent } from './timing';
 import type { CarBuild, CarInput, CarState, ContactConfig, Pose, Rules, SimEvent, WheelState, Wheels, WorldState } from './types';
 import { NEUTRAL_INPUT } from './types';
@@ -27,6 +28,8 @@ export interface SimContext {
   contact: ContactConfig;
   /** config/race.json: start lights, finish timeout. */
   race: RaceConfig;
+  /** config/slipstream.json: tow + dirty air (live-tunable). */
+  slipstream: SlipstreamConfig;
   cache: PhysicsCache;
 }
 
@@ -146,6 +149,8 @@ export function createCar(posePx: Pose, build: CarBuild, ctx: SimContext): CarSt
     wallContact: false,
     barrierContact: false,
     carContact: false,
+    tow: 0,
+    dirtyAir: 0,
     timing: newTiming(),
   };
 }
@@ -236,7 +241,7 @@ interface WheelForces {
 }
 
 /** Work out and apply this tick's forces for one car. Returns per-wheel numbers for wear/telemetry. */
-function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimContext, dt: number): Wheels<WheelForces> {
+function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimContext, dt: number, wake: { tow: number; dirtyAir: number }): Wheels<WheelForces> {
   const cfg = ctx.physics;
   const stats = buildStats(car.build, ctx.catalog);
   const mass = cfg.car.dryMassKg + Math.max(0, car.fuelKg);
@@ -251,7 +256,8 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
   // static weight and they read as unloaded and "skidding".)
   const wf = cfg.car.weightFront;
   const share: Wheels<number> = [wf / 2, wf / 2, (1 - wf) / 2, (1 - wf) / 2];
-  const vertical = mass * G * (1 + cfg.aero.downforceCoef * stats.downforce * v2);
+  // Dirty air: following closely through a corner costs downforce (slipstream.ts).
+  const vertical = mass * G * (1 + cfg.aero.downforceCoef * stats.downforce * (1 - wake.dirtyAir) * v2);
   const aRight = vFwd * car.angVel; // centripetal acceleration, + = toward the car's right
   const transfer = (mass * aRight * cfg.car.cgHeightM) / cfg.car.trackWidthM;
   const side: Wheels<number> = [-1, 1, -1, 1];
@@ -277,7 +283,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
   // LONGITUDINAL LOAD TRANSFER (card 03b): braking loads the fronts (they bite, the car turns in),
   // throttle loads the rears. dFz = m * a_long * cgHeight / wheelbase, with a_long from this tick's
   // drive, brakes and drag, no more than the tyres can deliver.
-  const dragF = cfg.aero.dragCoef * stats.drag * v2;
+  const dragF = cfg.aero.dragCoef * stats.drag * (1 - wake.tow) * v2;
   const aLongMax = cfg.tyres.baseGrip * stats.grip * vertical / mass;
   const aLong = clamp((drive - Math.sign(vFwd || 1) * (brakeTotal + dragF)) / mass, -aLongMax, aLongMax);
   const dFz = (mass * aLong * cfg.car.cgHeightM) / cfg.car.wheelbaseM;
@@ -344,7 +350,8 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
   }
 
   // Aero drag on the body, and hard scrub while rubbing a tyre barrier.
-  const dragK = cfg.aero.dragCoef * stats.drag * speed;
+  // Slipstream: in another car's wake, less drag (the tow).
+  const dragK = cfg.aero.dragCoef * stats.drag * (1 - wake.tow) * speed;
   let fx = -dragK * car.vx, fy = -dragK * car.vy;
   if (car.barrierContact) {
     fx -= car.vx * mass * cfg.walls.barrierScrubPerSec;
@@ -397,7 +404,8 @@ export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimCon
   // On the grid and under the lights, cars are held: the drivers' inputs are ignored (but read for jump starts).
   const held = raceHolds(world.race);
   const controls = world.cars.map((car, i) => rampControls(car.controls, held ? NEUTRAL_INPUT : (inputs[i] ?? NEUTRAL_INPUT), ctx.physics, dt));
-  const forces = world.cars.map((car, i) => applyCarForces(i, car, controls[i]!, ctx, dt));
+  const wake = wakeEffects(world.cars, ctx.physics.car.widthM, ctx.slipstream);
+  const forces = world.cars.map((car, i) => applyCarForces(i, car, controls[i]!, ctx, dt, { tow: wake.tow[i]!, dirtyAir: wake.dirtyAir[i]! }));
   stepWorld(ctx.cache, dt, ctx.physics);
   const bodies = readStateFromWorld(ctx.cache);
 
@@ -415,6 +423,8 @@ export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimCon
       wheels: car.wheels.map((wh, w) => ({ ...wh, surface: surfaces[w]! })) as Wheels<WheelState>,
       ...surfaceFlags(surfaces, ctx),
       pitBox: pitBoxUnder(b, ctx),
+      tow: wake.tow[i]!,
+      dirtyAir: wake.dirtyAir[i]!,
     };
     const timingEvents: TimingEvent[] = [];
     const timing = updateTiming(
@@ -423,6 +433,7 @@ export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimCon
       ctx.track.json,
       i,
       timingEvents,
+      ctx.race.timingLineReachM,
     );
     events.push(...timingEvents);
     const next = { ...moved, ...updateConsumables(moved, forces[i]!, ctx, dt, world.race?.cars[i]?.box ?? -1), timing };

@@ -139,3 +139,15 @@
 .slot .up { margin-top: calc(var(--u) * 8); border-radius: calc(var(--u) * 4) calc(var(--u) * 4) 0 0; }
 .slot .dn { border-radius: 0 0 calc(var(--u) * 4) calc(var(--u) * 4); }
 .slot .value { background: rgba(72, 74, 71, 0.5); margin-top: -1px; margin-bottom: -1px; }
+
+/* Slipstream tag (shown while in a tow). */
+.hud-bar .tow {
+  flex: none;
+  visibility: hidden;
+  font-family: "Formula1 Bold", system-ui, sans-serif;
+  font-size: calc(var(--u) * 10);
+  padding: calc(var(--u) * 3) calc(var(--u) * 7);
+  border-radius: calc(var(--u) * 3);
+  background: rgba(64, 160, 255, 0.85);
+}
+.hud-bar .tow.on { visibility: visible; }

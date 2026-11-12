@@ -4,11 +4,12 @@
 import { describe, expect, it } from 'vitest';
 import physicsJson from '../../tools/fixtures/physics-baseline.json';
 import aiJson from '../../tools/fixtures/ai-baseline.json';
+import slipstreamJson from '../../tools/fixtures/slipstream-baseline.json';
 import { loadTrackNode, simContextNode } from '../../tools/load-track-node';
 import { aiDrive, aiInputSource, buildRacingLine, createWorld, newAiState, step, type AiConfig, type PhysicsConfig, type WorldState } from './index';
 
 const loaded = loadTrackNode('oxford');
-const ctx = simContextNode(loaded, structuredClone(physicsJson as PhysicsConfig));
+const ctx = { ...simContextNode(loaded, structuredClone(physicsJson as PhysicsConfig)), slipstream: slipstreamJson };
 const line = buildRacingLine(loaded.track)!;
 const cfg = aiJson as unknown as AiConfig;
 const hard = cfg.presets.hard!;

@@ -273,6 +273,37 @@ export class Vfx {
   }
 
   /** Smoke, dust, stones, sparks: above cars. */
+  /**
+   * Slipstream feedback (high only): two faint streaks trailing each car's rear wing at speed, longer
+   * and stronger the faster it goes. Drawn per frame from car state, nothing stored.
+   */
+  drawWakes(ctx: CanvasRenderingContext2D, world: WorldState, physics: PhysicsConfig, ppm: number, cfg: { minKph: number; opacity: number; lengthM: number }): void {
+    if (this.quality !== 'high') return;
+    for (const car of world.cars) {
+      const kph = Math.abs(car.speed) * 3.6;
+      if (kph < cfg.minKph) continue;
+      const k = Math.min(1, (kph - cfg.minKph) / cfg.minKph);
+      const f = { x: Math.sin(car.heading), y: -Math.cos(car.heading) }, r = { x: Math.cos(car.heading), y: Math.sin(car.heading) };
+      const back = bodyOffsetM(physics) - physics.car.lengthM / 2; // rear of the body, from the CG
+      const len = cfg.lengthM * (0.5 + k);
+      ctx.save();
+      ctx.lineWidth = 0.12 * ppm;
+      ctx.lineCap = 'round';
+      for (const side of [-0.7, 0.7]) {
+        const x0 = (car.x + f.x * back + r.x * side) * ppm, y0 = (car.y + f.y * back + r.y * side) * ppm;
+        const g = ctx.createLinearGradient(x0, y0, x0 - f.x * len * ppm, y0 - f.y * len * ppm);
+        g.addColorStop(0, `rgba(255,255,255,${cfg.opacity * k})`);
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.strokeStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x0 - f.x * len * ppm, y0 - f.y * len * ppm);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
   drawOver(ctx: CanvasRenderingContext2D, ppm: number): void {
     if (this.quality === 'off' || !this.count) return;
     ctx.save();
