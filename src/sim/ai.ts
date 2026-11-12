@@ -28,6 +28,8 @@ export interface AiConfig {
   presets: Record<string, AiPreset>;
   recovery: { stuckSec: number; reverseSec: number; backwardsDeg: number };
   pits?: { fuelLaps: number; minWear: number; pitSpeedMarginKph: number };
+  /** Race starts: reaction to lights out, a random delay in this range per driver. */
+  start?: { reactionMinSec: number; reactionMaxSec: number };
 }
 
 const G = 9.81;
@@ -48,8 +50,10 @@ export interface AiPath {
 }
 
 export interface PitPath extends AiPath {
-  /** Path index of the pit box stop. */
+  /** Path index of the pit box stop (box 0). */
   box: number;
+  /** Per pit box (SimTrack.boxes order): path index to stop at, and the box centre, metres. */
+  boxStops: Array<{ q: number; x: number; y: number }>;
   /** Racing-line index where the pit path leaves the line, and where it rejoins. */
   entry: number;
   exit: number;
@@ -222,10 +226,9 @@ function buildPitPath(track: SimTrack, line: AiPath): PitPath | undefined {
     for (let q = 0; q < path.n; q++) { const d = (path.x[q]! - p.x) ** 2 + (path.y[q]! - p.y) ** 2; if (d < bd) { bd = d; best = q; } }
     return best;
   };
-  let bx = 0, by = 0, bn = 0;
-  for (let i = 0; i < w * h; i++) if (data[i] === pitBox) { bx += i % w; by += Math.floor(i / w); bn++; }
-  const box = bn ? nearestOnPath({ x: bx / bn / ppm, y: by / bn / ppm }) : nearestOnPath(lane[Math.floor(lane.length / 2)]!);
-  return { ...path, box, entry: (((join - LEAD) % line.n) + line.n) % line.n, exit: (rejoin + TAIL - 1) % line.n, laneFrom: nearestOnPath(lane[0]!), laneTo: nearestOnPath(lane[lane.length - 1]!) };
+  const boxStops = track.boxes.map((b) => { const p = { x: b.x / ppm, y: b.y / ppm }; return { q: nearestOnPath(p), ...p }; });
+  const box = boxStops[0]?.q ?? nearestOnPath(lane[Math.floor(lane.length / 2)]!);
+  return { ...path, box, boxStops, entry: (((join - LEAD) % line.n) + line.n) % line.n, exit: (rejoin + TAIL - 1) % line.n, laneFrom: nearestOnPath(lane[0]!), laneTo: nearestOnPath(lane[lane.length - 1]!) };
 }
 
 export interface AiState {
@@ -253,6 +256,8 @@ export interface AiState {
   stuckEvents: number;
   mistakes: number;
   pitStops: number;
+  /** Race start: the tick it goes after lights out (-1 = not drawn yet). */
+  launchTick: number;
   /** How much of its computed corner speed it trusts (learned: drops when it runs wide), 0.85..1. */
   trust: number;
   /** Debug: the speed it planned for last tick, m/s. */
@@ -262,7 +267,7 @@ export interface AiState {
 export function newAiState(seed: number): AiState {
   return {
     mode: 'race', near: -1, lastErr: 0, stuckTicks: 0, recoverTicks: 0, offset: 0, mistake: undefined, rng: seed >>> 0 || 1,
-    pitWanted: false, serviced: false, fuelAtLap: -1, fuelPerLap: 0, stuckEvents: 0, mistakes: 0, pitStops: 0, trust: 1, lastAllowed: 0,
+    pitWanted: false, serviced: false, fuelAtLap: -1, fuelPerLap: 0, stuckEvents: 0, mistakes: 0, pitStops: 0, launchTick: -1, trust: 1, lastAllowed: 0,
   };
 }
 
@@ -309,6 +314,18 @@ function locate(path: AiPath, car: CarState, prev: number, speed: number, ahead 
 export function aiDrive(world: WorldState, i: number, prevState: AiState, line: RacingLine, ctx: SimContext, preset: AiPreset, cfg: AiConfig): { input: CarInput; state: AiState } {
   const car = world.cars[i]!;
   const st: AiState = { ...prevState };
+  // Race start: sit still under the lights (throttle now = a jump start), then react to lights out.
+  const race = world.race;
+  if (race && (race.phase === 'grid' || race.phase === 'lights')) return { input: { throttle: 0, brake: 0, steer: 0 }, state: st };
+  if (race && race.phase === 'racing' && race.phaseTick > 0 && world.tick - race.phaseTick < 120) {
+    if (st.launchTick < 0) {
+      const [r0, next] = rand(st.rng);
+      st.rng = next;
+      const s0 = cfg.start ?? { reactionMinSec: 0.2, reactionMaxSec: 0.2 };
+      st.launchTick = race.phaseTick + Math.round((s0.reactionMinSec + r0 * (s0.reactionMaxSec - s0.reactionMinSec)) / TICK_DT);
+    }
+    if (world.tick < st.launchTick) return { input: { throttle: 0, brake: 0, steer: 0 }, state: st };
+  }
   const speed = Math.hypot(car.vx, car.vy);
   const phys = ctx.physics;
   const pits = cfg.pits ?? { fuelLaps: 2.2, minWear: 0.45, pitSpeedMarginKph: 4 };
@@ -325,7 +342,13 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     }
     if (st.fuelAtLap < 0) st.fuelAtLap = car.fuelKg;
     const need = st.fuelPerLap > 0 ? st.fuelPerLap * pits.fuelLaps : phys.fuel.burnKgPerSec * 40;
-    if (line.pit && (car.fuelKg < need || car.wheels.some((wh) => wh.wear < pits.minWear))) st.pitWanted = true;
+    let want = car.fuelKg < need || car.wheels.some((wh) => wh.wear < pits.minWear);
+    // Racing: no stop it doesn't need to reach the flag (enough fuel, tyres not near the cliff).
+    if (want && race && st.fuelPerLap > 0) {
+      const lapsLeft = race.laps - car.timing.laps;
+      if (car.fuelKg > st.fuelPerLap * (lapsLeft + 0.3) && car.wheels.every((wh) => wh.wear > 0.3)) want = false;
+    }
+    if (line.pit && want) st.pitWanted = true;
     if (line.pit && st.pitWanted) {
       const toEntry = (line.pit.entry - st.near + line.n) % line.n;
       if (toEntry <= 3 || toEntry >= line.n - 2) {
@@ -372,7 +395,10 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     const err = wrap(pathHeading - car.heading);
     return { input: { throttle: 0, brake: 1, steer: -Math.sign(err || 1) }, state: st }; // reversing: steer the tail round
   }
-  const waitingInBox = !!pit && !st.serviced && Math.abs(best - pit.box) <= 2;
+  // Which box to stop in: its own in a race, otherwise the first (practice: any box services).
+  const myBox = pit ? pit.boxStops[Math.max(0, world.race?.cars[i]?.box ?? 0)] : undefined;
+  const stopQ = myBox?.q ?? pit?.box ?? 0;
+  const waitingInBox = !!pit && !st.serviced && Math.abs(best - stopQ) <= 2;
   st.stuckTicks = !waitingInBox && ((speed < 1.5 && car.controls.throttle > 0.1) || backwards) ? st.stuckTicks + 1 : 0;
   if (st.stuckTicks > cfg.recovery.stuckSec / TICK_DT) {
     st.stuckTicks = 0;
@@ -437,7 +463,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   const pointV = (q: number) => {
     let v = cornerV(path.k[q]!) * preset.cornerMargin * st.trust;
     if (pit && q >= pit.laneFrom - 3 && q <= pit.laneTo) v = Math.min(v, pitV);
-    if (pit && !st.serviced && q >= pit.box) v = 0; // stop at the box
+    if (pit && !st.serviced && q >= stopQ) v = 0; // stop at its box
     return v;
   };
   // Speed profile over the stretch ahead, built BACKWARDS from the far end: each point can only be as
@@ -456,9 +482,10 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
 
   // In the box: wait for fresh tyres + fuel (the sim services a car stopped in its pit box).
   let holdInBox = false;
-  if (pit && !st.serviced && best >= pit.box - 3 && speed < 1) {
+  // "Stopped" = slow enough for the sim to service (fuel.pitServiceMaxKph), not some other threshold.
+  if (pit && !st.serviced && best >= stopQ - 3 && speed * 3.6 < phys.fuel.pitServiceMaxKph * 0.8) {
     const full = car.fuelKg >= phys.fuel.tankKg - 0.5 && car.wheels.every((wh) => wh.wear > 0.99);
-    if (!car.inPitBox) st.serviced = true; // stopped short of / past the box: drive on, try again next lap
+    if (!car.servicing) st.serviced = true; // stopped short of / past its box: drive on, try again next lap
     else if (full) {
       st.serviced = true;
       st.pitStops++;
@@ -470,6 +497,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // hit within ~2 s. Pass on the side they're not on if there's room; otherwise follow at a gap
   // (not "their speed minus a bit", which chains slowdowns around the whole field). No passing in pits.
   let wantOffset = !pit && st.mistake?.kind === 'wide' ? Math.sign(path.k[best]!) * -1.5 : 0;
+  // Coming up to its box: move across so the car sits in it (boxes can be beside the lane centre).
+  if (pit && myBox && !st.serviced && stopQ - best < 20 && best <= stopQ + 2) wantOffset = lateral(stopQ, myBox.x, myBox.y);
   let alongside = 0; // a car next to us: -1 left, +1 right
   const gap = 6 + phys.car.lengthM;
   // Only start (or keep) a pass where the next ~40 m is fairly straight, not side by side into a braking zone.

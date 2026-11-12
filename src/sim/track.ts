@@ -167,6 +167,22 @@ export interface SimTrack {
   surfaces: readonly SurfaceDef[];
   /** Palette indices by role, resolved once from `surfaces`. */
   index: SurfaceIndex;
+  /** Pit boxes: each separate cyan region, numbered in driving direction along the pit lane (0-based). */
+  boxes: PitBox[];
+  /** Box number per mask pixel, -1 where there's no box. */
+  boxMap: Int16Array;
+}
+
+export interface PitBox {
+  /** Centre, mask pixels. */
+  x: number;
+  y: number;
+  pixels: number;
+  /** Bounding box, mask pixels (x0,y0 inclusive; x1,y1 exclusive). */
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
 }
 
 export interface SurfaceIndex {
@@ -193,7 +209,68 @@ export function resolveSurfaceIndex(surfaces: readonly SurfaceDef[]): SurfaceInd
 }
 
 export function createSimTrack(json: TrackJson, mask: TrackMask, surfaces: readonly SurfaceDef[]): SimTrack {
-  return { json, mask, surfaces, index: resolveSurfaceIndex(surfaces) };
+  const index = resolveSurfaceIndex(surfaces);
+  return { json, mask, surfaces, index, ...findPitBoxes(mask, index.pitBox, json.racingLine, json.timingLines.startFinish) };
+}
+
+/**
+ * Each separate (4-connected) pit-box region is one box (SYS - Track authoring spec), numbered in
+ * driving direction along the pit lane. The pit lane runs beside the main straight, which start/finish
+ * crosses, so "driving direction" = the start/finish line's crossing direction. Without a start/finish
+ * line: by position along the racing line (after the biggest gap between boxes); without either, scan order.
+ */
+export function findPitBoxes(mask: TrackMask, pitBox: number, racingLine: readonly Point[], startFinish?: TimingLine): Pick<SimTrack, 'boxes' | 'boxMap'> {
+  const { width: w, height: h, data } = mask;
+  const label = new Int16Array(w * h).fill(-1);
+  const found: PitBox[] = [];
+  for (let s0 = 0; s0 < w * h; s0++) {
+    if (data[s0] !== pitBox || label[s0] !== -1) continue;
+    const id = found.length;
+    let sx = 0, sy = 0, n = 0, x0 = w, y0 = h, x1 = 0, y1 = 0;
+    const stack = [s0];
+    label[s0] = id;
+    while (stack.length) {
+      const i = stack.pop()!;
+      const x = i % w;
+      const y = (i - x) / w;
+      sx += x; sy += y; n++;
+      if (x < x0) x0 = x; if (x >= x1) x1 = x + 1; if (y < y0) y0 = y; if (y >= y1) y1 = y + 1;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w])
+        if (j >= 0 && j < w * h && label[j] === -1 && data[j] === pitBox) { label[j] = id; stack.push(j); }
+    }
+    found.push({ x: sx / n + 0.5, y: sy / n + 0.5, pixels: n, x0, y0, x1, y1 });
+  }
+  if (found.length < 2) return { boxes: found, boxMap: label };
+  const renumber = (order: number[]) => {
+    const renum = new Int16Array(found.length);
+    order.forEach((old, k) => (renum[old] = k));
+    for (let i = 0; i < label.length; i++) if (label[i]! >= 0) label[i] = renum[label[i]!]!;
+    return { boxes: order.map((k) => found[k]!), boxMap: label };
+  };
+  if (startFinish) {
+    // Right-hand normal of a -> b = the direction a valid crossing goes (see timing.ts crossing()).
+    const dx = -(startFinish.b.y - startFinish.a.y), dy = startFinish.b.x - startFinish.a.x;
+    return renumber(found.map((_, k) => k).sort((a, b) => (found[a]!.x - found[b]!.x) * dx + (found[a]!.y - found[b]!.y) * dy));
+  }
+  if (racingLine.length < 3) return { boxes: found, boxMap: label };
+  const along = found.map((b) => {
+    let best = 0, bd = Infinity;
+    racingLine.forEach((p, q) => { const d = (p.x - b.x) ** 2 + (p.y - b.y) ** 2; if (d < bd) { bd = d; best = q; } });
+    return best;
+  });
+  const n = racingLine.length;
+  const sorted = [...along].sort((a, b) => a - b);
+  let gapAfter = sorted[sorted.length - 1]!, gap = sorted[0]! + n - gapAfter;
+  for (let k = 1; k < sorted.length; k++) if (sorted[k]! - sorted[k - 1]! > gap) { gap = sorted[k]! - sorted[k - 1]!; gapAfter = sorted[k - 1]!; }
+  const key = (q: number) => (q - gapAfter - 1 + n) % n;
+  return renumber(found.map((_, k) => k).sort((a, b) => key(along[a]!) - key(along[b]!)));
+}
+
+/** Pit box number at a point (mask pixels), -1 if none. */
+export function boxAt(track: SimTrack, x: number, y: number): number {
+  const px = Math.floor(x), py = Math.floor(y);
+  if (px < 0 || py < 0 || px >= track.mask.width || py >= track.mask.height) return -1;
+  return track.boxMap[py * track.mask.width + px]!;
 }
 
 /** Surface index at a point. Anything off the image is out of bounds. */

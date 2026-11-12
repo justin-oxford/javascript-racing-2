@@ -1,4 +1,4 @@
-import { aiInputSource, buildRacingLine, buildStats, createWorld, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { aiInputSource, buildRacingLine, buildStats, createRaceWorld, createWorld, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -6,6 +6,8 @@ import { startLoop } from './loop';
 import { Renderer, type CarLook } from './render';
 import {
   chooseTrackId,
+  contact,
+  raceConfig,
   getTrackJsonStub,
   loadBackground,
   loadMask,
@@ -23,6 +25,7 @@ import aiJson from '../../config/ai.json';
 import audioConfig from '../../config/audio.json';
 import hudConfig from '../../config/hud.json';
 import { Hud } from './hud/hud';
+import { RaceHud } from './hud/race-hud';
 import { browserStore, Session } from './hud/session';
 import { TimingLines } from './hud/timing-lines';
 import vfxConfig from '../../config/vfx.json';
@@ -77,29 +80,54 @@ async function main(): Promise<void> {
   function curr0Build(): CarBuild {
     return physics.defaultCar;
   }
-  /** Swap the player's car build and put it back in the pits (spec/team change). */
+  /** Swap the player's car build and put it back in the pits (spec/team change). A race restarts. */
   const rebuildCar = (build: CarBuild): void => {
+    if (raceSetup) {
+      curr = setCarBuild(curr, 0, build);
+      return startRace(raceSetup.laps, raceSetup.grid);
+    }
     curr = resetCar(setCarBuild(curr, 0, build), 0, json.spawn, ctx);
     prev = curr;
   };
-  const stoppedInBox = (): boolean => {
-    const c = curr.cars[0];
-    return !!c && c.inPitBox && Math.abs(c.speed) * 3.6 < physics.fuel.pitServiceMaxKph;
+  /** Stopped in a box that services the player (any box in practice, its own in a race). */
+  const stoppedInBox = (): boolean => !!curr.cars[0]?.servicing;
+  const aiDrivers = (count: number): InputSource[] => Array.from({ length: count }, (_, k) =>
+    aiInputSource(k + 1, () => ({ world: curr, ctx, line: racingLine }), () => aiCfg.presets[aiPreset] ?? aiCfg.presets[aiCfg.defaultPreset]!, () => aiCfg, 1000 + k));
+  const aiBuilds = (me: CarBuild, count: number): CarBuild[] => {
+    const teams = ctx.catalog.teams.filter((t) => t.id !== me.team);
+    return Array.from({ length: count }, (_, k) => ({ ...physics.defaultCar, spec: me.spec, team: teams[k % teams.length]!.id }));
   };
+  /** The race being run (for Restart), undefined in practice. */
+  let raceSetup: { laps: number; grid: 'random' | 'pole' | 'back' } | undefined;
   /** (Re)start practice: the player plus aiCount AI cars, everyone back on the grid. */
   const startPractice = (): void => {
+    raceSetup = undefined;
     const me = curr?.cars[0]?.build ?? startBuild;
     if (!racingLine) aiCount = 0;
-    const teams = ctx.catalog.teams.filter((t) => t.id !== me.team);
-    const builds: CarBuild[] = [me, ...Array.from({ length: aiCount }, (_, k) => ({ ...physics.defaultCar, spec: me.spec, team: teams[k % teams.length]!.id }))];
+    const builds: CarBuild[] = [me, ...aiBuilds(me, aiCount)];
     if (aiCount === 0) for (let i = 1; i <= extra; i++) builds.push(physics.defaultCar);
     curr = createWorld(ctx, builds);
     prev = curr;
-    drivers = aiCount === 0
-      ? [keyboard, ...Array.from({ length: extra }, (_, k) => new DonutInput(k + 1))]
-      : [keyboard, ...Array.from({ length: aiCount }, (_, k) =>
-          aiInputSource(k + 1, () => ({ world: curr, ctx, line: racingLine }), () => aiCfg.presets[aiPreset] ?? aiCfg.presets[aiCfg.defaultPreset]!, () => aiCfg, 1000 + k))];
+    drivers = aiCount === 0 ? [keyboard, ...Array.from({ length: extra }, (_, k) => new DonutInput(k + 1))] : [keyboard, ...aiDrivers(aiCount)];
     hud.setAi(aiCount, aiPreset);
+    raceHud?.hide();
+  };
+  /** (Re)start a race (card 06): grid, lights, own pit boxes, flag. Uses the menu's AI count (at least 1). */
+  const startRace = (laps: number, grid: 'random' | 'pole' | 'back'): void => {
+    if (!racingLine || !json.timingLines.startFinish) {
+      console.warn('[race] this track needs a racing line and a start/finish line for races');
+      return startPractice();
+    }
+    raceSetup = { laps, grid };
+    const me = curr?.cars[0]?.build ?? startBuild;
+    const count = Math.max(1, aiCount);
+    const builds: CarBuild[] = [me, ...aiBuilds(me, count)];
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0]!; // client-side: the sim itself stays seeded
+    curr = createRaceWorld(ctx, builds, { laps, seed, playerSlot: grid === 'pole' ? 0 : grid === 'back' ? count : undefined });
+    prev = curr;
+    drivers = [keyboard, ...aiDrivers(count)];
+    hud.setAi(aiCount, aiPreset);
+    if (curr.race!.sharedBoxes) console.warn(`[race] ${ctx.track.boxes.length} pit box(es) for ${builds.length} cars: boxes are shared round-robin`);
   };
 
   const hud = new Hud(canvas, hudConfig, ctx.catalog, {
@@ -126,9 +154,17 @@ async function main(): Promise<void> {
       aiCount = count;
       aiPreset = preset;
       try { localStorage.setItem('jr2.ai', JSON.stringify({ count, preset })); } catch { /* private window: not remembered */ }
-      startPractice();
+      if (raceSetup) startRace(raceSetup.laps, raceSetup.grid);
+      else startPractice();
     },
+    onRace: (laps, grid) => startRace(laps, grid),
+    onPractice: () => startPractice(),
   }, () => renderer.trackHeight, siteUrl, Object.keys(aiCfg.presets));
+  hud.setRaceDefaults(ctx.race.defaultLaps);
+  const raceHud: RaceHud = new RaceHud(hud.element, ctx.catalog, siteUrl, {
+    onRestart: () => raceSetup && startRace(raceSetup.laps, raceSetup.grid),
+    onMenu: () => { startPractice(); hud.openMenu(); },
+  });
 
   let prev: WorldState = createWorld(ctx, drivers.length);
   let curr: WorldState = prev;
@@ -137,6 +173,8 @@ async function main(): Promise<void> {
   let fps = TICK_HZ; // display smoothing starts at the expected rate, not 0
 
   keyboard.onAction((a) => {
+    // In a race, R (reset to pits) and 0-9 (grid slots) are off: they'd teleport you round the lap.
+    if (curr.race && (a.type === 'reset' || a.type === 'gridSlot')) return;
     if (a.type === 'reset') {
       curr = resetCar(curr, 0, json.spawn, ctx);
       prev = curr;
@@ -170,6 +208,8 @@ async function main(): Promise<void> {
         vfxQuality: { get: () => vfx.quality, set: (q) => vfx.setQuality(q), clear: () => vfx.clear() },
         audio: audioConfig,
         ai: aiCfg,
+        contact,
+        race: raceConfig,
         volumes: { values: audio.volumes, set: (bus, v) => audio.setVolume(bus, v) },
         onBuildChange: (build) => {
           const was = curr.cars[0]!.build;
@@ -193,6 +233,9 @@ async function main(): Promise<void> {
         vfx,
         audio,
         session,
+        /** Dev: an AI drives your car (hands-off race tests). Undo with __game.setDriver(0, keyboard) or reload. */
+        autopilot: () => (drivers[0] = aiInputSource(0, () => ({ world: curr, ctx, line: racingLine }), () => aiCfg.presets[aiPreset] ?? aiCfg.presets[aiCfg.defaultPreset]!, () => aiCfg, 999)),
+        keyboard,
         /** Dev: who drives each car (AI drivers expose .state). */
         drivers: () => drivers,
         /** Dev: replace who drives car i (e.g. a scripted test driver). */
@@ -326,6 +369,18 @@ async function main(): Promise<void> {
             if (!editor) drawTrackData(c, json, lw);
             drawWheels(c, prev, curr, alpha, physics, json.pxPerMeter, lw);
           }
+          // Race: outline your own pit box while you're in the pit lane.
+          const me = curr.cars[0], myBox = curr.race?.cars[0]?.box ?? -1;
+          if (me?.inPitLane && myBox >= 0) {
+            const b = ctx.track.boxes[myBox]!;
+            c.save();
+            c.strokeStyle = `rgba(255, 221, 0, ${0.55 + 0.45 * Math.sin(performance.now() / 160)})`;
+            c.lineWidth = 4 * lw;
+            c.strokeRect(b.x0 - 3, b.y0 - 3, b.x1 - b.x0 + 6, b.y1 - b.y0 + 6);
+            c.fillStyle = 'rgba(255, 221, 0, 0.18)';
+            c.fillRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
+            c.restore();
+          }
           editor?.draw(c, lw);
         },
         text,
@@ -335,7 +390,9 @@ async function main(): Promise<void> {
       const me = curr.cars[0];
       if (me) {
         hud.fuelTankKg = physics.fuel.tankKg;
-        hud.update(me, (curr.tick + alpha) * TICK_DT, session, !!json.timingLines.startFinish, stoppedInBox());
+        const race = curr.race;
+        hud.update(me, (curr.tick + alpha) * TICK_DT, session, !!json.timingLines.startFinish, stoppedInBox(), race ? { laps: race.laps, box: (race.cars[0]?.box ?? -1) + 1 } : undefined);
+        raceHud.update(curr, race?.sharedBoxes ? `${ctx.track.boxes.length} pit boxes for ${curr.cars.length} cars: shared` : '');
       }
     }
   }

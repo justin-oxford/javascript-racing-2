@@ -1,4 +1,5 @@
 // All sim state is plain, JSON-serializable data. No classes, no hidden state.
+import type { RaceState } from './race';
 import type { LapTiming, TimingEvent } from './timing';
 // Units: metres, seconds, radians, kg, newtons. Track pixels exist only at the track boundary
 // (mask sampling, track.json) and in the client renderer.
@@ -79,6 +80,10 @@ export interface CarState extends Pose {
   inPitLane: boolean;
   /** Any wheel on the pit box: service (tyres, fuel) when stopped. */
   inPitBox: boolean;
+  /** Which pit box (0-based, see SimTrack.boxes) a wheel is in, -1 if none. */
+  pitBox: number;
+  /** Being serviced this tick: stopped in a box it may use (any box in practice, its own in a race). */
+  servicing: boolean;
   /** Touching a wall this tick. */
   wallContact: boolean;
   /** Touching a tyre barrier this tick (invalidates the lap, card 04). */
@@ -97,10 +102,22 @@ export interface WorldState {
   cars: CarState[];
   /** Events from the most recent tick only. */
   events: SimEvent[];
+  /** Race mode (card 06). Absent in practice. */
+  race?: RaceState;
 }
 
 export interface Rules {
   pitSpeedLimitKph: number;
+}
+
+/** config/contact.json: car-to-car contact, and the car body's own material against walls. */
+export interface ContactConfig {
+  /** Car against car. */
+  carFriction: number;
+  carRestitution: number;
+  /** Car body against walls: mixed with the wall's own friction/restitution (physics.json walls). */
+  bodyFriction: number;
+  bodyRestitution: number;
 }
 
 export const NEUTRAL_INPUT: Readonly<CarInput> = Object.freeze({ throttle: 0, brake: 0, steer: 0 });

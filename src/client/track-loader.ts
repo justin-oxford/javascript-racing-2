@@ -2,7 +2,9 @@
 // fetched at runtime so they can hot-reload). The mask is decoded to palette indices here,
 // before anything reaches the sim.
 import trackList from 'virtual:tracks';
+import contactJson from '../../config/contact.json';
 import physicsJson from '../../config/physics.json';
+import raceJson from '../../config/race.json';
 import rules from '../../config/rules.json';
 import specsJson from '../../config/specs.json';
 import surfacesConfig from '../../config/surfaces.json';
@@ -10,6 +12,8 @@ import teamsJson from '../../config/teams.json';
 import trackDefaults from '../../config/track-defaults.json';
 import wallTracing from '../../config/wall-tracing.json';
 import {
+  type ContactConfig,
+  type RaceConfig,
   completeTrackJson,
   createPhysicsCache,
   createSimTrack,
@@ -36,6 +40,10 @@ import {
 export { surfacesConfig };
 export const surfaces: SurfaceDef[] = surfacesConfig.surfaces;
 export const physics = physicsJson as PhysicsConfig;
+/** config/contact.json, live (tuning panel). */
+export const contact: ContactConfig = contactJson;
+/** config/race.json. */
+export const raceConfig: RaceConfig = raceJson;
 export const catalog: CarCatalog = { teams: teamsJson.teams as TeamDef[], specs: specsJson as unknown as SpecsConfig };
 export { rules };
 const defaults = trackDefaults as TrackDefaults;
@@ -176,5 +184,5 @@ export async function loadTeamSprites(): Promise<Map<string, HTMLImageElement>> 
 }
 
 export function simContext(mask: MaskState): SimContext {
-  return { track: mask.track, walls: mask.walls, physics, catalog, rules, cache: createPhysicsCache() };
+  return { track: mask.track, walls: mask.walls, physics, catalog, rules, contact, race: raceConfig, cache: createPhysicsCache() };
 }

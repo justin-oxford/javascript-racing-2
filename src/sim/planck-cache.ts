@@ -12,7 +12,7 @@
 import { BoxShape, ChainShape, Vec2, World, type Body, type Fixture } from 'planck';
 import type { PhysicsConfig } from './car-config';
 import type { SimTrack, WallChain } from './track';
-import type { CarState, WorldState } from './types';
+import type { CarState, ContactConfig, WorldState } from './types';
 
 interface WallTag {
   kind: 'wall' | 'barrier';
@@ -27,17 +27,28 @@ export interface PhysicsCache {
   walls_: readonly WallChain[] | undefined;
   /** Wall material last applied, so live tuning reaches existing fixtures. */
   wallMaterial: { restitution: number; friction: number };
+  /** Car-to-car material for this step (contact.json), applied per contact in pre-solve. */
+  carCar: { friction: number; restitution: number };
 }
 
 export function createPhysicsCache(): PhysicsCache {
-  return {
+  const cache: PhysicsCache = {
     world: new World({ gravity: Vec2(0, 0), allowSleep: false }),
     cars: [],
     walls: [],
     track: undefined,
     walls_: undefined,
     wallMaterial: { restitution: NaN, friction: NaN },
+    carCar: { friction: 0, restitution: 0 },
   };
+  // Car against car: contact.json's own values, not a mix of the two bodies' materials. (A car body's
+  // material still mixes with a wall's, so car-to-car tuning never changes how walls feel.)
+  cache.world.on('pre-solve', (contact) => {
+    if (!contact.getFixtureA().getBody().isDynamic() || !contact.getFixtureB().getBody().isDynamic()) return;
+    contact.setFriction(cache.carCar.friction);
+    contact.setRestitution(cache.carCar.restitution);
+  });
+  return cache;
 }
 
 function buildWalls(cache: PhysicsCache, track: SimTrack, walls: readonly WallChain[], cfg: PhysicsConfig): void {
@@ -74,12 +85,12 @@ function carMassData(car: CarState, cfg: PhysicsConfig): { mass: number; center:
  * Make the Planck world mirror a plain state exactly (bodies, transforms, velocities, mass).
  * Car bodies are recreated, not moved, so no Box2D history survives from earlier ticks.
  */
-export function writeStateToWorld(cache: PhysicsCache, state: WorldState, cfg: PhysicsConfig): void {
+export function writeStateToWorld(cache: PhysicsCache, state: WorldState, cfg: PhysicsConfig, contact: ContactConfig): void {
   const { world } = cache;
   while (cache.cars.length) world.destroyBody(cache.cars.pop()!);
   while (cache.cars.length < state.cars.length) {
     const body = world.createBody({ type: 'dynamic', allowSleep: false, bullet: true });
-    body.createFixture({ shape: new BoxShape(cfg.car.widthM / 2, cfg.car.lengthM / 2), density: 1, friction: 0.3, restitution: 0.1 });
+    body.createFixture({ shape: new BoxShape(cfg.car.widthM / 2, cfg.car.lengthM / 2), density: 1, friction: contact.bodyFriction, restitution: contact.bodyRestitution });
     cache.cars.push(body);
   }
   state.cars.forEach((car, i) => syncBody(cache.cars[i]!, car, cfg));
@@ -125,9 +136,10 @@ export function readStateFromWorld(cache: PhysicsCache): BodyReadout[] {
  * Get the cache ready to step `state`: rebuild walls if the track changed (hot reload), write the
  * cars from plain state, and apply live-tuned wall material.
  */
-export function prepareCache(cache: PhysicsCache, state: WorldState, track: SimTrack, walls: readonly WallChain[], cfg: PhysicsConfig): void {
+export function prepareCache(cache: PhysicsCache, state: WorldState, track: SimTrack, walls: readonly WallChain[], cfg: PhysicsConfig, contact: ContactConfig): void {
   if (cache.track !== track || cache.walls_ !== walls) buildWalls(cache, track, walls, cfg);
-  writeStateToWorld(cache, state, cfg);
+  cache.carCar = { friction: contact.carFriction, restitution: contact.carRestitution };
+  writeStateToWorld(cache, state, cfg, contact);
   const m = cache.wallMaterial;
   if (m.restitution !== cfg.walls.restitution || m.friction !== cfg.walls.friction) {
     for (const f of cache.walls) {

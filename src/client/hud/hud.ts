@@ -11,6 +11,10 @@ export interface HudCallbacks {
   onSetup(slot: keyof CarSetup, value: string): void;
   /** AI opponents: how many (0-9) and which difficulty preset. Restarts practice from the grid. */
   onAi(count: number, preset: string): void;
+  /** Start a race (card 06) with the menu's AI count, difficulty, team and spec. */
+  onRace(laps: number, grid: 'random' | 'pole' | 'back'): void;
+  /** Leave a race for practice. */
+  onPractice(): void;
 }
 
 const fmt = (t: number | undefined, plus = false): string => {
@@ -114,6 +118,11 @@ export class Hud {
         <div class="choices ai-count">${[0, 1, 3, 5, 9].map((n) => `<button data-ai-count="${n}">${n}</button>`).join('')}</div>
         <div class="choices ai-level">${this.aiPresets.map((p) => `<button data-ai-preset="${p}">${p}</button>`).join('')}</div>
         <div class="note">Changing AI restarts everyone from the grid.</div>
+        <div class="title">RACE</div>
+        <div class="choices race-laps">${[3, 5, 10, 15].map((n) => `<button data-race-laps="${n}">${n} laps</button>`).join('')}</div>
+        <div class="choices race-grid">${(['random', 'pole', 'back'] as const).map((g) => `<button data-race-grid="${g}">${{ random: 'Random grid', pole: 'Pole', back: 'Back of grid' }[g]}</button>`).join('')}</div>
+        <div class="choices race-go"><button data-id="raceStart">START RACE</button><button data-id="practice">PRACTICE</button></div>
+        <div class="note">Races use the AI count above (at least 1) and difficulty.</div>
       </div>
       <div class="hud-drop car" data-id="carPanel">
         <div class="title">Vehicle Information</div>
@@ -138,6 +147,10 @@ export class Hud {
     this.el.timeBtn!.addEventListener('click', () => this.toggle('timing'));
     this.root.querySelectorAll<HTMLButtonElement>('[data-spec]').forEach((b) => b.addEventListener('click', () => this.cb.onSpec(b.dataset.spec!)));
     this.root.querySelectorAll<HTMLButtonElement>('[data-team]').forEach((b) => b.addEventListener('click', () => this.cb.onTeam(b.dataset.team!)));
+    this.root.querySelectorAll<HTMLButtonElement>('[data-race-laps]').forEach((b) => b.addEventListener('click', () => { this.race.laps = Number(b.dataset.raceLaps); this.showRaceChoice(); }));
+    this.root.querySelectorAll<HTMLButtonElement>('[data-race-grid]').forEach((b) => b.addEventListener('click', () => { this.race.grid = b.dataset.raceGrid as Hud['race']['grid']; this.showRaceChoice(); }));
+    this.el.raceStart!.addEventListener('click', () => { this.closeMenu(); this.cb.onRace(this.race.laps, this.race.grid); });
+    this.el.practice!.addEventListener('click', () => { this.closeMenu(); this.cb.onPractice(); });
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-count]').forEach((b) => b.addEventListener('click', () => this.cb.onAi(Number(b.dataset.aiCount), this.ai.preset)));
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-preset]').forEach((b) => b.addEventListener('click', () => this.cb.onAi(this.ai.count, b.dataset.aiPreset!)));
     this.root.querySelectorAll<HTMLButtonElement>('[data-slot]').forEach((b) =>
@@ -154,6 +167,34 @@ export class Hud {
   }
 
   private setup: CarSetup | undefined;
+  private race: { laps: number; grid: 'random' | 'pole' | 'back' } = { laps: 5, grid: 'random' };
+
+  /** Default race length (config/race.json). */
+  setRaceDefaults(laps: number): void {
+    this.race.laps = laps;
+    this.showRaceChoice();
+  }
+
+  private showRaceChoice(): void {
+    this.root.querySelectorAll<HTMLButtonElement>('[data-race-laps]').forEach((b) => b.classList.toggle('active', Number(b.dataset.raceLaps) === this.race.laps));
+    this.root.querySelectorAll<HTMLButtonElement>('[data-race-grid]').forEach((b) => b.classList.toggle('active', b.dataset.raceGrid === this.race.grid));
+  }
+
+  /** Open the menu (results screen: back to menu). */
+  openMenu(): void {
+    this.panels.menu = this.panels.car = true;
+    this.applyPanels();
+  }
+
+  private closeMenu(): void {
+    this.panels.menu = this.panels.car = false;
+    this.applyPanels();
+  }
+
+  /** The HUD's root element (the race overlay mounts inside it so it scales the same way). */
+  get element(): HTMLElement {
+    return this.root;
+  }
   private ai = { count: 0, preset: '' };
 
   /** Show the current AI choice (highlights the buttons). */
@@ -193,8 +234,11 @@ export class Hud {
     this.el[`split${i}`]!.textContent = t.split === undefined ? '---' : fmt(t.split, true);
   }
 
-  update(car: CarState, simTime: number, session: Session, hasLines: boolean, inBoxStopped: boolean): void {
-    this.el.lap!.textContent = String(car.timing.started ? car.timing.laps + 1 : 0);
+  /** `race`: race laps and the car's own box (1-based) while racing; undefined in practice. */
+  update(car: CarState, simTime: number, session: Session, hasLines: boolean, inBoxStopped: boolean, race?: { laps: number; box: number }): void {
+    this.el.lap!.textContent = race
+      ? `${Math.min(race.laps, car.timing.started ? car.timing.laps + 1 : 0)}/${race.laps}`
+      : String(car.timing.started ? car.timing.laps + 1 : 0);
     this.el.speed!.textContent = Math.abs(car.speed * 3.6).toFixed(0);
     const time = this.el.time!;
     if (!hasLines) time.textContent = 'no lines';
@@ -226,7 +270,9 @@ export class Hud {
     this.setup = car.build.setup;
     for (const s of SLOTS) this.el[`setup-${s.slot}`]!.textContent = car.build.setup[s.slot];
     this.root.querySelectorAll<HTMLButtonElement>('[data-slot]').forEach((b) => (b.disabled = !inBoxStopped));
-    this.el.setupHint!.textContent = inBoxStopped ? 'In the box: fresh tyres, refuelling. Setup changes apply now.' : 'Stop in a pit box to change the setup.';
+    this.el.setupHint!.textContent = inBoxStopped ? 'In the box: fresh tyres, refuelling. Setup changes apply now.'
+      : race && race.box > 0 ? `Your pit box is ${race.box} (outlined when you're in the pit lane). Only your box services you.`
+      : 'Stop in a pit box to change the setup.';
     this.root.querySelectorAll<HTMLButtonElement>('[data-spec]').forEach((b) => b.classList.toggle('active', b.dataset.spec === car.build.spec));
     this.root.querySelectorAll<HTMLButtonElement>('[data-team]').forEach((b) => b.classList.toggle('active', b.dataset.team === car.build.team));
 

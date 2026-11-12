@@ -1,9 +1,10 @@
 // Headless AI race check (card 05): N AI cars, L laps, no rendering, faster than real time.
-// Usage: npm run ai-run -- [--track id] [--cars 10] [--laps 20] [--preset hard] [--seed 1]
+// Usage: npm run ai-run -- [--track id] [--cars 10] [--laps 20] [--preset hard] [--seed 1] [--race]
+// --race: a real race (card 06): grid, start lights, own pit boxes, chequered flag; prints the classification.
 // Reports per car: laps, best/median lap, spread, invalid laps, wall hits, stuck events, car contacts.
 // Uses live config (physics, ai). Rerun after every AI change; regressions show up as numbers.
 import aiJson from '../config/ai.json' with { type: 'json' };
-import { aiInputSource, buildRacingLine, buildStats, createWorld, step, type AiConfig, type CarBuild, type WorldState } from '../src/sim/index.ts';
+import { aiInputSource, buildRacingLine, buildStats, createRaceWorld, createWorld, raceResults, step, type AiConfig, type CarBuild, type WorldState } from '../src/sim/index.ts';
 import { catalog, defaultTrackIdNode, loadTrackNode, simContextNode } from './load-track-node.ts';
 
 const args = process.argv.slice(2);
@@ -28,7 +29,9 @@ if (!line) throw new Error(`${trackId} has no racing line (npm run suggest-racin
 
 // One car per team (cycling if more cars than teams), default spec/setup.
 const builds: CarBuild[] = Array.from({ length: cars }, (_, i) => ({ ...ctx.physics.defaultCar, team: catalog.teams[i % catalog.teams.length]!.id }));
-let world: WorldState = createWorld(ctx, builds);
+const race = args.includes('--race');
+let world: WorldState = race ? createRaceWorld(ctx, builds, { laps, seed }) : createWorld(ctx, builds);
+if (race && world.race?.sharedBoxes) console.warn(`warning: ${ctx.track.boxes.length} pit box(es) for ${cars} cars: shared round-robin`);
 const drivers = builds.map((_, i) => aiInputSource(i, () => ({ world, ctx, line }), () => preset, () => cfg, seed * 1000 + i));
 
 interface Stat { laps: number[]; invalid: number; walls: number; contacts: number; barriers: number }
@@ -41,15 +44,43 @@ let tick = 0;
 const progress = (i: number) => world.cars[i]!.timing.laps * line.n + (drivers[i]!.state.mode === 'race' ? drivers[i]!.state.near : -1e6);
 const order = new Map<number, number>();
 let overtakes = 0;
+// Race checks: progress never jumps; at each crossing the car shown ahead really is ahead; every service is in the car's own box.
+let progressJumps = 0, orderErrors = 0, wrongBox = 0;
+const prevProgress: number[] = [], prevCross: number[] = [];
 for (; tick < maxTicks; tick++) {
   const prev = world;
+  const before = process.env.PITDBG ? drivers.map((d) => ({ mode: d.state.mode, serviced: d.state.serviced, stuck: d.state.stuckEvents, stops: d.state.pitStops })) : [];
   world = step(world, drivers.map((d) => d.read(world.tick)), ctx);
+  if (process.env.PITDBG) drivers.forEach((d, i) => {
+    const b = before[i]!, st = d.state, c = world.cars[i]!, ppm = ctx.track.json.pxPerMeter, at = `(${(c.x * ppm).toFixed(0)},${(c.y * ppm).toFixed(0)})`;
+    if (st.mode !== b.mode) console.log(`pit t=${(tick / 60).toFixed(1)} car ${i} ${b.mode} -> ${st.mode} ${at} fuel ${c.fuelKg.toFixed(1)}`);
+    if (st.serviced && !b.serviced) console.log(`pit t=${(tick / 60).toFixed(1)} car ${i} ${st.pitStops > b.stops ? 'SERVICED' : 'GAVE UP'} ${at} box ${c.pitBox} own ${world.race?.cars[i]?.box} near ${st.near} servicing ${c.servicing}`);
+    if (st.stuckEvents > b.stuck) console.log(`stuck t=${(tick / 60).toFixed(1)} car ${i} mode ${st.mode} ${at} near ${st.near}`);
+  });
   world.cars.forEach((c, i) => {
     const p = prev.cars[i]!, s = stats[i]!;
     if (c.wallContact && !p.wallContact) s.walls++;
     if (c.barrierContact && !p.barrierContact) s.barriers++;
     if (c.carContact && !p.carContact) s.contacts++;
   });
+  if (race && (world.race!.phase === 'racing' || world.race!.phase === 'finishing')) {
+    const r = world.race!;
+    // Progress must move smoothly (a jump = mis-tracking, e.g. in the pit lane or at the line).
+    r.cars.forEach((c, i) => { const was = prevProgress[i]; if (was !== undefined && !c.finished && Math.abs(c.progress - was) > 0.05) { progressJumps++; if (process.env.GAPDBG) console.log(`jump t=${(tick / 60).toFixed(2)} car ${i} ${was.toFixed(3)} -> ${c.progress.toFixed(3)} mode ${drivers[i]!.state.mode}`); } prevProgress[i] = c.progress; });
+    // At a crossing, the car shown ahead must already have crossed that line (unless they're level).
+    r.cars.forEach((c, i) => {
+      if (c.crossings.length === (prevCross[i] ?? 0)) return;
+      prevCross[i] = c.crossings.length;
+      const at = r.order.indexOf(i);
+      if (at <= 0) return;
+      const a = r.cars[r.order[at - 1]!]!;
+      if (!a.finished && a.crossings.length < c.crossings.length && a.progress - c.progress > 0.003) {
+        orderErrors++;
+        if (process.env.GAPDBG) console.log(`order t=${(tick / 60).toFixed(2)} car ${i} crossed #${c.crossings.length} but car ${r.order[at - 1]} (crossed ${a.crossings.length}, prog ${a.progress.toFixed(3)} vs ${c.progress.toFixed(3)}) is shown ahead`);
+      }
+    });
+    world.cars.forEach((c, i) => { if (c.servicing && c.pitBox !== r.cars[i]!.box) wrongBox++; });
+  }
   if (tick > 600)
     for (let a = 0; a < builds.length; a++)
       for (let b = a + 1; b < builds.length; b++) {
@@ -66,7 +97,7 @@ for (; tick < maxTicks; tick++) {
     if (e.invalid) s.invalid++;
     else s.laps.push(e.time);
   }
-  if (world.cars.every((c) => c.timing.laps >= laps)) break;
+  if (race ? world.race!.phase === 'results' : world.cars.every((c) => c.timing.laps >= laps)) break;
 }
 const wall = (performance.now() - t0) / 1000;
 
@@ -86,4 +117,18 @@ const unfinished = world.cars.filter((c) => c.timing.laps < laps).length;
 console.log(`\nstuck events ${stuck}; cars short of ${laps} laps: ${unfinished}; overtakes ${overtakes}`);
 console.log('pace order (best lap): ' + rows.filter((r) => r.best !== undefined).sort((a, b) => a.best! - b.best!).map((r) => catalog.teams.find((t) => t.id === world.cars[r.i]!.build.team)!.name).join(' > '));
 // A stuck car = one that never finished; stuck *events* (beached, reversed out) are recovery working.
-if (unfinished) process.exitCode = 1;
+if (!race && unfinished) process.exitCode = 1;
+
+if (race) {
+  const r = world.race!;
+  const fmtGap = (g: { seconds: number; laps: number } | undefined) => (!g ? '' : g.laps ? `+${g.laps} lap${g.laps > 1 ? 's' : ''}` : `+${g.seconds.toFixed(3)}s`);
+  console.log(`
+RACE: ${r.laps} laps, phase ${r.phase}, lights out at ${r.startTime.toFixed(2)} s (hold ${(r.holdTicks / 60).toFixed(2)} s)`);
+  console.log('pos car team          laps  time       gap          best      pits box jump');
+  for (const row of raceResults(r)) {
+    const team = catalog.teams.find((t) => t.id === world.cars[row.car]!.build.team)!.name;
+    console.log(`${String(row.pos).padStart(3)} ${String(row.car).padStart(3)} ${team.padEnd(13)} ${String(row.laps).padStart(4)}  ${row.finished ? fmt(row.time) : '  DNF   '}  ${fmtGap(row.gap).padEnd(11)}  ${row.bestLap ? fmt(row.bestLap) : '   -   '}  ${String(row.pitStops).padStart(4)} ${String(r.cars[row.car]!.box + 1).padStart(3)} ${row.jumpStart ? 'JUMP' : ''}`);
+  }
+  console.log(`checks: progress jumps ${progressJumps}; order wrong at a line crossing ${orderErrors}; services outside the car's own box ${wrongBox}`);
+  if (r.phase !== 'results' || raceResults(r).some((x) => !x.finished) || progressJumps || orderErrors || wrongBox) process.exitCode = 1;
+}

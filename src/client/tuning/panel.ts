@@ -2,7 +2,7 @@
 // tick, so changes apply to the running car immediately. Save writes them back to /config.
 // Tuning is Justin's job; this file's job is to be a good instrument.
 import GUI, { type Controller } from 'lil-gui';
-import type { AiConfig, CarBuild, PhysicsConfig, Rules, SurfaceDef, WorldState } from '../../sim';
+import type { AiConfig, CarBuild, ContactConfig, PhysicsConfig, RaceConfig, Rules, SurfaceDef, WorldState } from '../../sim';
 import type { VfxConfig } from '../vfx/triggers';
 import type { VfxQuality } from '../vfx/vfx';
 import type { AudioConfig } from '../audio/targets';
@@ -71,6 +71,15 @@ const RANGES: Record<string, [number, number, number]> = {
   'ai.recovery.stuckSec': [0.5, 10, 0.1],
   'ai.recovery.reverseSec': [0.3, 5, 0.1],
   'ai.recovery.backwardsDeg': [60, 180, 5],
+  'contact.carFriction': [0, 1.5, 0.01],
+  'contact.carRestitution': [0, 1, 0.01],
+  'race.defaultLaps': [1, 30, 1],
+  'race.gridSec': [0, 10, 0.5],
+  'race.lightIntervalSec': [0.2, 2, 0.1],
+  'race.holdMinSec': [0, 5, 0.1],
+  'race.holdMaxSec': [0, 5, 0.1],
+  'race.jumpStartThrottle': [0, 1, 0.01],
+  'race.finishTimeoutSec': [10, 300, 5],
   'surface.grip': [0, 1.5, 0.01],
   'surface.rollingDrag': [0, 1.5, 0.005],
   'audio.engine.gears': [3, 10, 1],
@@ -101,11 +110,15 @@ export interface TuningTargets {
   volumes: { values: Volumes; set(bus: 'master' | 'engine' | 'tyres' | 'impacts' | 'ui', v: number): void };
   /** config/ai.json, live (AI drivers read it every tick). */
   ai: AiConfig;
+  /** config/contact.json, live: car-to-car friction / restitution. */
+  contact: ContactConfig;
+  /** config/race.json: start lights, finish timeout (applies from the next race). */
+  race: RaceConfig;
   /** Called when the team/spec/setup changes, to rebuild the player's car. */
   onBuildChange(build: CarBuild): void;
 }
 
-async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai', value: unknown): Promise<string> {
+async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai' | 'contact' | 'race', value: unknown): Promise<string> {
   const res = await fetch(`/__tuning/save/${name}`, { method: 'POST', headers: { 'x-tuning-panel': '1' }, body: formatTrackJson(value) });
   return res.ok ? `config/${name}.json` : `${name}: ${await res.text()}`;
 }
@@ -203,6 +216,16 @@ export class TuningPanel {
     }
     snd.close();
 
+    const con = gui.addFolder('Car contact (yaw inertia: Car body → inertiaScale)');
+    this.slider(con, this.t.contact, 'carFriction', 'contact.carFriction', 'car friction');
+    this.slider(con, this.t.contact, 'carRestitution', 'contact.carRestitution', 'car restitution (bounce)');
+    this.slider(con, physics.car, 'inertiaScale', 'car.inertiaScale', 'yaw inertia scale (= Car body)');
+    con.close();
+
+    const race = gui.addFolder('Race (next race)');
+    for (const key of Object.keys(this.t.race)) if (key !== '_comment') this.slider(race, this.t.race, key, `race.${key}`);
+    race.close();
+
     const ai = gui.addFolder('AI drivers (HUD menu: count + difficulty)');
     for (const [name, preset] of Object.entries(this.t.ai.presets)) {
       const sub = ai.addFolder(name);
@@ -225,7 +248,7 @@ export class TuningPanel {
       statusCtl.updateDisplay();
     };
     io.add({
-      save: async () => show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai)])).join(', ')),
+      save: async () => show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai), saveConfig('contact', this.t.contact), saveConfig('race', this.t.race)])).join(', ')),
     }, 'save').name('Save to /config');
     io.add({ copy: () => void navigator.clipboard.writeText(formatTrackJson(physics)).then(() => show('physics.json copied')) }, 'copy').name('Copy physics JSON');
     io.add({ revert: () => this.revert() && show('Reverted to last saved values') }, 'revert').name('Revert unsaved changes');

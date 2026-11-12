@@ -1,5 +1,7 @@
 // @vitest-environment node
 // Car physics on small synthetic arenas (built here, not real tracks), so each behaviour is isolated.
+import contactJson from '../../tools/fixtures/contact-baseline.json';
+import raceJson from '../../config/race.json';
 import { describe, expect, it } from 'vitest';
 // Frozen baseline, not live config: these behaviours must not change while Justin tunes.
 import physicsJson from '../../tools/fixtures/physics-baseline.json';
@@ -46,7 +48,7 @@ function arena(wM: number, hM: number, spawnM: Pose, paint?: (xM: number, yM: nu
     physics: structuredClone(physicsJson) as PhysicsConfig,
     catalog,
     rules,
-    cache: createPhysicsCache(),
+    contact: contactJson, race: raceJson, cache: createPhysicsCache(),
   };
 }
 

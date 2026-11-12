@@ -1,9 +1,10 @@
 import { buildStats, type CarCatalog, type PhysicsConfig } from './car-config';
 import { applyCarForce, prepareCache, readStateFromWorld, setCarMass, stepWorld, type PhysicsCache } from './planck-cache';
 import type { SimTrack, WallChain } from './track';
-import { surfaceAt } from './track';
+import { boxAt, surfaceAt } from './track';
+import { gridOrder, newRaceState, raceHolds, updateRace, type RaceConfig } from './race';
 import { newTiming, updateTiming, type TimingEvent } from './timing';
-import type { CarBuild, CarInput, CarState, Pose, Rules, SimEvent, WheelState, Wheels, WorldState } from './types';
+import type { CarBuild, CarInput, CarState, ContactConfig, Pose, Rules, SimEvent, WheelState, Wheels, WorldState } from './types';
 import { NEUTRAL_INPUT } from './types';
 
 /** Fixed simulation rate. Physics is never stepped by frame time. */
@@ -22,6 +23,10 @@ export interface SimContext {
   physics: PhysicsConfig;
   catalog: CarCatalog;
   rules: Rules;
+  /** config/contact.json: car-to-car contact material (live-tunable). */
+  contact: ContactConfig;
+  /** config/race.json: start lights, finish timeout. */
+  race: RaceConfig;
   cache: PhysicsCache;
 }
 
@@ -69,6 +74,17 @@ function surfaceFlags(surfaces: Wheels<number>, ctx: SimContext): Pick<CarState,
   };
 }
 
+/** Which pit box a wheel is in (0-based), -1 if none. */
+function pitBoxUnder(car: Pick<CarState, 'x' | 'y' | 'heading'>, ctx: SimContext): number {
+  if (!ctx.track.boxes.length) return -1;
+  const ppm = ctx.track.json.pxPerMeter;
+  for (const p of wheelPositions(car, ctx.physics)) {
+    const b = boxAt(ctx.track, p.x * ppm, p.y * ppm);
+    if (b >= 0) return b;
+  }
+  return -1;
+}
+
 /** A stationary car at a pose given in TRACK PIXELS (track.json coordinates). */
 export function createCar(posePx: Pose, build: CarBuild, ctx: SimContext): CarState {
   const ppm = ctx.track.json.pxPerMeter;
@@ -85,6 +101,8 @@ export function createCar(posePx: Pose, build: CarBuild, ctx: SimContext): CarSt
     fuelKg: ctx.physics.fuel.startKg,
     wheels: surfaces.map(newWheel) as Wheels<WheelState>,
     ...surfaceFlags(surfaces, ctx),
+    pitBox: pitBoxUnder(pose, ctx),
+    servicing: false,
     wallContact: false,
     barrierContact: false,
     carContact: false,
@@ -97,7 +115,7 @@ export function createCar(posePx: Pose, build: CarBuild, ctx: SimContext): CarSt
  * spawn (one row every 8 m, the second column 4 m to the side and 4 m back, on whichever side is legal
  * surface). Nose-to-tail single file piled up at the first corner.
  */
-function startPose(i: number, ctx: SimContext): Pose {
+export function startPose(i: number, ctx: SimContext): Pose {
   const { grid, spawn, pxPerMeter: ppm } = ctx.track.json;
   if (i === 0) return spawn;
   const slot = grid[i];
@@ -120,12 +138,30 @@ export function createWorld(ctx: SimContext, cars: number | readonly CarBuild[] 
   return { tick: 0, cars: builds.map((b, i) => createCar(startPose(i, ctx), b, ctx)), events: [] };
 }
 
+export interface RaceSetup {
+  laps: number;
+  /** Seeds the grid shuffle and the start-light hold. */
+  seed: number;
+  /** Put the player (car 0) in this grid slot; otherwise the grid is shuffled. */
+  playerSlot?: number | undefined;
+}
+
+/**
+ * A race (card 06): cars on the grid (slot order = shuffled, or the player's choice), held still until
+ * lights out, each assigned its own pit box. Car indices stay as given (car 0 = the player).
+ */
+export function createRaceWorld(ctx: SimContext, builds: readonly CarBuild[], setup: RaceSetup): WorldState {
+  const order = gridOrder(builds.length, setup.seed, setup.playerSlot);
+  const slotOf = new Map(order.map((car, slot) => [car, slot]));
+  const cars = builds.map((b, i) => createCar(startPose(slotOf.get(i)!, ctx), b, ctx));
+  return { tick: 0, cars, events: [], race: newRaceState(order, setup.laps, setup.seed, ctx.track, ctx.race, TICK_HZ) };
+}
+
 /** Put a car back at a pose (track pixels), stationary, same build (R = reset to pits). */
 export function resetCar(world: WorldState, index: number, posePx: Pose, ctx: SimContext): WorldState {
   return {
-    tick: world.tick,
+    ...world,
     cars: world.cars.map((car, i) => (i === index ? createCar(posePx, car.build, ctx) : car)),
-    events: world.events,
   };
 }
 
@@ -261,14 +297,15 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
 }
 
 /** Tyre wear + fuel for one tick (SYS - Car model rules), and pit service. */
-function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimContext, dt: number): Pick<CarState, 'fuelKg' | 'wheels'> {
+function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimContext, dt: number, ownBox: number): Pick<CarState, 'fuelKg' | 'wheels' | 'servicing'> {
   const cfg = ctx.physics;
   const kph = Math.abs(car.speed) / KPH;
   const v4 = (kph / cfg.wear.refSpeedKph) ** 4;
   const mass = cfg.car.dryMassKg + Math.max(0, car.fuelKg);
   const quarterWeight = (mass * G) / 4;
   const { throttle, brake } = car.controls;
-  const service = car.inPitBox && kph < cfg.fuel.pitServiceMaxKph;
+  // Practice (ownBox -1): any box. Race: only the car's own box; someone else's does nothing.
+  const service = car.inPitBox && kph < cfg.fuel.pitServiceMaxKph && (ownBox < 0 || car.pitBox === ownBox);
 
   const wheels = car.wheels.map((wheel, w) => {
     let dw = cfg.wear.cornerPerSec * v4 * (Math.abs(forces[w]!.lat) / quarterWeight); // by actual lateral load
@@ -286,7 +323,7 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
 
   let fuelKg = Math.max(0, car.fuelKg - throttle * cfg.fuel.burnKgPerSec * dt);
   if (service) fuelKg = Math.min(cfg.fuel.tankKg, fuelKg + cfg.fuel.refuelKgPerSec * dt);
-  return { fuelKg, wheels };
+  return { fuelKg, wheels, servicing: service };
 }
 
 /**
@@ -296,9 +333,11 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
  */
 export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimContext): WorldState {
   const dt = TICK_DT;
-  prepareCache(ctx.cache, world, ctx.track, ctx.walls, ctx.physics);
+  prepareCache(ctx.cache, world, ctx.track, ctx.walls, ctx.physics, ctx.contact);
 
-  const controls = world.cars.map((car, i) => rampControls(car.controls, inputs[i] ?? NEUTRAL_INPUT, ctx.physics, dt));
+  // On the grid and under the lights, cars are held: the drivers' inputs are ignored (but read for jump starts).
+  const held = raceHolds(world.race);
+  const controls = world.cars.map((car, i) => rampControls(car.controls, held ? NEUTRAL_INPUT : (inputs[i] ?? NEUTRAL_INPUT), ctx.physics, dt));
   const forces = world.cars.map((car, i) => applyCarForces(i, car, controls[i]!, ctx, dt));
   stepWorld(ctx.cache, dt, ctx.physics);
   const bodies = readStateFromWorld(ctx.cache);
@@ -315,6 +354,7 @@ export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimCon
       controls: controls[i]!,
       wheels: car.wheels.map((wh, w) => ({ ...wh, surface: surfaces[w]! })) as Wheels<WheelState>,
       ...surfaceFlags(surfaces, ctx),
+      pitBox: pitBoxUnder(b, ctx),
     };
     const timingEvents: TimingEvent[] = [];
     const timing = updateTiming(
@@ -325,7 +365,7 @@ export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimCon
       timingEvents,
     );
     events.push(...timingEvents);
-    const next = { ...moved, ...updateConsumables(moved, forces[i]!, ctx, dt), timing };
+    const next = { ...moved, ...updateConsumables(moved, forces[i]!, ctx, dt, world.race?.cars[i]?.box ?? -1), timing };
     // Out of bounds should be unreachable behind walls. If a wheel gets there, the mask has a gap.
     if (surfaces.includes(ctx.track.index.outOfBounds)) {
       const ppm = ctx.track.json.pxPerMeter;
@@ -335,5 +375,8 @@ export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimCon
     return next;
   });
 
-  return { tick: world.tick + 1, cars, events };
+  const tick = world.tick + 1;
+  if (!world.race) return { tick, cars, events };
+  const race = updateRace(world.race, tick, dt, world.cars, cars, inputs.map((x) => x ?? NEUTRAL_INPUT), events, ctx.track, ctx.race);
+  return { tick, cars, events, race };
 }

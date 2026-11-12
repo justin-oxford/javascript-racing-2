@@ -1,0 +1,77 @@
+/* Race overlay (card 06). Lives inside #hud, so --u (1 px of the v0.16 1280-wide layout) applies. */
+.race-hud { position: absolute; inset: 0; pointer-events: none; }
+
+.race-hud .lights {
+  position: absolute;
+  top: calc(var(--u) * 70);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: calc(var(--u) * 10);
+  padding: calc(var(--u) * 10) calc(var(--u) * 14);
+  background: #111;
+  border-radius: calc(var(--u) * 8);
+  box-shadow: 0 0 calc(var(--u) * 12) rgba(0, 0, 0, 0.6);
+}
+.race-hud .light { display: flex; flex-direction: column; gap: calc(var(--u) * 6); }
+.race-hud .light i {
+  width: calc(var(--u) * 26);
+  height: calc(var(--u) * 26);
+  border-radius: 50%;
+  background: #3a0d10;
+}
+.race-hud .light.on i { background: #ff1f2d; box-shadow: 0 0 calc(var(--u) * 14) #ff1f2d; }
+
+.race-hud .tower {
+  position: absolute;
+  top: calc(var(--u) * 60);
+  left: calc(var(--u) * 8);
+  width: calc(var(--u) * 168);
+  background: rgba(20, 20, 20, 0.82);
+  font-size: calc(var(--u) * 10);
+}
+.race-hud .tower .head { font-family: "Formula1 Bold", system-ui, sans-serif; padding: calc(var(--u) * 5) calc(var(--u) * 7); background: var(--bar); }
+.race-hud .tower .row { display: flex; align-items: center; gap: calc(var(--u) * 5); padding: calc(var(--u) * 2.5) calc(var(--u) * 6); }
+.race-hud .tower .row.me { background: rgba(230, 57, 70, 0.55); }
+.race-hud .tower .pos { width: calc(var(--u) * 14); text-align: right; font-family: "Formula1 Bold", system-ui, sans-serif; }
+.race-hud .sw {
+  display: inline-block;
+  width: calc(var(--u) * 6);
+  height: calc(var(--u) * 13);
+  background: center / cover no-repeat;
+  border-radius: calc(var(--u) * 1.5);
+  vertical-align: middle;
+}
+.race-hud .tower .name { flex: 1; white-space: nowrap; overflow: hidden; }
+.race-hud .tower .gap { font-variant-numeric: tabular-nums; }
+.race-hud .tower .pit { font-size: calc(var(--u) * 7); padding: 0 calc(var(--u) * 3); background: #1d4ed8; }
+.race-hud .tower .chq {
+  width: calc(var(--u) * 10);
+  height: calc(var(--u) * 8);
+  background: repeating-conic-gradient(#fff 0 25%, #111 0 50%) 0 0 / calc(var(--u) * 5) calc(var(--u) * 4);
+}
+.race-hud .tower .ahead { padding: calc(var(--u) * 4) calc(var(--u) * 7); font-size: calc(var(--u) * 9); border-top: 1px solid rgba(255, 255, 255, 0.15); }
+.race-hud .note { position: absolute; top: calc(var(--u) * 56); left: 50%; transform: translateX(-50%); font-size: calc(var(--u) * 9); color: var(--yellow); }
+
+.race-hud .results {
+  display: none;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: calc(var(--u) * 560);
+  padding: calc(var(--u) * 14) calc(var(--u) * 18);
+  background: rgba(20, 20, 20, 0.94);
+  pointer-events: auto;
+  font-size: calc(var(--u) * 11);
+}
+.race-hud .results.open { display: block; }
+.race-hud .results .title { font-family: "Formula1 Wide", system-ui, sans-serif; font-size: calc(var(--u) * 16); margin-bottom: calc(var(--u) * 10); }
+.race-hud .results table { width: 100%; border-collapse: collapse; }
+.race-hud .results th { text-align: left; font-weight: normal; opacity: 0.6; font-size: calc(var(--u) * 9); padding-bottom: calc(var(--u) * 4); }
+.race-hud .results td { padding: calc(var(--u) * 3) calc(var(--u) * 6) calc(var(--u) * 3) 0; font-variant-numeric: tabular-nums; }
+.race-hud .results tr.me td { color: #fff; font-family: "Formula1 Bold", system-ui, sans-serif; }
+.race-hud .results .jump { color: var(--yellow); font-size: calc(var(--u) * 9); }
+.race-hud .results .buttons { display: flex; gap: calc(var(--u) * 10); justify-content: flex-end; margin-top: calc(var(--u) * 12); }
+.race-hud .results button { border: 0; padding: calc(var(--u) * 6) calc(var(--u) * 14); background: rgba(230, 57, 70, 0.9); }
+.race-hud .results button:hover { background: #e63946; }
