@@ -1,4 +1,4 @@
-import { aiInputSource, bodyOffsetM, buildRacingLine, buildStats, createRaceWorld, createWorld, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { aiInputSource, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createRaceWorld, createWorld, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -27,6 +27,7 @@ import { Hud } from './hud/hud';
 import { RaceHud } from './hud/race-hud';
 import { Liveries } from './livery';
 import liveryConfig from '../../config/livery.json';
+import racingLineConfig from '../../config/racing-line.json';
 import { browserStore, Session } from './hud/session';
 import { TimingLines } from './hud/timing-lines';
 import vfxConfig from '../../config/vfx.json';
@@ -198,7 +199,18 @@ async function main(): Promise<void> {
 
   // Dev-only tools. Dynamic imports keep them out of the production bundle.
   const editor = import.meta.env.DEV && new URLSearchParams(location.search).has('edit')
-    ? new (await import('./editor/editor')).TrackEditor(renderer, json)
+    ? new (await import('./editor/editor')).TrackEditor(renderer, json, (kerbUse) => {
+        // Racing line optimizer: seed (kept) -> generated line + reference speed profile, then the AI follows it.
+        const seed = json.racingLineSeed?.length ? json.racingLineSeed : [...json.racingLine];
+        if (seed.length < 3) return 'Place a rough racing line first (Racing line +): it is the seed.';
+        json.racingLineSeed = seed;
+        const out = optimizeRacingLine(ctx.track, seed, { ...(racingLineConfig as LineOptimizerConfig), kerbUse }, physics);
+        const ppm = json.pxPerMeter;
+        json.racingLine = out.line;
+        json.racingLineSpeed = Array.from(speedProfile(out.line.map((p) => p.x / ppm), out.line.map((p) => p.y / ppm), physics, buildStats(physics.defaultCar, ctx.catalog), { cornerMargin: 1, brakeMargin: 1, fuelKg: physics.fuel.startKg / 2 }), (v) => Math.round(v * 10) / 10);
+        racingLine = buildRacingLine(ctx.track);
+        return `Optimized: ${out.line.length} points, ${out.lengthM.toFixed(0)} m, tightest radius ${out.minRadiusM.toFixed(1)} m, kerb use ${Math.round(kerbUse * 100)}%.`;
+      }, racingLineConfig.kerbUse)
     : undefined;
   const tuning = import.meta.env.DEV
     ? new (await import('./tuning/panel')).TuningPanel({

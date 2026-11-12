@@ -27,7 +27,15 @@ export class TrackEditor {
   private readonly status: HTMLElement;
   private readonly headingInput: HTMLInputElement;
 
-  constructor(private readonly renderer: Renderer, private readonly json: TrackJson) {
+  /** Kerb use for the optimizer (0..1), from config/racing-line.json; the panel slider changes it. */
+  kerbUse = 0.5;
+
+  /**
+   * optimize: run the racing line optimizer on this track (main has the sim track + physics). It keeps the
+   * seed in racingLineSeed, writes racingLine + racingLineSpeed into the same json, returns a status line.
+   */
+  constructor(private readonly renderer: Renderer, private readonly json: TrackJson, private readonly optimize?: (kerbUse: number) => string, kerbUse?: number) {
+    if (kerbUse !== undefined) this.kerbUse = kerbUse;
     this.panel = this.buildPanel();
     this.status = this.panel.querySelector('[data-status]')!;
     this.headingInput = this.panel.querySelector('[data-heading]')!;
@@ -65,10 +73,35 @@ export class TrackEditor {
 
   draw(ctx: CanvasRenderingContext2D, lw: number): void {
     const j = this.json;
-    drawRacingLine(ctx, j.racingLine, lw);
+    // The seed (what the optimizer started from) faint underneath; the line itself coloured by its
+    // speed profile when it has one (red = slow, green = fast), else the plain dashed line.
+    if (j.racingLineSeed?.length) {
+      ctx.save();
+      ctx.globalAlpha = 0.45;
+      drawRacingLine(ctx, j.racingLineSeed, lw);
+      ctx.restore();
+    }
+    const speeds = j.racingLineSpeed;
+    if (speeds && speeds.length === j.racingLine.length) {
+      const lo = Math.min(...speeds), hi = Math.max(...speeds);
+      ctx.save();
+      ctx.lineWidth = lw * 3;
+      ctx.lineCap = 'round';
+      j.racingLine.forEach((p, i) => {
+        const q = j.racingLine[(i + 1) % j.racingLine.length]!;
+        const u = hi > lo ? (speeds[i]! - lo) / (hi - lo) : 1;
+        ctx.strokeStyle = `hsl(${Math.round(120 * u)}, 90%, 50%)`;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(q.x, q.y);
+        ctx.stroke();
+      });
+      ctx.restore();
+    } else drawRacingLine(ctx, j.racingLine, lw);
     ctx.save();
     j.racingLine.forEach((p, i) => {
       const sel = this.isSelected({ kind: 'racing', i });
+      if (speeds && !sel) return; // a generated line has hundreds of points: only show the selected one
       ctx.fillStyle = sel ? '#fff' : '#00e5ff';
       ctx.beginPath();
       ctx.arc(p.x, p.y, (sel ? 4 : 2.5) * lw, 0, Math.PI * 2);
@@ -260,6 +293,10 @@ export class TrackEditor {
         <button data-flip disabled>Flip direction</button>
         <button data-delete disabled>Delete</button>
       </div>
+      <div class="optimize">
+        <button data-optimize ${this.optimize ? '' : 'disabled'}>Optimize line</button>
+        <label>Kerb use <input type="range" min="0" max="1" step="0.05" value="${this.kerbUse}" data-kerb> <span data-kerb-val>${Math.round(this.kerbUse * 100)}%</span></label>
+      </div>
       <div class="actions">
         <button data-save>Save to disk</button>
         <button data-download>Download</button>
@@ -291,6 +328,16 @@ export class TrackEditor {
       this.refresh();
     });
     el.querySelector('[data-delete]')!.addEventListener('click', () => this.deleteSelected());
+    el.querySelector('[data-optimize]')!.addEventListener('click', () => {
+      if (!this.optimize) return;
+      this.selected = undefined;
+      this.setStatus(this.optimize(this.kerbUse) + ' Save to disk to keep it.');
+      this.refresh();
+    });
+    el.querySelector<HTMLInputElement>('[data-kerb]')!.addEventListener('input', (e) => {
+      this.kerbUse = Number((e.target as HTMLInputElement).value);
+      el.querySelector('[data-kerb-val]')!.textContent = `${Math.round(this.kerbUse * 100)}%`;
+    });
     el.querySelector('[data-save]')!.addEventListener('click', () => void this.save());
     el.querySelector('[data-download]')!.addEventListener('click', () => this.download());
     el.querySelector('[data-copy]')!.addEventListener('click', () =>

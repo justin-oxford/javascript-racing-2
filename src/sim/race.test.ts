@@ -109,7 +109,8 @@ describe('a short race', () => {
     expect(rows.map((r) => r.pos)).toEqual([1, 2, 3]);
     expect(rows.every((r) => r.finished)).toBe(true);
     expect(rows[0]!.gap).toBeUndefined();
-    expect(rows.find((r) => r.car === 1)!.pos).toBe(3); // Motus is slow on purpose
+    // Motus is slow on purpose: slowest best lap (finishing order in a 2-lap race also depends on traffic).
+    expect(rows.find((r) => r.car === 1)!.bestLap).toBeGreaterThan(Math.max(...rows.filter((r) => r.car !== 1).map((r) => r.bestLap)));
     expect(rows.some((r) => r.jumpStart)).toBe(false);
   });
 });

@@ -1,5 +1,7 @@
 // Handling diagnostic (card 03b): N AI cars x L laps on the default track, headless, live config.
-// Usage: npm run handling-diag -- [--cars 10] [--laps 10] [--seed 1] [--corners]
+// Usage: npm run handling-diag -- [--cars 10] [--laps 10] [--seed 1] [--corners] [--physics file.json] [--line seed|generated]
+// --clean: no AI mistakes or steering noise. --team <id>: every car from that team.
+// --physics: run with another physics.json (A/B against live tuning). --line seed: drive racingLineSeed instead.
 // Reports, while cornering (|lateral accel| > 0.3 g, > 10 m/s):
 //   - per axle: % of cornering time the OUTSIDE (loaded) wheel is past its grip limit
 //     (wheel.usage > 1: demand over grip today; slip past the tyre's peak after the tyre-curve fix)
@@ -9,17 +11,23 @@
 import aiJson from '../config/ai.json' with { type: 'json' };
 import vfxJson from '../config/vfx.json' with { type: 'json' };
 import { wheelFx } from '../src/client/vfx/triggers.ts';
-import { aiInputSource, buildRacingLine, createWorld, step, type AiConfig, type CarBuild, type WorldState } from '../src/sim/index.ts';
+import { readFileSync } from 'node:fs';
+import { aiInputSource, buildRacingLine, createWorld, step, type AiConfig, type CarBuild, type PhysicsConfig, type WorldState } from '../src/sim/index.ts';
 import { catalog, defaultTrackIdNode, loadTrackNode, simContextNode, surfaces } from './load-track-node.ts';
 
 const args = process.argv.slice(2);
 const opt = (name: string, def: string) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1]! : def; };
 const cars = Number(opt('cars', '10')), laps = Number(opt('laps', '10')), seed = Number(opt('seed', '1'));
 const loaded = loadTrackNode(opt('track', defaultTrackIdNode()));
-const ctx = simContextNode(loaded);
+const physPath = args.includes('--physics') ? opt('physics', '') : '';
+const ctx = physPath ? simContextNode(loaded, JSON.parse(readFileSync(physPath, 'utf8')) as PhysicsConfig) : simContextNode(loaded);
+if (opt('line', 'generated') === 'seed') {
+  if (!loaded.track.json.racingLineSeed?.length) throw new Error('no racingLineSeed in track.json');
+  loaded.track.json.racingLine = loaded.track.json.racingLineSeed;
+}
 const line = buildRacingLine(loaded.track)!;
 const cfg = aiJson as unknown as AiConfig;
-const preset = cfg.presets[cfg.defaultPreset]!;
+const preset = args.includes('--clean') ? { ...cfg.presets[cfg.defaultPreset]!, mistakesPerMin: 0, noise: 0 } : cfg.presets[cfg.defaultPreset]!;
 const G = 9.81, ppm = ctx.track.json.pxPerMeter;
 
 // Corners: runs of racing-line points with |curvature| > 1/80 m, small gaps merged, at least 8 m long.
@@ -45,7 +53,7 @@ const corners: Array<{ from: number; to: number; dir: string; minR: number; at: 
 }
 const cornerOf = (near: number) => corners.findIndex((c) => (c.from <= c.to ? near >= c.from && near <= c.to : near >= c.from || near <= c.to));
 
-const builds: CarBuild[] = Array.from({ length: cars }, (_, i) => ({ ...ctx.physics.defaultCar, team: catalog.teams[i % catalog.teams.length]!.id }));
+const builds: CarBuild[] = Array.from({ length: cars }, (_, i) => ({ ...ctx.physics.defaultCar, team: args.includes('--team') ? opt('team', '') : catalog.teams[i % catalog.teams.length]!.id }));
 let world: WorldState = createWorld(ctx, builds);
 const drivers = builds.map((_, i) => aiInputSource(i, () => ({ world, ctx, line }), () => preset, () => cfg, seed * 1000 + i));
 
@@ -54,6 +62,7 @@ let markSlide = 0, markLock = 0, markSpin = 0, walls = 0, lockFront = 0;
 const perCorner = corners.map(() => ({ front: 0, rear: 0, same: 0, neither: 0 }));
 const pass = builds.map(() => ({ corner: -1, first: '' as '' | 'front' | 'rear' | 'same' }));
 const lapTimes: number[][] = builds.map(() => []);
+let invalidLaps = 0;
 const closePass = (i: number) => {
   const p = pass[i]!;
   if (p.corner >= 0) { const c = perCorner[p.corner]!; if (p.first === 'front') c.front++; else if (p.first === 'rear') c.rear++; else if (p.first === 'same') c.same++; else c.neither++; }
@@ -87,7 +96,7 @@ for (let tick = 0; tick < 60 * 60 * 20; tick++) {
       if (fx.mark > vfxJson.skid.minIntensity) { if (fx.lockup) { markLock++; if (w < 2) lockFront++; } else if (fx.spin) markSpin++; else markSlide++; }
     }
   });
-  for (const e of world.events) if (e.type === 'lap' && !e.invalid) lapTimes[e.car]!.push(e.time);
+  for (const e of world.events) if (e.type === 'lap') { if (e.invalid) invalidLaps++; else lapTimes[e.car]!.push(e.time); }
   if (world.cars.every((c) => c.timing.laps >= laps)) break;
 }
 builds.forEach((_, i) => closePass(i));
@@ -102,7 +111,7 @@ const tot = perCorner.reduce((a, c) => ({ front: a.front + c.front, rear: a.rear
 const passes = tot.front + tot.rear + tot.same + tot.neither;
 console.log(`first axle past the limit per corner pass:      front ${pct(tot.front, passes)}   rear ${pct(tot.rear, passes)}   same tick ${pct(tot.same, passes)}   neither ${pct(tot.neither, passes)}   (${passes} passes)`);
 console.log(`skid-mark wheel-ticks: ${pct(markSlide + markLock + markSpin, wheelTicks)} of all  (slide ${markSlide}, lockup ${markLock} [front ${lockFront} / rear ${markLock - lockFront}], wheelspin ${markSpin}; ${((markSlide + markLock + markSpin) / Math.max(1, totalLaps)).toFixed(0)} per car-lap)`);
-console.log(`pace: best laps ${best.length ? `${best[0]!.toFixed(2)}-${best[best.length - 1]!.toFixed(2)} s` : '-'}; wall hits ${walls}; stuck events ${stuck}; laps ${totalLaps}`);
+console.log(`pace: best laps ${best.length ? `${best[0]!.toFixed(2)}-${best[best.length - 1]!.toFixed(2)} s` : '-'}; wall hits ${walls}; stuck events ${stuck}; laps ${totalLaps}, invalid ${invalidLaps}`);
 if (args.includes('--corners')) {
   console.log('\ncorner  dir  min R   centre px        front  rear  same  neither');
   corners.forEach((c, k) => { const p = perCorner[k]!; console.log(`${String(k + 1).padStart(6)}  ${c.dir}   ${c.minR.toFixed(0).padStart(4)} m  ${c.at.padEnd(15)} ${String(p.front).padStart(6)} ${String(p.rear).padStart(5)} ${String(p.same).padStart(5)} ${String(p.neither).padStart(8)}`); });

@@ -4,6 +4,7 @@
 // Pure: aiDrive(state in) -> (input, state out). State is plain data, randomness is a seeded PRNG kept
 // in that state, so the server (card 07) runs it unchanged and replays stay exact.
 import { buildStats } from './car-config';
+import { speedProfile } from './line-optimizer';
 import type { SimTrack } from './track';
 import { surfaceAt } from './track';
 import type { CarInput, CarState, InputSource, WorldState } from './types';
@@ -312,6 +313,23 @@ function locate(path: AiPath, car: CarState, prev: number, speed: number, ahead 
   return best;
 }
 
+// Speed profiles per line x car build x preset x the physics numbers that matter: static data computed
+// once (not state), so a memo is fine; physics tuned live gives a new key and a fresh profile.
+const profiles = new WeakMap<AiPath, Map<string, Float64Array>>();
+function carProfile(line: AiPath, car: CarState, ctx: SimContext, preset: AiPreset): Float64Array {
+  const p = ctx.physics;
+  const key = JSON.stringify([car.build, preset.cornerMargin, preset.brakeMargin, p.tyres, p.car, p.engine, p.brakes, p.aero]);
+  let m = profiles.get(line);
+  if (!m) profiles.set(line, (m = new Map()));
+  let prof = m.get(key);
+  if (!prof) {
+    if (m.size > 64) m.clear();
+    prof = speedProfile(line.x, line.y, p, buildStats(car.build, ctx.catalog), { cornerMargin: preset.cornerMargin, brakeMargin: preset.brakeMargin, fuelKg: p.fuel.startKg / 2 });
+    m.set(key, prof);
+  }
+  return prof;
+}
+
 /** One tick of an AI driver for car `i`. */
 export function aiDrive(world: WorldState, i: number, prevState: AiState, line: RacingLine, ctx: SimContext, preset: AiPreset, cfg: AiConfig): { input: CarInput; state: AiState } {
   const car = world.cars[i]!;
@@ -468,19 +486,27 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     if (pit && !st.serviced && q >= stopQ) v = 0; // stop at its box
     return v;
   };
-  // Speed profile over the stretch ahead, built BACKWARDS from the far end: each point can only be as
-  // fast as the next allows, braking with whatever grip cornering there leaves over (friction circle).
-  // So it brakes before turn-in instead of trying to brake and turn at full grip at once.
-  const scanM = (speed * speed) / (2 * Math.max(1, brakeA(speed) * 0.4)) + 40;
-  const steps = Math.min(path.closed ? n - 1 : n - 1 - best, Math.ceil(scanM / SPACING_M));
-  let vNext = pointV(idx(best + steps));
-  for (let q = steps - 1; q >= 0; q--) {
-    const j = idx(best + q);
-    const latUse = Math.min(1, (vNext * vNext * Math.abs(path.k[j]!)) / latMax(vNext));
-    const decel = brakeA(vNext) * Math.sqrt(Math.max(0.05, 1 - latUse * latUse));
-    vNext = Math.min(pointV(j), Math.sqrt(vNext * vNext + 2 * decel * SPACING_M));
+  let allowed: number;
+  if (!pit) {
+    // ON THE RACING LINE: this car's own speed profile round the whole line (racing line optimizer card),
+    // computed once for its build and preset, then scaled by what's changed since: tyre wear (speed goes
+    // with the square root of grip) and how much of its corner speed it has learned to trust.
+    const prof = carProfile(line, car, ctx, preset);
+    const ahead = st.mistake?.kind === 'lateBrake' ? 6 : 1; // a late braker reads the target a few metres on
+    allowed = prof[idx(best + ahead)]! * Math.sqrt(Math.max(0.05, tyre)) * st.trust;
+  } else {
+    // In the pit lane: a short backward scan, since the path is short and has the limiter and the stop.
+    const scanM = (speed * speed) / (2 * Math.max(1, brakeA(speed) * 0.4)) + 40;
+    const steps = Math.min(n - 1 - best, Math.ceil(scanM / SPACING_M));
+    let vNext = pointV(idx(best + steps));
+    for (let q = steps - 1; q >= 0; q--) {
+      const j = idx(best + q);
+      const latUse = Math.min(1, (vNext * vNext * Math.abs(path.k[j]!)) / latMax(vNext));
+      const decel = brakeA(vNext) * Math.sqrt(Math.max(0.05, 1 - latUse * latUse));
+      vNext = Math.min(pointV(j), Math.sqrt(vNext * vNext + 2 * decel * SPACING_M));
+    }
+    allowed = vNext;
   }
-  let allowed = vNext;
 
   // In the box: wait for fresh tyres + fuel (the sim services a car stopped in its pit box).
   let holdInBox = false;

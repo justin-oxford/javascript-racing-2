@@ -7,4 +7,5 @@ export * from './planck-cache';
 export * from './timing';
 export * from './ai';
 export * from './race';
+export * from './line-optimizer';
 export * from './world';

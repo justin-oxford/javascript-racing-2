@@ -1,0 +1,9 @@
+{
+  "_comment": "Racing line optimizer. The line moves only sideways from its seed (track.json racingLineSeed) to minimise curvature, keeping the car (half its width + safetyMarginM) on asphalt plus kerbUse (0..1) of each kerb. shortestBlend > 0 pulls toward the shortest path on gentle sections. Re-run after physics changes (the speed profile depends on grip): npm run optimize-racing-line -- <id> --write, or the editor's Optimize line button.",
+  "spacingM": 2,
+  "safetyMarginM": 0.3,
+  "kerbUse": 0.5,
+  "shortestBlend": 0,
+  "iterations": 3000,
+  "relax": 1.7
+}
