@@ -17,10 +17,10 @@
     "reverseForceN": 3500,
     "maxReverseKph": 25
   },
-  "brakes": { "maxForceN": 32000, "frontBias": 0.6 },
+  "brakes": { "maxForceN": 47000, "frontBias": 0.6 },
   "aero": { "dragCoef": 0.9, "downforceCoef": 0.0003 },
-  "tyres": { "baseGrip": 1.6, "lateralGrip": 1, "lateralStiffness": 0.6 },
-  "steering": { "lockDeg": 20, "lockFalloffKph": 180 },
+  "tyres": { "baseGrip": 3, "lateralGrip": 1.18, "lateralStiffness": 0.6 },
+  "steering": { "lockDeg": 28.5, "lockFalloffKph": 135 },
   "input": { "steerRate": 5, "steerReturnRate": 8, "throttleRate": 6, "brakeRate": 10 },
   "wear": {
     "throttlePerSec": 0.005,
