@@ -50,9 +50,43 @@ export function wheelPositions(pose: Pose, cfg: PhysicsConfig): Wheels<{ x: numb
   return wheelOffsets(cfg).map(([l, s]) => ({ x: pose.x + f.x * l + r.x * s, y: pose.y + f.y * l + r.y * s })) as Wheels<{ x: number; y: number }>;
 }
 
-/** Front wheel angle, radians (+ = right), for a steer input at a speed (m/s): the lock shrinks with speed. */
-export function frontWheelAngle(steer: number, speed: number, cfg: PhysicsConfig): number {
-  return steer * ((cfg.steering.lockDeg * Math.PI) / 180) / (1 + (Math.abs(speed) / KPH) / cfg.steering.lockFalloffKph);
+/**
+ * Most the front wheels may turn toward `dir` (+1 right, -1 left), radians, for this car's motion now.
+ * Mechanical lock shrinks with speed. STEERING ASSIST (card 03b): at speed, full lock = the wheels
+ * pointed at peak slip relative to where the front axle is actually travelling, so a keyboard's
+ * all-or-nothing steer can't scrub the fronts far past their peak. Full mechanical lock at low speed,
+ * blending to the assist between assistFromKph and assistFullKph.
+ */
+export function steerLimit(car: Pick<CarState, 'x' | 'y' | 'heading' | 'vx' | 'vy' | 'angVel'>, dir: number, cfg: PhysicsConfig): number {
+  const st = cfg.steering;
+  const speed = Math.hypot(car.vx, car.vy);
+  const mech = ((st.lockDeg * Math.PI) / 180) / (1 + speed / KPH / st.lockFalloffKph);
+  const blend = st.assist ? clamp((speed / KPH - st.assistFromKph) / Math.max(1, st.assistFullKph - st.assistFromKph), 0, 1) : 0;
+  if (blend <= 0) return mech;
+  // Front axle velocity in the car's frame: v + omega x r at the axle (r = a forward of the CG).
+  const f = forward(car.heading), r = right(car.heading);
+  const a = cfg.car.wheelbaseM * (1 - cfg.car.weightFront);
+  const vx = car.vx - car.angVel * f.y * a, vy = car.vy + car.angVel * f.x * a;
+  const vLong = vx * f.x + vy * f.y, vLat = vx * r.x + vy * r.y;
+  const travel = Math.atan2(vLat, Math.max(Math.abs(vLong), cfg.tyres.lowSpeedMps)); // + = axle moving right
+  const peak = ((cfg.tyres.peakSlipDeg * Math.PI) / 180) * st.assistPeakPct;
+  const assisted = Math.min(mech, Math.max(peak * 0.5, dir * travel + peak));
+  return mech + (assisted - mech) * blend;
+}
+
+/** Front wheel angle, radians (+ = right), for a steer input (-1..1) given the car's motion now. */
+export function frontWheelAngle(steer: number, car: Pick<CarState, 'x' | 'y' | 'heading' | 'vx' | 'vy' | 'angVel'>, cfg: PhysicsConfig): number {
+  return steer * steerLimit(car, steer >= 0 ? 1 : -1, cfg);
+}
+
+/**
+ * Force available vs combined slip (fraction of peak), as a fraction of peak grip: 2s - s^2 up to the
+ * peak (s = 1), then a smooth fall toward `falloff`, nearly there by `falloffSlip` x peak slip.
+ */
+export function tyreCurve(s: number, falloff: number, falloffSlip: number): number {
+  if (s <= 1) return s * (2 - s);
+  const k = 3 / Math.max(0.01, (falloffSlip - 1) ** 2);
+  return falloff + (1 - falloff) * Math.exp(-k * (s - 1) ** 2);
 }
 
 /** Tyre grip vs wear: gentle down to ~40%, then a cliff, nothing left at 10% (v0.16 curve). */
@@ -103,6 +137,7 @@ export function createCar(posePx: Pose, build: CarBuild, ctx: SimContext): CarSt
     angVel: 0,
     speed: 0,
     controls: { ...NEUTRAL_INPUT },
+    steerAngle: 0,
     fuelKg: ctx.physics.fuel.startKg,
     wheels: surfaces.map(newWheel) as Wheels<WheelState>,
     ...surfaceFlags(surfaces, ctx),
@@ -222,7 +257,6 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
   const side: Wheels<number> = [-1, 1, -1, 1];
   const axle: Wheels<number> = [wf, wf, 1 - wf, 1 - wf];
   const load = share.map((s, w) => Math.max(0, vertical * s - side[w]! * transfer * axle[w]!)) as Wheels<number>;
-  const totalLoad = load[0] + load[1] + load[2] + load[3] || 1;
 
   // Longitudinal requests.
   const vTop = cfg.engine.topSpeedKph * KPH * stats.topSpeed;
@@ -240,7 +274,17 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
   const brakeTotal = reversing ? 0 : controls.brake * cfg.brakes.maxForceN * stats.brakes;
   const brakeShare: Wheels<number> = [cfg.brakes.frontBias / 2, cfg.brakes.frontBias / 2, (1 - cfg.brakes.frontBias) / 2, (1 - cfg.brakes.frontBias) / 2];
 
-  const delta = frontWheelAngle(controls.steer, speed, cfg);
+  // LONGITUDINAL LOAD TRANSFER (card 03b): braking loads the fronts (they bite, the car turns in),
+  // throttle loads the rears. dFz = m * a_long * cgHeight / wheelbase, with a_long from this tick's
+  // drive, brakes and drag, no more than the tyres can deliver.
+  const dragF = cfg.aero.dragCoef * stats.drag * v2;
+  const aLongMax = cfg.tyres.baseGrip * stats.grip * vertical / mass;
+  const aLong = clamp((drive - Math.sign(vFwd || 1) * (brakeTotal + dragF)) / mass, -aLongMax, aLongMax);
+  const dFz = (mass * aLong * cfg.car.cgHeightM) / cfg.car.wheelbaseM;
+  for (let w = 0; w < 4; w++) load[w] = Math.max(0, load[w]! + (w < 2 ? -dFz : dFz) / 2);
+
+  const totalLoad = load[0] + load[1] + load[2] + load[3] || 1;
+  const delta = frontWheelAngle(controls.steer, car, cfg);
 
   const gripBase = cfg.tyres.baseGrip * stats.grip; // downforce is already in the load
   const positions = wheelPositions(car, cfg);
@@ -259,7 +303,8 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
     const wheelMass = (mass * load[w]!) / totalLoad;
     const surf = ctx.track.surfaces[car.wheels[w]!.surface]!;
 
-    const cap = gripBase * wearGrip(car.wheels[w]!.wear) * surf.grip * load[w]!;
+    // Balance knobs (03b): front/rear grip multipliers next to weight distribution and yaw inertia.
+    const cap = gripBase * (w < 2 ? cfg.tyres.frontGrip : cfg.tyres.rearGrip) * wearGrip(car.wheels[w]!.wear) * surf.grip * load[w]!;
     const capLat = cap * cfg.tyres.lateralGrip;
     const stopCap = (Math.abs(vLong) * wheelMass) / dt; // never push a wheel past standstill
 
@@ -269,14 +314,25 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
     // Rolling resistance on static weight: unchanged by downforce, so tuned surface drag keeps its feel.
     const resist = Math.min(brakeTotal * brakeShare[w]! + surf.rollingDrag * mass * G * share[w]!, stopCap);
     long -= Math.sign(vLong) * resist;
-    let lat = (-vLat * wheelMass * cfg.tyres.lateralStiffness) / dt;
 
-    // Friction ellipse: over the cap the tyre slides and only gives what it has.
-    const usage = Math.hypot(cap > 0 ? long / cap : long ? Infinity : 0, capLat > 0 ? lat / capLat : lat ? Infinity : 0);
-    if (usage > 1) {
-      long /= usage;
-      lat /= usage;
-    }
+    // TYRE CURVE (card 03b). Lateral: slip angle as a fraction of the peak slip angle. Longitudinal:
+    // the braking/drive demand as a fraction of grip (no wheel-spin model: a demand past grip IS a
+    // locked or spinning wheel). Combined slip s = their hypot (friction ellipse); the force available at
+    // s rises to the peak at s = 1, then falls gently toward `falloff` (past the peak: sliding, catchable).
+    const t = cfg.tyres;
+    const alpha = Math.atan2(Math.abs(vLat), Math.max(Math.abs(vLong), t.lowSpeedMps));
+    const sLat = alpha / ((t.peakSlipDeg * Math.PI) / 180);
+    const sLong = cap > 0 ? Math.abs(long) / cap : long ? Infinity : 0;
+    // A wheel with no grip at all (lifted, worn through, zero-grip surface) gives no force: no 0 x infinity.
+    const usage = cap > 0 ? Math.hypot(sLat, sLong) : 0;
+    const avail = tyreCurve(usage, t.falloff, t.falloffSlip);
+    if (!(cap > 0)) long = 0;
+    // Below the peak the tyre gives what's asked longitudinally; past it, only its share of what's left.
+    if (usage > 1) long = Math.sign(long) * cap * avail * (sLong / usage);
+    let latMag = usage > 0 && cap > 0 ? capLat * (usage <= 1 ? sLat * (2 - usage) : avail * (sLat / usage)) : 0;
+    // Stability at 60 Hz: never remove more than a fraction of the wheel's sideways velocity in one tick.
+    latMag = Math.min(latMag, (Math.abs(vLat) * wheelMass * t.lateralStiffness) / dt);
+    const lat = -Math.sign(vLat) * latMag;
     applyCarForce(ctx.cache, i, wf_.x * long + wr.x * lat, wf_.y * long + wr.y * lat, p.x, p.y);
     out[w] = {
       lat,
@@ -355,6 +411,7 @@ export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimCon
       ...b,
       speed: b.vx * f.x + b.vy * f.y,
       controls: controls[i]!,
+      steerAngle: frontWheelAngle(controls[i]!.steer, car, ctx.physics),
       wheels: car.wheels.map((wh, w) => ({ ...wh, surface: surfaces[w]! })) as Wheels<WheelState>,
       ...surfaceFlags(surfaces, ctx),
       pitBox: pitBoxUnder(b, ctx),

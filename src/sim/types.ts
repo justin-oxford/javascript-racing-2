@@ -72,6 +72,8 @@ export interface CarState extends Pose {
   speed: number;
   /** Inputs after ramping toward the driver's request. */
   controls: CarInput;
+  /** Front wheel angle used this tick, radians (+ = right). Telemetry, for drawing the wheels. */
+  steerAngle: number;
   fuelKg: number;
   wheels: Wheels<WheelState>;
   /** All four wheels off legal surface (track limits). */

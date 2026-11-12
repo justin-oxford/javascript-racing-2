@@ -143,15 +143,17 @@ describe('physics', () => {
   });
 
   it('two wheels on the grass pull the car toward it but do not cap its speed', () => {
-    // Grass west of x = 15 m; the car straddles the edge, left wheels on the grass.
+    // Grass west of x = 15 m; the car straddles the edge, left wheels on the grass. Measured over the first
+    // 2 s, while it still straddles: with no one steering, the 03b tyre curve then lets it get pulled fully
+    // onto the grass and spin, which is fair.
     const ctx = arena(30, 600, { x: 15.2, y: 595, heading: 0 }, (x) => (x < 15 ? 'grass' : undefined));
-    const c = drive(ctx, createWorld(ctx), 60 * 3, FULL).cars[0]!;
+    const c = drive(ctx, createWorld(ctx), 60 * 2, FULL).cars[0]!;
     const clean = arena(30, 600, { x: 15.2, y: 595, heading: 0 });
-    const ref = drive(clean, createWorld(clean), 60 * 3, FULL).cars[0]!;
+    const ref = drive(clean, createWorld(clean), 60 * 2, FULL).cars[0]!;
     expect(ref.heading).toBeCloseTo(0, 6);
     expect(c.heading).toBeLessThan(-0.005); // yawed left, toward the grass
     expect(c.speed).toBeGreaterThan(0.6 * ref.speed); // slower, not capped
-    const more = drive(ctx, drive(ctx, createWorld(ctx), 60 * 3, FULL), 30, FULL).cars[0]!;
+    const more = drive(ctx, drive(ctx, createWorld(ctx), 60 * 2, FULL), 30, FULL).cars[0]!;
     expect(more.speed).toBeGreaterThan(c.speed); // still accelerating
   });
 

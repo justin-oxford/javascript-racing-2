@@ -33,7 +33,7 @@ function run(ctx: SimContext, ticks: number, input: (w: WorldState) => CarInput,
   for (let t = 0; t < ticks; t++) {
     const prev = world;
     world = step(world, [input(world)], ctx);
-    fx.push(([0, 1, 2, 3] as const).map((w) => wheelFx(prev.cars[0]!, world.cars[0]!, w, vfx, surfaces)));
+    fx.push(([0, 1, 2, 3] as const).map((w) => wheelFx(prev.cars[0]!, world.cars[0]!, w, vfx, surfaces, physicsJson.tyres.peakSlipDeg)));
   }
   return { world, fx };
 }
@@ -101,7 +101,7 @@ describe('tyre VFX triggers', () => {
     for (let t = 0; t < 90; t++) {
       const prev = world;
       world = step(world, [{ throttle: 0.5, brake: 0, steer: 0.6 }], ctx); // right turn: inside = right wheels
-      const fx = ([0, 1, 2, 3] as const).map((w) => wheelFx(prev.cars[0]!, world.cars[0]!, w, vfx, surfaces));
+      const fx = ([0, 1, 2, 3] as const).map((w) => wheelFx(prev.cars[0]!, world.cars[0]!, w, vfx, surfaces, physicsJson.tyres.peakSlipDeg));
       inside.push(fx[1]!.mark + fx[3]!.mark);
       outside.push(fx[0]!.mark + fx[2]!.mark);
       insideRearUsage.push(world.cars[0]!.wheels[3].usage);

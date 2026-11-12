@@ -6,7 +6,6 @@
 // on-screen size x devicePixelRatio, stepping down in halves (scaling 256x512 to ~40 px every frame
 // shimmers). Caches rebuild only when the on-screen size changes (zoom, resize, DPR).
 import type { CarState, PhysicsConfig } from '../sim';
-import { frontWheelAngle } from '../sim';
 import liveryJson from '../../config/livery.json';
 
 export type LiveryConfig = typeof liveryJson;
@@ -176,7 +175,7 @@ export class Liveries {
 
     const tyre = this.sizedCopy('tyre', this.tyre, dev);
     const tw = this.tyre.width * s, th = this.tyre.height * s;
-    const steer = frontWheelAngle(car.controls.steer, car.speed, physics);
+    const steer = car.steerAngle;
     for (const [name, [x = 0, y = 0]] of Object.entries(tyres)) {
       const px = (x - this.cx) * s, py = (y - this.cy) * s;
       if (name === 'fl' || name === 'fr') {

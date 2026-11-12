@@ -52,7 +52,7 @@ export function soundTargets(
   topKph: number,
 ): SoundTargets {
   const kph = Math.abs(car.speed) * 3.6;
-  const fx = ([0, 1, 2, 3] as const).map((w) => wheelFx(prev, car, w, vfx, surfaces));
+  const fx = ([0, 1, 2, 3] as const).map((w) => wheelFx(prev, car, w, vfx, surfaces, physics.tyres.peakSlipDeg));
   const peak = (k: 'slide' | 'lockup' | 'spin') => Math.max(...fx.map((f) => f[k]));
 
   // Engine: virtual gears; the pit limiter pins RPM and stutters.

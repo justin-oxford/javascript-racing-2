@@ -83,7 +83,7 @@ describe('sound targets from the sim', () => {
     const ctx = arena(30, 1500, { x: 15, y: 1495, heading: 0 });
     const fast = run(ctx, 60 * 8, () => ({ throttle: 1, brake: 0, steer: 0 })).world;
     const { out } = run(ctx, 60, () => ({ throttle: 0, brake: 1, steer: 0 }), fast);
-    expect(Math.max(...out.map((t) => t.lockup))).toBeGreaterThan(0.5);
+    expect(Math.max(...out.map((t) => t.lockup))).toBeGreaterThan(0.4); // 03b: braking loads the fronts, a little less over the limit
     expect(Math.max(...out.map((t) => t.squeal))).toBeLessThan(0.2);
   });
 

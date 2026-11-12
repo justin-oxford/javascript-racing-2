@@ -1,8 +1,8 @@
 {
   "_comment": "TEST FIXTURE: frozen copy of the original config/vfx.json. Tyre VFX (client only). Tune live with the panel (T). Distances in metres unless named Px.",
   "maxParticles": 2000,
-  "triggers": { "slipThreshold": 1, "lockupMaxSlipDeg": 8, "wheelspinMaxKph": 90, "offTrackMinKph": 12, "intensitySpeedRefKph": 120 },
-  "skid": { "alpha": 0.5, "widthM": 0.4, "lockupDarkness": 1.6, "minIntensity": 0.05 },
+  "triggers": { "slipThreshold": 1, "wheelspinMaxKph": 90, "offTrackMinKph": 12, "intensitySpeedRefKph": 120 },
+  "skid": { "alpha": 0.5, "widthM": 0.4, "lockupDarkness": 1.6, "minIntensity": 0.05, "fadeHalfLifeSec": 180, "fadeEverySec": 15 },
   "smoke": { "ratePerSec": 40, "sizeM": 0.9, "growthPerSec": 2.2, "lifetimeSec": 1.1, "opacity": 0.45, "drift": 0.25, "spreadMps": 1.2, "lockupBurst": 2 },
   "dust": { "grassRate": 25, "gravelRate": 45, "sizeM": 1, "lifetimeSec": 1.4, "opacity": 0.5, "stonesPerSec": 30, "turfAlpha": 0.35 },
   "sparks": { "minKph": 60, "perSec": 90, "lifetimeSec": 0.25, "speedMps": 14 },

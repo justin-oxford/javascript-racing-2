@@ -20,13 +20,20 @@ export interface WheelFx {
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
-export function wheelFx(prev: CarState, car: CarState, w: 0 | 1 | 2 | 3, cfg: VfxConfig, surfaces: readonly SurfaceDef[]): WheelFx {
+/**
+ * peakSlipDeg: the tyres' peak slip angle (physics tyres.peakSlipDeg). wheel.usage = combined slip as a
+ * fraction of peak (03b), so: locked / spinning = the LONGITUDINAL part alone past the peak; sliding =
+ * combined slip past slipThreshold x peak (default 1.2). Cornering AT the limit leaves nothing.
+ */
+export function wheelFx(prev: CarState, car: CarState, w: 0 | 1 | 2 | 3, cfg: VfxConfig, surfaces: readonly SurfaceDef[], peakSlipDeg: number): WheelFx {
   const t = cfg.triggers;
   const wheel = car.wheels[w];
   const kph = Math.abs(car.speed) * 3.6;
   const speedK = clamp(kph / t.intensitySpeedRefKph, 0, 1.5);
-  const overRaw = clamp(wheel.usage - t.slipThreshold, 0, 1);
-  const longitudinal = Math.abs(wheel.slipDeg) < t.lockupMaxSlipDeg;
+  const latPart = Math.abs(wheel.slipDeg) / peakSlipDeg;
+  const longPart = Math.sqrt(Math.max(0, wheel.usage * wheel.usage - latPart * latPart));
+  const slideOver = clamp(wheel.usage - t.slipThreshold, 0, 1);
+  const longOver = clamp(longPart - 1, 0, 1);
   const front = w < 2;
   // Marks and smoke come from the tyre scrubbing under load: a lightly loaded (lifted) wheel over its
   // limit leaves little behind. 1 = an average wheel's share of the car's load.
@@ -34,13 +41,13 @@ export function wheelFx(prev: CarState, car: CarState, w: 0 | 1 | 2 | 3, cfg: Vf
   const loadK = avgLoad > 0 ? clamp(wheel.loadN / avgLoad, 0, 1.5) : 1;
 
   let slide = 0, lockup = 0, spin = 0;
-  const over = overRaw * loadK;
-  if (over > 0 && kph > 2) {
-    if (front && car.controls.brake > 0.1 && longitudinal) lockup = over * Math.max(0.4, speedK);
-    // Rears over the limit under throttle with little slip angle are wheelspin at ANY speed (a traction-
-    // limited car at 150 kph isn't sliding); wheelspinMaxKph only fades its intensity with speed.
-    else if (!front && car.controls.throttle > 0.1 && longitudinal) spin = over * Math.max(0.15, 1 - kph / t.wheelspinMaxKph);
-    else slide = over * Math.max(0.25, speedK);
+  if (kph > 2) {
+    // Locked under braking, any wheel (03b: braking unloads the rears, so they can lock too).
+    if (car.controls.brake > 0.1 && longOver > 0) lockup = longOver * loadK * Math.max(0.4, speedK);
+    // Rears spinning under throttle at ANY speed (a traction-limited car at 150 kph isn't sliding);
+    // wheelspinMaxKph only fades its intensity with speed.
+    else if (!front && car.controls.throttle > 0.1 && longOver > 0) spin = longOver * loadK * Math.max(0.15, 1 - kph / t.wheelspinMaxKph);
+    else if (slideOver > 0) slide = slideOver * loadK * Math.max(0.25, speedK);
   }
 
   const surf = surfaces[wheel.surface]?.id;

@@ -37,6 +37,8 @@ export interface CarLook {
   /** Track pixels per metre: the sim is in metres, the canvas in track pixels. */
   pxPerMeter: number;
   lengthM: number;
+  /** The body (sprite) centre is this far ahead of the car's position (its CG), metres. */
+  bodyOffsetM: number;
   widthM: number;
   /** Draw car `index` with ctx at its centre, rotated to its heading (track pixels). false = not drawn. */
   drawCar(ctx: CanvasRenderingContext2D, car: CarState, index: number, lengthPx: number, devicePerTrackPx: number): boolean;
@@ -194,6 +196,7 @@ export class Renderer {
       ctx.save();
       ctx.translate(c.x * ppm, c.y * ppm);
       ctx.rotate(c.heading);
+      ctx.translate(0, -look.bodyOffsetM * ppm); // heading 0 points up (-y): the body centre is ahead
       if (!look.drawCar(ctx, car, i, l, this.scale)) {
         ctx.fillStyle = '#e8e8e8';
         ctx.fillRect(-w / 2, -l / 2, w, l);

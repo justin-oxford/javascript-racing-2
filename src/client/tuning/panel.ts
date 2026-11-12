@@ -32,6 +32,16 @@ const RANGES: Record<string, [number, number, number]> = {
   'tyres.baseGrip': [0.3, 3, 0.01],
   'tyres.lateralGrip': [0.3, 2, 0.01],
   'tyres.lateralStiffness': [0.05, 1, 0.01],
+  'tyres.frontGrip': [0.6, 1.6, 0.01],
+  'tyres.rearGrip': [0.6, 1.6, 0.01],
+  'tyres.peakSlipDeg': [2, 15, 0.1],
+  'tyres.falloff': [0.4, 1, 0.01],
+  'tyres.falloffSlip': [1.2, 6, 0.1],
+  'tyres.lowSpeedMps': [0.5, 10, 0.1],
+  'car.frontAxleFromCentreM': [0.5, 3, 0.005],
+  'steering.assistPeakPct': [0.5, 2, 0.01],
+  'steering.assistFromKph': [0, 150, 1],
+  'steering.assistFullKph': [0, 250, 1],
   'steering.lockDeg': [5, 45, 0.5],
   'steering.lockFalloffKph': [20, 600, 5],
   'input.steerRate': [0.5, 30, 0.1],
@@ -295,7 +305,7 @@ export class TuningPanel {
       <div>throttle ${bar(c.controls.throttle)}  brake ${bar(c.controls.brake)}</div>
       <div>steer ${c.controls.steer >= 0 ? '+' : ''}${c.controls.steer.toFixed(2)}   yaw ${(c.angVel * 57.3).toFixed(0)}°/s</div>
       <div>fuel ${c.fuelKg.toFixed(1)} kg (${pct(c.fuelKg / physics.fuel.tankKg)})   mass ${(physics.car.dryMassKg + c.fuelKg).toFixed(0)} kg</div>
-      <table><tr><th></th><th>surface</th><th>wear</th><th>slip</th><th>use</th><th>grip kN</th><th>load kN</th></tr>${rows}</table>
+      <table><tr><th></th><th>surface</th><th>wear</th><th>slip</th><th>slip/peak</th><th>grip kN</th><th>load kN</th></tr>${rows}</table>
       <div class="flags">${flags || '&nbsp;'}</div>`;
   }
 }

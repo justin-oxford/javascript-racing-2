@@ -2,12 +2,23 @@
 // stat = team multiplier x spec ratio x setup multiplier (SYS - Car model).
 import type { CarBuild } from './types';
 
+/** How far the body's centre (sprite + collision box) is AHEAD of the CG, metres. */
+export function bodyOffsetM(cfg: Pick<PhysicsConfig, 'car'>): number {
+  return cfg.car.wheelbaseM * (1 - cfg.car.weightFront) - cfg.car.frontAxleFromCentreM;
+}
+
 export interface PhysicsConfig {
   car: {
     dryMassKg: number;
     lengthM: number;
     widthM: number;
     wheelbaseM: number;
+    /**
+     * How far the front axle sits ahead of the car body's centre (the sprite's centre and the collision
+     * box's), metres. With the CG placed between the axles by weightFront, this puts the body (and the drawn
+     * car) where the art has its tyres (livery card: front axle 1.535 m ahead of the sprite centre).
+     */
+    frontAxleFromCentreM: number;
     trackWidthM: number;
     /** Fraction of weight on the front axle. */
     weightFront: number;
@@ -18,8 +29,17 @@ export interface PhysicsConfig {
   brakes: { maxForceN: number; frontBias: number };
   /** Drag force = dragCoef x v^2. Grip x (1 + downforceCoef x v^2). */
   aero: { dragCoef: number; downforceCoef: number };
-  tyres: { baseGrip: number; lateralGrip: number; lateralStiffness: number };
-  steering: { lockDeg: number; lockFalloffKph: number };
+  /**
+   * peakSlipDeg: slip angle of peak lateral grip; past it force falls toward `falloff` x peak, nearly there by
+   * falloffSlip x peak slip. lateralStiffness: at most this fraction of a wheel's sideways velocity is removed
+   * per tick (60 Hz stability at low speed). lowSpeedMps: slip angles are measured against at least this speed.
+   */
+  tyres: { baseGrip: number; lateralGrip: number; lateralStiffness: number; frontGrip: number; rearGrip: number; peakSlipDeg: number; falloff: number; falloffSlip: number; lowSpeedMps: number };
+  /**
+   * Mechanical lock shrinks with speed (lockFalloffKph). assist: full lock = peak slip (x assistPeakPct)
+   * relative to the front axle's travel, blending in between assistFromKph and assistFullKph.
+   */
+  steering: { lockDeg: number; lockFalloffKph: number; assist: boolean; assistPeakPct: number; assistFromKph: number; assistFullKph: number };
   /** Ramp rates, full scale per second. */
   input: { steerRate: number; steerReturnRate: number; throttleRate: number; brakeRate: number };
   wear: { throttlePerSec: number; throttleLowSpeedKph: number; brakePerSec: number; cornerPerSec: number; refSpeedKph: number };

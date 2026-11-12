@@ -7,7 +7,7 @@ import { buildStats } from './car-config';
 import type { SimTrack } from './track';
 import { surfaceAt } from './track';
 import type { CarInput, CarState, InputSource, WorldState } from './types';
-import { TICK_DT, wearGrip, type SimContext } from './world';
+import { steerLimit, TICK_DT, wearGrip, type SimContext } from './world';
 
 export interface AiPreset {
   cornerMargin: number;
@@ -28,6 +28,8 @@ export interface AiConfig {
   presets: Record<string, AiPreset>;
   recovery: { stuckSec: number; reverseSec: number; backwardsDeg: number };
   pits?: { fuelLaps: number; minWear: number; pitSpeedMarginKph: number };
+  /** Traction control: from tcSlip (rear longitudinal slip as a fraction of peak), fully off tcRange later. */
+  aids?: { tcSlip: number; tcRange: number };
   /** Race starts: reaction to lights out, a random delay in this range per driver. */
   start?: { reactionMinSec: number; reactionMaxSec: number };
 }
@@ -542,7 +544,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // The wheel angle that arcs the car onto the target, divided by the lock the car has at this speed.
   const ld = Math.max(3, Math.hypot(tx - car.x, ty - car.y));
   const wheelAngle = Math.atan((2 * phys.car.wheelbaseM * Math.sin(err)) / ld);
-  const lockNow = ((phys.steering.lockDeg * Math.PI) / 180) / (1 + (speed * 3.6) / phys.steering.lockFalloffKph);
+  // The lock available toward that side right now (the same limit the keyboard gets, assist included).
+  const lockNow = steerLimit(car, wheelAngle >= 0 ? 1 : -1, phys);
   [r, st.rng] = rand(st.rng);
   let steer = (preset.steerKp * wheelAngle) / lockNow + (preset.steerKd * (err - st.lastErr)) / TICK_DT + preset.noise * (r * 2 - 1);
   st.lastErr = err;
@@ -571,7 +574,14 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // Rear stepping out (body slip: the car pointing a different way from where it's going): lift, the
   // way a driver feathers the throttle out of a slow corner. Gentle slip is fine, more cuts harder.
   const slip = speed > 5 ? Math.abs(wrap(Math.atan2(car.vx, -car.vy) - car.heading)) : 0;
-  if (slip > 0.08) throttle *= clamp(1 - (slip - 0.08) / 0.12, 0.15, 1);
+  if (slip > 0.08) throttle *= clamp(1 - (slip - 0.08) / 0.12, 0, 1);
+  // Traction control on the tyres (card 03b: wheel.usage = slip as a fraction of the tyre's peak):
+  // rears nearing their peak -> less throttle. (An ABS the same way was tried and dropped:
+  // it let cars overshoot corners into walls; the brake cap below already keeps the fronts honest.)
+  const aids = cfg.aids ?? { tcSlip: 0.9, tcRange: 0.35 };
+  // Combined slip (ellipse): throttle is what eats the rears' sideways grip on exit, so cut it on either.
+  const rearUse = Math.max(car.wheels[2].usage, car.wheels[3].usage);
+  if (rearUse > aids.tcSlip) throttle *= clamp(1 - (rearUse - aids.tcSlip) / aids.tcRange, 0, 1);
   // Facing well off the line at low speed (e.g. after a spin): don't floor it.
   if (Math.abs(err) > 1 && speed < 8) throttle = Math.min(throttle, 0.4);
   // Brake like a driver who knows the car: never press harder than the front tyres can use at this

@@ -1,4 +1,4 @@
-import { aiInputSource, buildRacingLine, buildStats, createRaceWorld, createWorld, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { aiInputSource, bodyOffsetM, buildRacingLine, buildStats, createRaceWorld, createWorld, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -293,6 +293,7 @@ async function main(): Promise<void> {
   const look: CarLook = {
     get pxPerMeter() { return json.pxPerMeter; },
     get lengthM() { return physics.car.lengthM; },
+    get bodyOffsetM() { return bodyOffsetM(physics); },
     get widthM() { return physics.car.widthM; },
     drawCar: (c, car, index, lengthPx, devicePerTrackPx) => {
       const team = ctx.catalog.teams.find((t) => t.id === car.build.team);

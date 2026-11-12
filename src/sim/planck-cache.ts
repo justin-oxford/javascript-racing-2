@@ -10,7 +10,7 @@
 // snapshot do identical work: rewind/replay is exact (drift 0). Resting contact against walls was
 // measured identical in both modes, and recreating a few car bodies per tick is cheap.
 import { BoxShape, ChainShape, Vec2, World, type Body, type Fixture } from 'planck';
-import type { PhysicsConfig } from './car-config';
+import { bodyOffsetM, type PhysicsConfig } from './car-config';
 import type { SimTrack, WallChain } from './track';
 import type { CarState, ContactConfig, WorldState } from './types';
 
@@ -78,7 +78,8 @@ function buildWalls(cache: PhysicsCache, track: SimTrack, walls: readonly WallCh
 function carMassData(car: CarState, cfg: PhysicsConfig): { mass: number; center: Vec2; I: number } {
   const mass = cfg.car.dryMassKg + Math.max(0, car.fuelKg);
   const { lengthM: l, widthM: w } = cfg.car;
-  return { mass, center: Vec2(0, 0), I: ((mass * (l * l + w * w)) / 12) * cfg.car.inertiaScale };
+  const off = bodyOffsetM(cfg); // the box is centred ahead of the CG: parallel axis
+  return { mass, center: Vec2(0, 0), I: ((mass * (l * l + w * w)) / 12 + mass * off * off) * cfg.car.inertiaScale };
 }
 
 /**
@@ -90,7 +91,7 @@ export function writeStateToWorld(cache: PhysicsCache, state: WorldState, cfg: P
   while (cache.cars.length) world.destroyBody(cache.cars.pop()!);
   while (cache.cars.length < state.cars.length) {
     const body = world.createBody({ type: 'dynamic', allowSleep: false, bullet: true });
-    body.createFixture({ shape: new BoxShape(cfg.car.widthM / 2, cfg.car.lengthM / 2), density: 1, friction: contact.bodyFriction, restitution: contact.bodyRestitution });
+    body.createFixture({ shape: new BoxShape(cfg.car.widthM / 2, cfg.car.lengthM / 2, Vec2(0, -bodyOffsetM(cfg)), 0), density: 1, friction: contact.bodyFriction, restitution: contact.bodyRestitution });
     cache.cars.push(body);
   }
   state.cars.forEach((car, i) => syncBody(cache.cars[i]!, car, cfg));
@@ -98,9 +99,12 @@ export function writeStateToWorld(cache: PhysicsCache, state: WorldState, cfg: P
 
 function syncBody(body: Body, car: CarState, cfg: PhysicsConfig): void {
   body.setTransform(Vec2(car.x, car.y), car.heading);
+  // Mass data FIRST: the box fixture is offset from the CG (bodyOffsetM), so Planck's density-derived centre
+  // of mass sits at the box centre until this resets it to the origin, and setMassData then "corrects" the
+  // linear velocity by omega x (the move). Setting velocities afterwards keeps them exactly as in the state.
+  body.setMassData(carMassData(car, cfg));
   body.setLinearVelocity(Vec2(car.vx, car.vy));
   body.setAngularVelocity(car.angVel);
-  body.setMassData(carMassData(car, cfg));
   body.setAwake(true);
 }
 

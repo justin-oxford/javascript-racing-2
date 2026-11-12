@@ -17,7 +17,8 @@
     "drive-laps": "tsx tools/drive-laps.ts",
     "suggest-racing-line": "tsx tools/suggest-racing-line.ts",
     "ai-run": "tsx tools/ai-run.ts",
-    "contact-probe": "tsx tools/contact-probe.ts"
+    "contact-probe": "tsx tools/contact-probe.ts",
+    "handling-diag": "tsx tools/handling-diag.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

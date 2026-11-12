@@ -2,7 +2,7 @@
 // tick, never feeds anything back. Particles are a fixed pool (struct of arrays); at the cap new ones
 // are dropped, never the frame.
 import type { CarState, PhysicsConfig, SimTrack, WorldState } from '../../sim';
-import { wheelPositions } from '../../sim';
+import { bodyOffsetM, wheelPositions } from '../../sim';
 import { wheelFx, type VfxConfig } from './triggers';
 
 export type VfxQuality = 'off' | 'low' | 'high';
@@ -39,9 +39,14 @@ const RUBBER_RGB = '38,38,40';
 
 export class Vfx {
   quality: VfxQuality = loadQuality();
-  /** Every mark ever laid (rubber + skids + turf), half resolution, transparent elsewhere. */
+  /** Rubber laid (permanent: the subtle layer), half resolution, transparent elsewhere. */
   readonly history: HTMLCanvasElement;
   private readonly historyCtx: CanvasRenderingContext2D;
+  /** Skid marks + torn turf: fade over minutes (skid.fadeHalfLifeSec). */
+  readonly skids: HTMLCanvasElement;
+  private readonly skidsCtx: CanvasRenderingContext2D;
+  /** Sim seconds since the skid layer last faded. */
+  private sinceFade = 0;
   /** Paints onto the renderer's static layer (track px space); set by main. */
   paintLive: (fn: (ctx: CanvasRenderingContext2D) => void) => void = () => {};
   /** Ask for a static-layer rebuild (marks cleared, quality changed). */
@@ -65,6 +70,12 @@ export class Vfx {
     this.historyCtx = this.history.getContext('2d')!;
     this.historyCtx.setTransform(HISTORY_SCALE, 0, 0, HISTORY_SCALE, 0, 0);
     this.historyCtx.lineCap = 'round';
+    this.skids = document.createElement('canvas');
+    this.skids.width = this.history.width;
+    this.skids.height = this.history.height;
+    this.skidsCtx = this.skids.getContext('2d')!;
+    this.skidsCtx.setTransform(HISTORY_SCALE, 0, 0, HISTORY_SCALE, 0, 0);
+    this.skidsCtx.lineCap = 'round';
     this.cap = cfg.maxParticles;
     const f = () => new Float32Array(this.cap);
     this.px = f(); this.py = f(); this.vx = f(); this.vy = f(); this.age = f(); this.life = f();
@@ -86,10 +97,12 @@ export class Vfx {
 
   /** Green track: wipe marks and rubber (new session). */
   clear(): void {
-    this.historyCtx.save();
-    this.historyCtx.setTransform(1, 0, 0, 1, 0, 0);
-    this.historyCtx.clearRect(0, 0, this.history.width, this.history.height);
-    this.historyCtx.restore();
+    for (const [c, g] of [[this.history, this.historyCtx], [this.skids, this.skidsCtx]] as const) {
+      g.save();
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.clearRect(0, 0, c.width, c.height);
+      g.restore();
+    }
     this.count = 0;
     this.onInvalidate();
   }
@@ -98,6 +111,27 @@ export class Vfx {
   drawHistory(ctx: CanvasRenderingContext2D): void {
     if (this.quality === 'off') return;
     ctx.drawImage(this.history, 0, 0, this.width, this.height);
+    ctx.drawImage(this.skids, 0, 0, this.width, this.height);
+  }
+
+  /**
+   * Skid marks fade over minutes (skid.fadeHalfLifeSec) so a long session doesn't turn the track black;
+   * rubber stays. Faded in steps every skid.fadeEverySec, each one a single static-layer rebuild.
+   */
+  private fadeSkids(dt: number): void {
+    const s = this.cfg.skid;
+    this.sinceFade += dt;
+    if (this.sinceFade < s.fadeEverySec || !(s.fadeHalfLifeSec > 0)) return;
+    const keep = Math.pow(0.5, this.sinceFade / s.fadeHalfLifeSec);
+    this.sinceFade = 0;
+    const g = this.skidsCtx;
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'destination-out';
+    g.fillStyle = `rgba(0,0,0,${1 - keep})`;
+    g.fillRect(0, 0, this.skids.width, this.skids.height);
+    g.restore();
+    this.onInvalidate();
   }
 
   get particles(): number {
@@ -126,6 +160,7 @@ export class Vfx {
   /** After each sim tick: marks, rubber and particle emission from what every wheel is doing. */
   onTick(prev: WorldState, curr: WorldState, track: SimTrack, physics: PhysicsConfig): void {
     if (this.quality === 'off') return;
+    this.fadeSkids(1 / 60);
     const ppm = track.json.pxPerMeter;
     const c = this.cfg;
     curr.cars.forEach((car, ci) => {
@@ -135,18 +170,18 @@ export class Vfx {
       if (Math.hypot(car.x - before.x, car.y - before.y) > 4) return;
       const p0 = wheelPositions(before, physics), p1 = wheelPositions(car, physics);
       for (const w of [0, 1, 2, 3] as const) {
-        const fx = wheelFx(before, car, w, c, track.surfaces);
+        const fx = wheelFx(before, car, w, c, track.surfaces, physics.tyres.peakSlipDeg);
         const a = p0[w], b = p1[w];
         const l = c.layers;
         // Rubber: faint stamps toward a fixed dark tone, only where tyres are loaded.
-        if (fx.rubber > 0 && this.quality === 'high') this.mark(a, b, ppm, c.skid.widthM, `rgba(${RUBBER_RGB},${fx.rubber * l.rubberOpacity})`);
+        if (fx.rubber > 0 && this.quality === 'high') this.mark(a, b, ppm, c.skid.widthM, `rgba(${RUBBER_RGB},${fx.rubber * l.rubberOpacity})`, this.historyCtx);
         // Skid marks.
         if (fx.mark > c.skid.minIntensity) {
           const dark = fx.lockup > 0 ? c.skid.lockupDarkness : 1;
-          this.mark(a, b, ppm, c.skid.widthM * (fx.lockup > 0 ? 1.1 : 1), `rgba(12,12,12,${Math.min(1, c.skid.alpha * fx.mark * dark) * l.skidOpacity})`);
+          this.mark(a, b, ppm, c.skid.widthM * (fx.lockup > 0 ? 1.1 : 1), `rgba(12,12,12,${Math.min(1, c.skid.alpha * fx.mark * dark) * l.skidOpacity})`, this.skidsCtx);
         }
         // Torn turf on grass.
-        if (fx.offTrack === 'grass') this.mark(a, b, ppm, c.skid.widthM * 1.2, `rgba(70,52,28,${c.dust.turfAlpha * fx.offIntensity * l.skidOpacity})`);
+        if (fx.offTrack === 'grass') this.mark(a, b, ppm, c.skid.widthM * 1.2, `rgba(70,52,28,${c.dust.turfAlpha * fx.offIntensity * l.skidOpacity})`, this.skidsCtx);
         this.emitWheel(ci, w, car, b, fx);
       }
       this.emitSparks(ci, car, track, physics);
@@ -154,8 +189,8 @@ export class Vfx {
   }
 
   /** A mark: into the history (for rebuilds) and live onto the screen's static layer. */
-  private mark(a: { x: number; y: number }, b: { x: number; y: number }, ppm: number, widthM: number, style: string): void {
-    this.line(this.historyCtx, a, b, ppm, widthM, style);
+  private mark(a: { x: number; y: number }, b: { x: number; y: number }, ppm: number, widthM: number, style: string, into: CanvasRenderingContext2D): void {
+    this.line(into, a, b, ppm, widthM, style);
     this.paintLive((ctx) => {
       ctx.lineCap = 'round';
       this.line(ctx, a, b, ppm, widthM, style);
@@ -197,10 +232,12 @@ export class Vfx {
     const ppm = track.json.pxPerMeter;
     const f = { x: Math.sin(car.heading), y: -Math.cos(car.heading) }, r = { x: Math.cos(car.heading), y: Math.sin(car.heading) };
     const L = physics.car.lengthM / 2, W = physics.car.widthM / 2;
+    // Corners of the body, which is centred bodyOffsetM ahead of the car's position (CG).
+    const bx = car.x + f.x * bodyOffsetM(physics), by = car.y + f.y * bodyOffsetM(physics);
     // Pick the corner whose outward neighbour is wall; else the front corner on the side we're sliding.
-    let best = { x: car.x + f.x * L, y: car.y + f.y * L };
+    let best = { x: bx + f.x * L, y: by + f.y * L };
     for (const [l, s] of [[L, -W], [L, W], [-L, -W], [-L, W]] as const) {
-      const cx = car.x + f.x * l + r.x * s, cy = car.y + f.y * l + r.y * s;
+      const cx = bx + f.x * l + r.x * s, cy = by + f.y * l + r.y * s;
       const ox = cx + (f.x * Math.sign(l) + r.x * Math.sign(s)) * 0.4, oy = cy + (f.y * Math.sign(l) + r.y * Math.sign(s)) * 0.4;
       const surf = track.mask.data[Math.floor(oy * ppm) * track.mask.width + Math.floor(ox * ppm)];
       if (surf === track.index.wall || surf === track.index.tyreBarrier) { best = { x: cx, y: cy }; break; }
