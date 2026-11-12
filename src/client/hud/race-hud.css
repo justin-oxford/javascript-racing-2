@@ -102,3 +102,20 @@
 .race-hud .results .buttons { display: flex; gap: calc(var(--u) * 10); justify-content: flex-end; margin-top: calc(var(--u) * 12); }
 .race-hud .results button { border: 0; padding: calc(var(--u) * 6) calc(var(--u) * 14); background: rgba(230, 57, 70, 0.9); }
 .race-hud .results button:hover { background: #e63946; }
+
+/* Race weekend: the ticker's action button (GO TO QUALIFYING / END SESSION), results extras. */
+.race-hud .tk-btn {
+  flex: none;
+  border: 0;
+  padding: 0 calc(var(--u) * 12);
+  background: #e63946;
+  font-family: "Formula1 Bold", system-ui, sans-serif;
+  font-size: calc(var(--u) * 9);
+  pointer-events: auto;
+}
+.race-hud .tk-btn:not(:disabled):hover { background: #ff4d5a; }
+.race-hud[data-mode='practice'] .tk-scroll { opacity: 0.85; font-size: calc(var(--u) * 9); }
+.race-hud .results .sub { margin: calc(var(--u) * -4) 0 calc(var(--u) * 10); opacity: 0.75; font-size: calc(var(--u) * 10); }
+.race-hud .results .sub:empty { display: none; }
+.race-hud .results .up { color: #4ade80; font-size: calc(var(--u) * 8); }
+.race-hud .results .dn { color: #f87171; font-size: calc(var(--u) * 8); }

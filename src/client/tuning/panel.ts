@@ -248,7 +248,7 @@ export class TuningPanel {
     con.close();
 
     const race = gui.addFolder('Race (next race)');
-    for (const key of Object.keys(this.t.race)) if (key !== '_comment') this.slider(race, this.t.race, key, `race.${key}`);
+    for (const key of Object.keys(this.t.race)) if (typeof (this.t.race as unknown as Record<string, unknown>)[key] === 'number') this.slider(race, this.t.race, key, `race.${key}`);
     race.close();
 
     const slip = gui.addFolder('Slipstream + dirty air');

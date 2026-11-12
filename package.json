@@ -21,7 +21,8 @@
     "handling-diag": "tsx tools/handling-diag.ts",
     "optimize-racing-line": "tsx tools/optimize-racing-line.ts",
     "tow-probe": "tsx tools/tow-probe.ts",
-    "start-probe": "tsx tools/start-probe.ts"
+    "start-probe": "tsx tools/start-probe.ts",
+    "quali-probe": "tsx tools/quali-probe.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

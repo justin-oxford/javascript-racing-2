@@ -2,6 +2,7 @@ import { buildStats, type CarCatalog, type PhysicsConfig } from './car-config';
 import { applyCarForce, prepareCache, readStateFromWorld, setCarMass, stepWorld, type PhysicsCache } from './planck-cache';
 import type { SimTrack, WallChain } from './track';
 import { boxAt, surfaceAt } from './track';
+import { newQualiState, qualiHolds, retireQualiCar, updateQuali } from './quali';
 import { gridOrder, newRaceState, raceHolds, updateRace, type RaceConfig } from './race';
 import { wakeEffects, type SlipstreamConfig } from './slipstream';
 import { newTiming, updateTiming, type TimingEvent } from './timing';
@@ -189,6 +190,8 @@ export interface RaceSetup {
   seed: number;
   /** Put the player (car 0) in this grid slot; otherwise the grid is shuffled. */
   playerSlot?: number | undefined;
+  /** The grid itself (order[slot] = car index), e.g. from qualifying. Overrides the shuffle. */
+  grid?: readonly number[] | undefined;
 }
 
 /**
@@ -196,10 +199,29 @@ export interface RaceSetup {
  * lights out, each assigned its own pit box. Car indices stay as given (car 0 = the player).
  */
 export function createRaceWorld(ctx: SimContext, builds: readonly CarBuild[], setup: RaceSetup): WorldState {
-  const order = gridOrder(builds.length, setup.seed, setup.playerSlot);
+  const order = setup.grid && setup.grid.length === builds.length ? [...setup.grid] : gridOrder(builds.length, setup.seed, setup.playerSlot);
   const slotOf = new Map(order.map((car, slot) => [car, slot]));
   const cars = builds.map((b, i) => createCar(startPose(slotOf.get(i)!, ctx), b, ctx));
   return { tick: 0, cars, events: [], race: newRaceState(order, setup.laps, setup.seed, ctx.track, ctx.race, TICK_HZ) };
+}
+
+/**
+ * Qualifying (race weekend): everyone queued at the pit exit (`queuePx[k]` = k-th in the queue, track
+ * pixels, from pitQueuePoses), released from the front: the player first and at once, then the others one
+ * by one in a seeded order. See quali.ts.
+ */
+export function createQualiWorld(ctx: SimContext, builds: readonly CarBuild[], seed: number, queuePx: readonly Pose[]): WorldState {
+  const quali = newQualiState(builds.length, seed, ctx.race, TICK_HZ);
+  const rank = quali.cars.map((_, i) => i).sort((a, b) => quali.cars[a]!.releaseTick - quali.cars[b]!.releaseTick || a - b);
+  const place = new Map(rank.map((car, k) => [car, k]));
+  const cars = builds.map((b, i) => createCar(queuePx[place.get(i)!] ?? startPose(i, ctx), b, ctx));
+  return { tick: 0, cars, events: [], quali };
+}
+
+/** End car i's qualifying session: parked at `posePx` (its box) and held; its best lap stands. */
+export function retireFromQuali(world: WorldState, i: number, posePx: Pose, ctx: SimContext): WorldState {
+  if (!world.quali) return world;
+  return { ...resetCar(world, i, posePx, ctx), quali: retireQualiCar(world.quali, i) };
 }
 
 /** Put a car back at a pose (track pixels), stationary, same build (R = reset to pits). */
@@ -407,8 +429,9 @@ export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimCon
   prepareCache(ctx.cache, world, ctx.track, ctx.walls, ctx.physics, ctx.contact);
 
   // On the grid and under the lights, cars are held: the drivers' inputs are ignored (but read for jump starts).
-  const held = raceHolds(world.race);
-  const controls = world.cars.map((car, i) => rampControls(car.controls, held ? NEUTRAL_INPUT : (inputs[i] ?? NEUTRAL_INPUT), ctx.physics, dt));
+  // In qualifying, cars waiting to leave the pit lane (and retired ones) are held the same way.
+  const raceHeld = raceHolds(world.race);
+  const controls = world.cars.map((car, i) => rampControls(car.controls, raceHeld || qualiHolds(world.quali, i, world.tick) ? NEUTRAL_INPUT : (inputs[i] ?? NEUTRAL_INPUT), ctx.physics, dt));
   const wake = wakeEffects(world.cars, ctx.physics.car.widthM, ctx.slipstream);
   const forces = world.cars.map((car, i) => applyCarForces(i, car, controls[i]!, ctx, dt, { tow: wake.tow[i]!, dirtyAir: wake.dirtyAir[i]! }));
   stepWorld(ctx.cache, dt, ctx.physics);
@@ -452,6 +475,7 @@ export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimCon
   });
 
   const tick = world.tick + 1;
+  if (world.quali) return { tick, cars, events, quali: updateQuali(world.quali, tick, dt, cars, inputs.map((x) => x ?? NEUTRAL_INPUT), events, ctx.race) };
   if (!world.race) return { tick, cars, events };
   const race = updateRace(world.race, tick, dt, world.cars, cars, inputs.map((x) => x ?? NEUTRAL_INPUT), events, ctx.track, ctx.race);
   return { tick, cars, events, race };

@@ -62,3 +62,36 @@ export function lapHead(world: WorldState): string {
   const lap = Math.min(race.laps, Math.max(1, Math.floor(leader.finished ? leader.finishLaps : leader.progress) + 1));
   return `LAP ${lap}/${race.laps}`;
 }
+
+/** m:ss.sss (or s.sss under a minute). */
+export const lapText = (t: number): string => {
+  const m = Math.floor(t / 60);
+  const s = (t - m * 60).toFixed(3).padStart(6, '0');
+  return m ? `${m}:${s}` : t.toFixed(3);
+};
+
+/** Qualifying order: by best lap; pole shows its time, the rest the gap to pole; no time = "NO TIME". */
+export function qualiEntries(world: WorldState, catalog: CarCatalog): OrderEntry[] {
+  const q = world.quali;
+  if (!q) return [];
+  const pole = q.cars[q.order[0]!]!.bestLap;
+  return q.order.map((car, k) => {
+    const team = catalog.teams.find((t) => t.id === world.cars[car]!.build.team);
+    const c = q.cars[car]!;
+    return {
+      pos: k + 1,
+      car,
+      code: car === 0 ? 'YOU' : teamCode(team?.name ?? '???'),
+      name: car === 0 ? 'You' : (team?.name ?? '?'),
+      swatch: team?.colors.primary ?? '#888',
+      gap: !c.bestLap ? 'NO TIME' : k === 0 ? lapText(c.bestLap) : `+${(c.bestLap - pole).toFixed(3)}`,
+      state: c.done ? 'finished' : world.cars[car]!.inPitLane ? 'pit' : '',
+      me: car === 0,
+    };
+  });
+}
+
+/** Whichever session is running: race order, qualifying order, or nothing (practice). */
+export function sessionOrder(world: WorldState, catalog: CarCatalog): OrderEntry[] {
+  return world.race ? runningOrder(world, catalog) : qualiEntries(world, catalog);
+}

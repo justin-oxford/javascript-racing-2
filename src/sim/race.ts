@@ -17,6 +17,13 @@ export interface RaceConfig {
   finishTimeoutSec: number;
   /** Timing lines also count crossings this far past their ends (metres): run-off, practice and race. */
   timingLineReachM: number;
+  /** Race weekend (quali.ts): qualifying length and pit-lane release gap, seconds. */
+  qualiSec: number;
+  qualiReleaseGapSec: number;
+  /** Sim speed-up once the player's qualifying session is over (client only). */
+  qualiFastForward: number;
+  /** Points for P1, P2, ... in a race. */
+  points: number[];
 }
 
 export type RacePhase = 'grid' | 'lights' | 'racing' | 'finishing' | 'results';

@@ -1,4 +1,5 @@
 // All sim state is plain, JSON-serializable data. No classes, no hidden state.
+import type { QualiState } from './quali';
 import type { RaceState } from './race';
 import type { LapTiming, TimingEvent } from './timing';
 // Units: metres, seconds, radians, kg, newtons. Track pixels exist only at the track boundary
@@ -110,6 +111,8 @@ export interface WorldState {
   events: SimEvent[];
   /** Race mode (card 06). Absent in practice. */
   race?: RaceState;
+  /** Qualifying (race weekend). Absent otherwise; never together with race. */
+  quali?: QualiState;
 }
 
 export interface Rules {

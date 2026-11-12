@@ -1,4 +1,4 @@
-import { aiInputSource, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createRaceWorld, createWorld, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { aiInputSource, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -27,7 +27,7 @@ import hudConfig from '../../config/hud.json';
 import { Hud } from './hud/hud';
 import { RaceHud } from './hud/race-hud';
 import { drawCarLabels, LABEL_MODES, nextLabelMode, type LabelMode } from './hud/car-labels';
-import { runningOrder, teamCode } from './hud/running-order';
+import { sessionOrder, teamCode } from './hud/running-order';
 import { Liveries } from './livery';
 import liveryConfig from '../../config/livery.json';
 import racingLineConfig from '../../config/racing-line.json';
@@ -89,7 +89,12 @@ async function main(): Promise<void> {
   const rebuildCar = (build: CarBuild): void => {
     if (raceSetup) {
       curr = setCarBuild(curr, 0, build);
-      return startRace(raceSetup.laps, raceSetup.grid);
+      return startRace(raceSetup.laps, raceSetup.grid, raceSetup.order);
+    }
+    if (curr.quali) { // qualifying: new car, same place (no restart)
+      curr = setCarBuild(curr, 0, build);
+      prev = setCarBuild(prev, 0, build);
+      return;
     }
     curr = resetCar(setCarBuild(curr, 0, build), 0, json.spawn, ctx);
     prev = curr;
@@ -103,10 +108,13 @@ async function main(): Promise<void> {
     return Array.from({ length: count }, (_, k) => ({ ...physics.defaultCar, spec: me.spec, team: teams[k % teams.length]!.id }));
   };
   /** The race being run (for Restart), undefined in practice. */
-  let raceSetup: { laps: number; grid: 'random' | 'pole' | 'back' } | undefined;
+  let raceSetup: { laps: number; grid: 'random' | 'pole' | 'back'; order?: number[] | undefined } | undefined;
+  /** The race weekend in progress (practice -> qualifying -> race), undefined otherwise. */
+  let weekend: { laps: number; stage: 'practice' | 'quali' | 'race'; grid?: number[] } | undefined;
   /** (Re)start practice: the player plus aiCount AI cars, everyone back on the grid. */
-  const startPractice = (): void => {
+  const startPractice = (keepWeekend = false): void => {
     raceSetup = undefined;
+    if (!keepWeekend) weekend = undefined;
     const me = curr?.cars[0]?.build ?? startBuild;
     if (!racingLine) aiCount = 0;
     const builds: CarBuild[] = [me, ...aiBuilds(me, aiCount)];
@@ -118,21 +126,59 @@ async function main(): Promise<void> {
     raceHud?.hide();
   };
   /** (Re)start a race (card 06): grid, lights, own pit boxes, flag. Uses the menu's AI count (at least 1). */
-  const startRace = (laps: number, grid: 'random' | 'pole' | 'back'): void => {
+  const startRace = (laps: number, grid: 'random' | 'pole' | 'back', order?: number[]): void => {
     if (!racingLine || !json.timingLines.startFinish) {
       console.warn('[race] this track needs a racing line and a start/finish line for races');
       return startPractice();
     }
-    raceSetup = { laps, grid };
+    raceSetup = { laps, grid, order };
+    if (!order) weekend = undefined; // a quick race leaves any weekend
     const me = curr?.cars[0]?.build ?? startBuild;
     const count = Math.max(1, aiCount);
     const builds: CarBuild[] = [me, ...aiBuilds(me, count)];
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!; // client-side: the sim itself stays seeded
-    curr = createRaceWorld(ctx, builds, { laps, seed, playerSlot: grid === 'pole' ? 0 : grid === 'back' ? count : undefined });
+    curr = createRaceWorld(ctx, builds, { laps, seed, playerSlot: grid === 'pole' ? 0 : grid === 'back' ? count : undefined, grid: order });
     prev = curr;
     drivers = [keyboard, ...aiDrivers(count)];
     hud.setAi(aiCount, aiPreset);
     if (curr.race!.sharedBoxes) console.warn(`[race] ${ctx.track.boxes.length} pit box(es) for ${builds.length} cars: boxes are shared round-robin`);
+  };
+
+  /** Race weekend, step 1: practice with the menu's AI, a banner to move on to qualifying. */
+  const startWeekend = (laps: number): void => {
+    if (!racingLine || !json.timingLines.startFinish || !pitQueuePoses(racingLine, 1, json.pxPerMeter)) {
+      console.warn('[weekend] this track needs a racing line, a start/finish line and a pit lane for a race weekend');
+      return startPractice();
+    }
+    weekend = { laps, stage: 'practice' };
+    startPractice(true);
+  };
+  /** Step 2: qualifying. Everyone queued at the pit exit; best lap sets the grid. */
+  const startQuali = (): void => {
+    if (!weekend) return;
+    const me = curr?.cars[0]?.build ?? startBuild;
+    const count = Math.max(1, aiCount);
+    const builds: CarBuild[] = [me, ...aiBuilds(me, count)];
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
+    curr = createQualiWorld(ctx, builds, seed, pitQueuePoses(racingLine, builds.length, json.pxPerMeter)!);
+    prev = curr;
+    raceSetup = undefined;
+    drivers = [keyboard, ...aiDrivers(count)];
+    weekend = { ...weekend, stage: 'quali' };
+  };
+  /** Qualifying: end your session; parked in the last pit box (out of the way), the rest fast-forwarded. */
+  const endSession = (): void => {
+    if (!curr.quali || curr.quali.cars[0]!.done) return;
+    const pose = pitBoxPose(racingLine, ctx.track.boxes.length - 1, json.pxPerMeter) ?? json.spawn;
+    curr = retireFromQuali(curr, 0, pose, ctx);
+    prev = curr;
+  };
+  /** Step 3: the race, on the grid qualifying set. */
+  const startWeekendRace = (): void => {
+    if (!weekend || !curr.quali) return;
+    const grid = [...curr.quali.order];
+    weekend = { ...weekend, stage: 'race', grid };
+    startRace(weekend.laps, 'random', grid);
   };
 
   const hud = new Hud(canvas, hudConfig, ctx.catalog, {
@@ -159,18 +205,22 @@ async function main(): Promise<void> {
       aiCount = count;
       aiPreset = preset;
       try { localStorage.setItem('jr2.ai', JSON.stringify({ count, preset })); } catch { /* private window: not remembered */ }
-      if (raceSetup) startRace(raceSetup.laps, raceSetup.grid);
-      else startPractice();
+      if (raceSetup && !raceSetup.order) startRace(raceSetup.laps, raceSetup.grid);
+      else if (!curr.quali && !raceSetup) startPractice(weekend?.stage === 'practice'); // mid-weekend: applies to the next session
     },
     onRace: (laps, grid) => startRace(laps, grid),
     onPractice: () => startPractice(),
+    onWeekend: (laps) => startWeekend(laps),
     onLabels: (m) => setLabels(m),
   }, () => renderer.trackHeight, siteUrl, Object.keys(aiCfg.presets));
   hud.setRaceDefaults(ctx.race.defaultLaps);
-  const raceHud: RaceHud = new RaceHud(hud.element, ctx.catalog, siteUrl, {
-    onRestart: () => raceSetup && startRace(raceSetup.laps, raceSetup.grid),
+  const raceHud: RaceHud = new RaceHud(hud.element, ctx.catalog, {
+    onRestart: () => raceSetup && startRace(raceSetup.laps, raceSetup.grid, raceSetup.order),
     onMenu: () => { startPractice(); hud.openMenu(); },
-  }, () => ({ height: renderer.trackHeight, pxPerMeter: json.pxPerMeter }));
+    onQualify: () => startQuali(),
+    onEndSession: () => endSession(),
+    onStartRace: () => startWeekendRace(),
+  }, () => ({ height: renderer.trackHeight, pxPerMeter: json.pxPerMeter }), () => ctx.race);
 
   // Car labels: remembered per browser; position by default.
   let labelMode: LabelMode = 'position';
@@ -190,7 +240,7 @@ async function main(): Promise<void> {
 
   keyboard.onAction((a) => {
     // In a race, R (reset to pits) and 0-9 (grid slots) are off: they'd teleport you round the lap.
-    if (curr.race && (a.type === 'reset' || a.type === 'gridSlot')) return;
+    if ((curr.race || curr.quali) && (a.type === 'reset' || a.type === 'gridSlot')) return;
     if (a.type === 'reset') {
       curr = resetCar(curr, 0, json.spawn, ctx);
       prev = curr;
@@ -345,6 +395,11 @@ async function main(): Promise<void> {
 
   const loopHooks = {
     tick() {
+      const q = curr.quali;
+      const n = q && q.phase !== 'results' && q.cars[0]?.done ? Math.max(1, Math.round(ctx.race.qualiFastForward)) : 1;
+      for (let k = 0; k < n; k++) loopHooks.simTick();
+    },
+    simTick() {
       const inputs = drivers.map((d) => d.read(curr.tick));
       prev = curr;
       curr = step(curr, inputs, ctx);
@@ -429,7 +484,7 @@ async function main(): Promise<void> {
               const team = ctx.catalog.teams.find((t) => t.id === car.build.team);
               return { code: i === 0 ? 'YOU' : teamCode(team?.name ?? '???'), swatch: team?.colors.primary ?? '#888' };
             });
-            drawCarLabels(c, prev, curr, alpha, labelMode, runningOrder(curr, ctx.catalog), codes, json.pxPerMeter, lw, physics.car.lengthM * json.pxPerMeter * 0.55 + 3 * lw);
+            drawCarLabels(c, prev, curr, alpha, labelMode, sessionOrder(curr, ctx.catalog), codes, json.pxPerMeter, lw, physics.car.lengthM * json.pxPerMeter * 0.55 + 3 * lw);
           }
           editor?.draw(c, lw);
         },
@@ -442,6 +497,7 @@ async function main(): Promise<void> {
         hud.fuelTankKg = physics.fuel.tankKg;
         const race = curr.race;
         hud.update(me, (curr.tick + alpha) * TICK_DT, session, !!json.timingLines.startFinish, stoppedInBox(), race ? { laps: race.laps, box: (race.cars[0]?.box ?? -1) + 1 } : undefined);
+        raceHud.weekend = weekend;
         raceHud.update(curr, race?.sharedBoxes ? `${ctx.track.boxes.length} pit boxes for ${curr.cars.length} cars: shared` : '');
       }
     }

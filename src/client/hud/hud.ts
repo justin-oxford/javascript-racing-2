@@ -15,6 +15,8 @@ export interface HudCallbacks {
   onRace(laps: number, grid: 'random' | 'pole' | 'back'): void;
   /** Leave a race for practice. */
   onPractice(): void;
+  /** Start a race weekend (practice -> qualifying -> race) of the menu's race length. */
+  onWeekend(laps: number): void;
   /** Car labels over the track: off / position / position + team code (also the L key). */
   onLabels(mode: 'off' | 'position' | 'name'): void;
 }
@@ -124,8 +126,8 @@ export class Hud {
         <div class="title">RACE</div>
         <div class="choices race-laps">${[3, 5, 10, 15].map((n) => `<button data-race-laps="${n}">${n} laps</button>`).join('')}</div>
         <div class="choices race-grid">${(['random', 'pole', 'back'] as const).map((g) => `<button data-race-grid="${g}">${{ random: 'Random grid', pole: 'Pole', back: 'Back of grid' }[g]}</button>`).join('')}</div>
-        <div class="choices race-go"><button data-id="raceStart">START RACE</button><button data-id="practice">PRACTICE</button></div>
-        <div class="note">Races use the AI count above (at least 1) and difficulty.</div>
+        <div class="choices race-go"><button data-id="weekend">RACE WEEKEND</button><button data-id="raceStart">QUICK RACE</button><button data-id="practice">PRACTICE</button></div>
+        <div class="note">Race weekend: practice, then qualifying (best lap sets the grid), then the race. Quick race skips to the grid. Races use the AI count above (at least 1) and difficulty.</div>
         <div class="title">CAR LABELS (L)</div>
         <div class="choices labels">${(['off', 'position', 'name'] as const).map((m) => `<button data-labels="${m}">${{ off: 'Off', position: 'Position', name: 'Position + name' }[m]}</button>`).join('')}</div>
       </div>
@@ -156,6 +158,7 @@ export class Hud {
     this.root.querySelectorAll<HTMLButtonElement>('[data-race-grid]').forEach((b) => b.addEventListener('click', () => { this.race.grid = b.dataset.raceGrid as Hud['race']['grid']; this.showRaceChoice(); }));
     this.el.raceStart!.addEventListener('click', () => { this.closeMenu(); this.cb.onRace(this.race.laps, this.race.grid); });
     this.el.practice!.addEventListener('click', () => { this.closeMenu(); this.cb.onPractice(); });
+    this.el.weekend!.addEventListener('click', () => { this.closeMenu(); this.cb.onWeekend(this.race.laps); });
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-count]').forEach((b) => b.addEventListener('click', () => this.cb.onAi(Number(b.dataset.aiCount), this.ai.preset)));
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-preset]').forEach((b) => b.addEventListener('click', () => this.cb.onAi(this.ai.count, b.dataset.aiPreset!)));
     this.root.querySelectorAll<HTMLButtonElement>('[data-labels]').forEach((b) => b.addEventListener('click', () => this.cb.onLabels(b.dataset.labels as 'off' | 'position' | 'name')));

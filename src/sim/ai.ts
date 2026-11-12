@@ -238,6 +238,41 @@ function buildPitPath(track: SimTrack, line: AiPath): PitPath | undefined {
   return { ...path, box, boxStops, entry: (((join - LEAD) % line.n) + line.n) % line.n, exit: (rejoin + TAIL - 1) % line.n, laneFrom: nearestOnPath(lane[0]!), laneTo: nearestOnPath(lane[lane.length - 1]!) };
 }
 
+/** Pit path heading at index q (track radians, 0 = up). */
+function pitHeading(pit: PitPath, q: number): number {
+  const a = Math.max(0, Math.min(pit.n - 2, q));
+  return Math.atan2(pit.x[a + 1]! - pit.x[a]!, -(pit.y[a + 1]! - pit.y[a]!));
+}
+
+/**
+ * Where cars start qualifying (track pixels): queued nose to tail in the fast lane at the pit exit, like
+ * the queue at the light when a session opens. Entry k is k-th in the queue (0 = at the front), 8 m
+ * apart, 1.75 m off the pit path away from the boxes. Undefined when the track has no pit path.
+ */
+export function pitQueuePoses(line: RacingLine | undefined, count: number, ppm: number): Array<{ x: number; y: number; heading: number }> | undefined {
+  const pit = line?.pit;
+  if (!pit) return undefined;
+  const b0 = pit.boxStops[0];
+  // Which side the boxes are on (+ = right of the path), so the queue sits on the other side.
+  const sideOf = (q: number, x: number, y: number) => {
+    const h = pitHeading(pit, q);
+    return Math.sign((x - pit.x[q]!) * Math.cos(h) + (y - pit.y[q]!) * Math.sin(h)) || 1;
+  };
+  const away = b0 ? -sideOf(b0.q, b0.x, b0.y) * 1.75 : 0;
+  return Array.from({ length: count }, (_, k) => {
+    const q = Math.max(pit.laneFrom, pit.laneTo - 2 - 4 * k); // path points are 2 m apart
+    const h = pitHeading(pit, q);
+    return { x: (pit.x[q]! + Math.cos(h) * away) * ppm, y: (pit.y[q]! + Math.sin(h) * away) * ppm, heading: h };
+  });
+}
+
+/** Car parked in pit box `box`, pointing down the lane (track pixels). Undefined without boxes. */
+export function pitBoxPose(line: RacingLine | undefined, box: number, ppm: number): { x: number; y: number; heading: number } | undefined {
+  const pit = line?.pit, b = pit?.boxStops[box];
+  if (!pit || !b) return undefined;
+  return { x: b.x * ppm, y: b.y * ppm, heading: pitHeading(pit, b.q) };
+}
+
 export interface AiState {
   /** 'race' follows the racing line; 'pit' follows the pit path. */
   mode: 'race' | 'pit';
@@ -343,6 +378,15 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // Race start: sit still under the lights (throttle now = a jump start), then react to lights out.
   const race = world.race;
   if (race && (race.phase === 'grid' || race.phase === 'lights')) return { input: { throttle: 0, brake: 0, steer: 0 }, state: st };
+  // Qualifying: wait in the pit lane until released (retired cars stay parked).
+  const qc = world.quali?.cars[i];
+  if (qc && (qc.retired || world.tick < qc.releaseTick)) return { input: { throttle: 0, brake: 0, steer: 0 }, state: st };
+  // Starting in the pit lane (qualifying): drive out along the pit path, nothing to service.
+  if (prevState.near < 0 && st.mode === 'race' && car.inPitLane && line.pit) {
+    st.mode = 'pit';
+    st.serviced = true;
+    st.near = -1;
+  }
   if (race && race.phase === 'racing' && race.phaseTick > 0 && world.tick - race.phaseTick < 120) {
     if (st.launchTick < 0) {
       const [r0, next] = rand(st.rng);
@@ -556,6 +600,12 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   let wantOffset = !pit && st.mistake?.kind === 'wide' ? Math.sign(path.k[best]!) * -1.5 : 0;
   // Coming up to its box: move across so the car sits in it (boxes can be beside the lane centre).
   if (pit && myBox && !st.serviced && stopQ - best < 20 && best <= stopQ + 2) wantOffset = lateral(stopQ, myBox.x, myBox.y);
+  // Qualifying: driving through (serviced, or leaving its box) past cars parked in their boxes, keep to
+  // the fast lane, away from the box side, so a parked car isn't in the way.
+  if (world.quali && pit && st.serviced && best >= pit.laneFrom && best <= pit.laneTo && pit.boxStops[0]) {
+    const b0 = pit.boxStops[0];
+    wantOffset = -Math.sign(lateral(b0.q, b0.x, b0.y)) * 1.5;
+  }
   let alongside = 0; // a car next to us: -1 left, +1 right
   let attack = false;
   // Following gap grows with speed (a time headway), so a queue through a slow hairpin can run close
