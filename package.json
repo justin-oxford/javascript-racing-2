@@ -12,7 +12,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.sim.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "vitest run",
     "draft-mask": "node tools/draft-mask.ts public/assets/BGs/indiana.jpg tracks/indiana/mask-draft.png tracks/indiana/draft-hints.json",
-    "validate-track": "tsx tools/validate-track.ts"
+    "validate-track": "tsx tools/validate-track.ts",
+    "suggest-timing-lines": "tsx tools/suggest-timing-lines.ts",
+    "drive-laps": "tsx tools/drive-laps.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

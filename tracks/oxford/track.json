@@ -3,7 +3,11 @@
   "name": "Oxford",
   "pxPerMeter": 10.8,
   "files": { "background": "background.png", "mask": "mask.png", "overhead": "overhead.png" },
-  "timingLines": {},
+  "timingLines": {
+    "startFinish": { "a": { "x": 1560, "y": 378 }, "b": { "x": 1560, "y": 121 } },
+    "s1": { "a": { "x": 2162.5, "y": 845 }, "b": { "x": 2095.5, "y": 682 } },
+    "s2": { "a": { "x": 683, "y": 990.5 }, "b": { "x": 715, "y": 819.5 } }
+  },
   "racingLine": [],
   "grid": [],
   "spawn": { "x": 1280, "y": 200, "heading": 1.5707963267948966 }
