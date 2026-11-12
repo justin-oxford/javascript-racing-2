@@ -166,10 +166,10 @@ async function main(): Promise<void> {
     drivers = [keyboard, ...aiDrivers(count)];
     weekend = { ...weekend, stage: 'quali' };
   };
-  /** Qualifying: end your session; parked in the last pit box (out of the way), the rest fast-forwarded. */
+  /** Qualifying: end your session; parked in your own pit box (box 0), the rest fast-forwarded. */
   const endSession = (): void => {
     if (!curr.quali || curr.quali.cars[0]!.done) return;
-    const pose = pitBoxPose(racingLine, ctx.track.boxes.length - 1, json.pxPerMeter) ?? json.spawn;
+    const pose = pitBoxPose(racingLine, 0, json.pxPerMeter) ?? json.spawn;
     curr = retireFromQuali(curr, 0, pose, ctx);
     prev = curr;
   };

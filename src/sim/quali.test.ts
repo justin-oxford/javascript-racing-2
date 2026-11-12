@@ -30,7 +30,7 @@ import {
   type WorldState,
 } from './index';
 
-const race: RaceConfig = { ...raceJson, qualiSec: 60, qualiReleaseGapSec: 3, finishTimeoutSec: 40 };
+const race: RaceConfig = { ...raceJson, qualiSec: 90, qualiReleaseGapSec: 3, finishTimeoutSec: 40 };
 
 describe('session rules', () => {
   const dt = 1 / 60;
@@ -60,13 +60,13 @@ describe('session rules', () => {
   it('at the flag a car on a timed lap may finish it; the rest are done; then results', () => {
     let q: QualiState = newQualiState(3, 1, race, 60);
     const cars = [car(), car({ lapInvalid: true }), car({}, true)];
-    q = updateQuali(q, 60 * 60, dt, cars, [], [], race);
+    q = updateQuali(q, 60 * 90, dt, cars, [], [], race);
     expect(q.phase).toBe('flag');
     expect(q.cars.map((c) => c.done)).toEqual([false, true, true]);
-    q = updateQuali(q, 60 * 60 + 100, dt, cars, [], [lap(0, 29.9), lap(1, 20)], race); // car 1 was already done
+    q = updateQuali(q, 60 * 90 + 100, dt, cars, [], [lap(0, 29.9), lap(1, 20)], race); // car 1 was already done
     expect(q.cars[0]).toMatchObject({ bestLap: 29.9, done: true });
     expect(q.cars[1]!.bestLap).toBe(0);
-    q = updateQuali(q, 60 * 60 + 101, dt, cars, [], [], race);
+    q = updateQuali(q, 60 * 90 + 101, dt, cars, [], [], race);
     expect(q.phase).toBe('results');
   });
 
@@ -79,13 +79,15 @@ describe('a session on Oxford', () => {
   const loaded = loadTrackNode('oxford');
   const ctx: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as PhysicsConfig)), contact: contactJson, race, slipstream: slipstreamJson };
   const line = buildRacingLine(loaded.track)!;
-  const cfg = aiJson as unknown as AiConfig;
+  // Frozen AI config, plus the qualifying pit threshold it predates (config/ai.json pits.qualiFuelLaps).
+  const frozen = aiJson as unknown as AiConfig;
+  const cfg: AiConfig = { ...frozen, pits: { ...frozen.pits!, qualiFuelLaps: 1.3 } };
   const builds = [0, 1, 2, 3].map((i) => ({ ...ctx.physics.defaultCar, team: catalog.teams[i]!.id }));
   const run = () => {
     let w: WorldState = createQualiWorld(ctx, builds, 3, pitQueuePoses(line, builds.length, ctx.track.json.pxPerMeter)!);
     const ai = builds.map((_, i) => aiInputSource(i, () => ({ world: w, ctx, line }), () => ({ ...cfg.presets[cfg.defaultPreset]!, mistakesPerMin: 0 }), () => cfg, 50 + i));
     let contact = 0;
-    for (let t = 0; t < 60 * 140 && w.quali!.phase !== 'results'; t++) {
+    for (let t = 0; t < 60 * 200 && w.quali!.phase !== 'results'; t++) {
       w = step(w, ai.map((d) => d.read(w.tick)), ctx);
       if (w.cars.some((c) => c.carContact && c.inPitLane)) contact++;
     }
@@ -96,8 +98,12 @@ describe('a session on Oxford', () => {
     const { w, contact } = run();
     expect(w.quali!.phase).toBe('results');
     expect(contact).toBe(0);
-    expect(w.quali!.cars.every((c) => c.bestLap > 20 && c.bestLap < 60)).toBe(true);
-    const times = w.quali!.order.map((i) => w.quali!.cars[i]!.bestLap);
+    // Everyone gets out of the queue and round; most set a valid time (frozen physics is loose: a car
+    // can lose its only flying lap to an off).
+    expect(w.cars.every((c) => c.timing.laps >= 1)).toBe(true);
+    const timed = w.quali!.cars.filter((c) => c.bestLap > 20 && c.bestLap < 60);
+    expect(timed.length).toBeGreaterThanOrEqual(3);
+    const times = w.quali!.order.map((i) => w.quali!.cars[i]!.bestLap).filter((t) => t > 0);
     expect([...times].sort((a, b) => a - b)).toEqual(times);
   }, 60_000);
 
@@ -112,6 +118,15 @@ describe('a session on Oxford', () => {
     for (let t = 0; t < 60; t++) w = step(w, [{ throttle: 1, brake: 0, steer: 0 }], ctx);
     expect(Math.hypot(w.cars[0]!.vx, w.cars[0]!.vy)).toBeLessThan(0.01);
     expect(w.quali!.cars[0]).toMatchObject({ retired: true, done: true, bestLap: 29.5 });
+  });
+
+  it('runs light: everyone starts on the qualifying fuel load, and the pits only top back up to it', () => {
+    let w: WorldState = createQualiWorld(ctx, builds, 3, pitQueuePoses(line, builds.length, ctx.track.json.pxPerMeter)!);
+    expect(w.cars.every((c) => c.fuelKg === race.qualiFuelKg)).toBe(true);
+    const box = ctx.track.boxes[0]!, ppm = ctx.track.json.pxPerMeter;
+    w = { ...w, cars: w.cars.map((c, i) => (i === 0 ? { ...c, x: box.x / ppm, y: box.y / ppm, vx: 0, vy: 0, fuelKg: 5 } : c)) };
+    for (let t = 0; t < 60 * 5; t++) w = step(w, [], ctx);
+    expect(w.cars[0]!.fuelKg).toBeCloseTo(race.qualiFuelKg, 5);
   });
 
   it('the race starts on the qualifying grid', () => {

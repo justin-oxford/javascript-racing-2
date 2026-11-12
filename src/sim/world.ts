@@ -214,8 +214,15 @@ export function createQualiWorld(ctx: SimContext, builds: readonly CarBuild[], s
   const quali = newQualiState(builds.length, seed, ctx.race, TICK_HZ);
   const rank = quali.cars.map((_, i) => i).sort((a, b) => quali.cars[a]!.releaseTick - quali.cars[b]!.releaseTick || a - b);
   const place = new Map(rank.map((car, k) => [car, k]));
-  const cars = builds.map((b, i) => createCar(queuePx[place.get(i)!] ?? startPose(i, ctx), b, ctx));
+  // Qualifying runs light: everyone starts with race.json qualiFuelKg (a pit stop tops back up to it).
+  const fuelKg = qualiFuelKg(ctx);
+  const cars = builds.map((b, i) => ({ ...createCar(queuePx[place.get(i)!] ?? startPose(i, ctx), b, ctx), fuelKg }));
   return { tick: 0, cars, events: [], quali };
+}
+
+/** Qualifying fuel load, kg (race.json qualiFuelKg, at most a full tank). */
+export function qualiFuelKg(ctx: SimContext): number {
+  return Math.min(ctx.physics.fuel.tankKg, ctx.race.qualiFuelKg ?? ctx.physics.fuel.startKg);
 }
 
 /** End car i's qualifying session: parked at `posePx` (its box) and held; its best lap stands. */
@@ -390,7 +397,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
 }
 
 /** Tyre wear + fuel for one tick (SYS - Car model rules), and pit service. */
-function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimContext, dt: number, ownBox: number): Pick<CarState, 'fuelKg' | 'wheels' | 'servicing'> {
+function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimContext, dt: number, ownBox: number, fillToKg = ctx.physics.fuel.tankKg): Pick<CarState, 'fuelKg' | 'wheels' | 'servicing'> {
   const cfg = ctx.physics;
   const kph = Math.abs(car.speed) / KPH;
   const v4 = (kph / cfg.wear.refSpeedKph) ** 4;
@@ -415,7 +422,7 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
   }) as Wheels<WheelState>;
 
   let fuelKg = Math.max(0, car.fuelKg - throttle * cfg.fuel.burnKgPerSec * dt);
-  if (service) fuelKg = Math.min(cfg.fuel.tankKg, fuelKg + cfg.fuel.refuelKgPerSec * dt);
+  if (service) fuelKg = Math.max(fuelKg, Math.min(fillToKg, cfg.fuel.tankKg, fuelKg + cfg.fuel.refuelKgPerSec * dt));
   return { fuelKg, wheels, servicing: service };
 }
 
@@ -464,7 +471,7 @@ export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimCon
       ctx.race.timingLineReachM,
     );
     events.push(...timingEvents);
-    const next = { ...moved, ...updateConsumables(moved, forces[i]!, ctx, dt, world.race?.cars[i]?.box ?? -1), timing };
+    const next = { ...moved, ...updateConsumables(moved, forces[i]!, ctx, dt, world.race?.cars[i]?.box ?? -1, world.quali ? qualiFuelKg(ctx) : undefined), timing };
     // Out of bounds should be unreachable behind walls. If a wheel gets there, the mask has a gap.
     if (surfaces.includes(ctx.track.index.outOfBounds)) {
       const ppm = ctx.track.json.pxPerMeter;

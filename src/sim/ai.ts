@@ -28,7 +28,8 @@ export interface AiConfig {
   defaultPreset: string;
   presets: Record<string, AiPreset>;
   recovery: { stuckSec: number; reverseSec: number; backwardsDeg: number };
-  pits?: { fuelLaps: number; minWear: number; pitSpeedMarginKph: number };
+  /** fuelLaps: pit with this many laps of fuel left (races, practice); qualiFuelLaps: the same in qualifying (light runs). */
+  pits?: { fuelLaps: number; qualiFuelLaps?: number; minWear: number; pitSpeedMarginKph: number };
   /** Lift and coast: coast (no throttle, no brake) for drops up to coastMaxDropMps; lift liftBeforeBrakeSec before braking. */
   coast?: { coastMaxDropMps: number; liftBeforeBrakeSec: number; coastMinKph?: number };
   /** Side by side: lateral gap kept to a car alongside, beyond the cars' width (3-wide allowed if it fits). */
@@ -411,13 +412,17 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
       st.fuelAtLap = car.fuelKg;
     }
     if (st.fuelAtLap < 0) st.fuelAtLap = car.fuelKg;
-    const need = st.fuelPerLap > 0 ? st.fuelPerLap * pits.fuelLaps : phys.fuel.burnKgPerSec * 40;
+    // Qualifying runs light: keep going until there's just enough to get back (qualiFuelLaps).
+    const lapsLeftWanted = world.quali ? (pits.qualiFuelLaps ?? pits.fuelLaps) : pits.fuelLaps;
+    const need = st.fuelPerLap > 0 ? st.fuelPerLap * lapsLeftWanted : (phys.fuel.burnKgPerSec * 40 * lapsLeftWanted) / pits.fuelLaps;
     let want = car.fuelKg < need || car.wheels.some((wh) => wh.wear < pits.minWear);
     // Racing: no stop it doesn't need to reach the flag (enough fuel, tyres not near the cliff).
     if (want && race && st.fuelPerLap > 0) {
       const lapsLeft = race.laps - car.timing.laps;
       if (car.fuelKg > st.fuelPerLap * (lapsLeft + 0.3) && car.wheels.every((wh) => wh.wear > 0.3)) want = false;
     }
+    // Qualifying after the flag: no point stopping, the session is over at the line.
+    if (world.quali && world.quali.phase !== 'running') want = false;
     if (line.pit && want) st.pitWanted = true;
     if (line.pit && st.pitWanted) {
       const toEntry = (line.pit.entry - st.near + line.n) % line.n;
@@ -466,7 +471,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     return { input: { throttle: 0, brake: 1, steer: -Math.sign(err || 1) }, state: st }; // reversing: steer the tail round
   }
   // Which box to stop in: its own in a race, otherwise the first (practice: any box services).
-  const myBox = pit ? pit.boxStops[Math.max(0, world.race?.cars[i]?.box ?? 0)] : undefined;
+  // Qualifying: car i uses box i (round-robin), so a field all running light doesn't queue for box 0.
+  const myBox = pit ? pit.boxStops[Math.max(0, world.race?.cars[i]?.box ?? (world.quali ? i % pit.boxStops.length : 0))] : undefined;
   const stopQ = myBox?.q ?? pit?.box ?? 0;
   const waitingInBox = !!pit && !st.serviced && Math.abs(best - stopQ) <= 2;
   st.stuckTicks = !waitingInBox && ((speed < 1.5 && car.controls.throttle > 0.1) || backwards) ? st.stuckTicks + 1 : 0;
@@ -585,7 +591,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   let holdInBox = false;
   // "Stopped" = slow enough for the sim to service (fuel.pitServiceMaxKph), not some other threshold.
   if (pit && !st.serviced && best >= stopQ - 3 && speed * 3.6 < phys.fuel.pitServiceMaxKph * 0.8) {
-    const full = car.fuelKg >= phys.fuel.tankKg - 0.5 && car.wheels.every((wh) => wh.wear > 0.99);
+    // Done when filled to what the pits give: a full tank, or in qualifying the qualifying load.
+    const fillTo = world.quali ? Math.min(phys.fuel.tankKg, ctx.race.qualiFuelKg ?? phys.fuel.tankKg) : phys.fuel.tankKg;
+    const full = car.fuelKg >= fillTo - 0.5 && car.wheels.every((wh) => wh.wear > 0.99);
     if (!car.servicing) st.serviced = true; // stopped short of / past its box: drive on, try again next lap
     else if (full) {
       st.serviced = true;

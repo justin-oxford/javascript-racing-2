@@ -20,6 +20,8 @@ export interface RaceConfig {
   /** Race weekend (quali.ts): qualifying length and pit-lane release gap, seconds. */
   qualiSec: number;
   qualiReleaseGapSec: number;
+  /** Fuel everyone starts qualifying with (and is topped back up to in the pits), kg. */
+  qualiFuelKg: number;
   /** Sim speed-up once the player's qualifying session is over (client only). */
   qualiFastForward: number;
   /** Points for P1, P2, ... in a race. */

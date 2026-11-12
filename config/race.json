@@ -8,9 +8,10 @@
   "jumpStartThrottle": 0.1,
   "finishTimeoutSec": 60,
   "timingLineReachM": 4,
-  "_comment_quali": "Race weekend: qualifying lasts qualiSec; AI cars leave the pit lane one every qualiReleaseGapSec (the player is free at once). Best valid lap sets the grid; a car on a timed lap when the clock runs out may finish it (finishTimeoutSec caps the wait). points = championship points for P1, P2, ... in a race. qualiFastForward = sim speed-up once your own qualifying session is over (End session, or after the flag).",
+  "_comment_quali": "Race weekend: qualifying lasts qualiSec; AI cars leave the pit lane one every qualiReleaseGapSec (the player is free at once). Best valid lap sets the grid; a car on a timed lap when the clock runs out may finish it (finishTimeoutSec caps the wait). points = championship points for P1, P2, ... in a race. qualiFastForward = sim speed-up once your own qualifying session is over (End session, or after the flag). qualiFuelKg = fuel everyone starts qualifying with (light, like real qualifying); a pit stop in qualifying tops back up to this, not a full tank.",
   "qualiSec": 300,
   "qualiReleaseGapSec": 4,
   "points": [25, 18, 15, 12, 10, 8, 6, 4, 2, 1],
-  "qualiFastForward": 4
+  "qualiFastForward": 4,
+  "qualiFuelKg": 30
 }
