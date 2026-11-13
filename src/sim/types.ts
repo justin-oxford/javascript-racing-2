@@ -1,3 +1,4 @@
+import type { DamageMode, DamageState } from './damage';
 import type { RejoinState } from './rejoin';
 // All sim state is plain, JSON-serializable data. No classes, no hidden state.
 import type { QualiState } from './quali';
@@ -110,6 +111,8 @@ export interface CarState extends Pose {
   timing: LapTiming;
   /** Reset to track: last on-track point, hold, cooldown, penalty, ghost (rejoin.ts). */
   rejoin: RejoinState;
+  /** Damage by zone (damage.ts); stays zero with the Damage setting off. */
+  damage: DamageState;
 }
 
 /** Things that happened this tick, for the client to react to (log, sound, HUD). */
@@ -124,6 +127,14 @@ export interface WorldState {
   race?: RaceState;
   /** Qualifying (race weekend). Absent otherwise; never together with race. */
   quali?: QualiState;
+  /** Session settings the sim needs every tick (set from the race setup; absent = defaults). */
+  settings?: SessionSettings;
+}
+
+/** Session settings carried on the world (host-set in multiplayer). */
+export interface SessionSettings {
+  /** Car damage: off (default), visual only, or realistic. */
+  damage?: DamageMode;
 }
 
 export interface Rules {

@@ -18,6 +18,8 @@ export interface HudCallbacks {
   onPractice(): void;
   /** Practice: put the car back in the pits (the v0.16 R). Ignored in a session. */
   onPits(): void;
+  /** Car damage setting (Car damage card): off, visual only, realistic. Restarts like the AI choice. */
+  onDamage(mode: 'off' | 'visual' | 'realistic'): void;
   /** Car performance: team stats, or equalised cars (Equal performance card). Restarts like the AI choice. */
   onPerf(mode: 'team' | 'equal'): void;
   /** Start a race weekend (practice -> qualifying -> race) of the menu's race length. */
@@ -91,6 +93,15 @@ export class Hud {
     const specs = Object.entries(this.catalog.specs.specs);
     return `
       <div class="reset-note" data-id="resetNote"></div>
+      <div class="damage-mini" data-id="damageMini" title="Damage: front wing, rear wing, left and right suspension">
+        <svg viewBox="0 0 40 70" width="100%" height="100%">
+          <rect x="4" y="2" width="32" height="7" rx="1.5" data-zone="frontWing" />
+          <rect x="11" y="11" width="18" height="48" rx="6" class="body" />
+          <rect x="3" y="18" width="6" height="34" rx="1.5" data-zone="left" />
+          <rect x="31" y="18" width="6" height="34" rx="1.5" data-zone="right" />
+          <rect x="6" y="61" width="28" height="7" rx="1.5" data-zone="rearWing" />
+        </svg>
+      </div>
       <div class="hud-bar" data-id="bar">
         <button class="hud-icon menu" data-id="menuBtn" title="Menu"></button>
         <div class="lap-speed">Lap:<b data-id="lap">0</b>Speed:<b data-id="speed">--</b>kph</div>
@@ -129,6 +140,9 @@ export class Hud {
         <div class="choices ai-count">${[0, 1, 3, 5, 9].map((n) => `<button data-ai-count="${n}">${n}</button>`).join('')}</div>
         <div class="choices ai-level">${this.aiPresets.map((p) => `<button data-ai-preset="${p}">${p}</button>`).join('')}</div>
         <div class="note">Changing AI restarts everyone from the grid.</div>
+        <div class="title">DAMAGE</div>
+        <div class="choices damage">${(['off', 'visual', 'realistic'] as const).map((m) => `<button data-damage="${m}">${{ off: 'Off', visual: 'Visual only', realistic: 'Realistic' }[m]}</button>`).join('')}</div>
+        <div class="note">Realistic: hits cost grip and downforce by where they land (a broken front wing understeers); the pits repair it, which makes the stop longer. Visual only: shown, no effect.</div>
         <div class="title">CAR PERFORMANCE</div>
         <div class="choices perf"><button data-perf="team">Team stats</button><button data-perf="equal">Equal</button></div>
         <div class="note">Equal: every team's car performs the same (spec and setup still count); AI drivers differ by skill instead.</div>
@@ -174,6 +188,7 @@ export class Hud {
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-count]').forEach((b) => b.addEventListener('click', () => this.cb.onAi(Number(b.dataset.aiCount), this.ai.preset)));
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-preset]').forEach((b) => b.addEventListener('click', () => this.cb.onAi(this.ai.count, b.dataset.aiPreset!)));
     this.root.querySelectorAll<HTMLButtonElement>('[data-perf]').forEach((b) => b.addEventListener('click', () => this.cb.onPerf(b.dataset.perf as 'team' | 'equal')));
+    this.root.querySelectorAll<HTMLButtonElement>('[data-damage]').forEach((b) => b.addEventListener('click', () => this.cb.onDamage(b.dataset.damage as 'off' | 'visual' | 'realistic')));
     this.root.querySelectorAll<HTMLButtonElement>('[data-labels]').forEach((b) => b.addEventListener('click', () => this.cb.onLabels(b.dataset.labels as 'off' | 'position' | 'name')));
     this.root.querySelectorAll<HTMLButtonElement>('[data-slot]').forEach((b) =>
       b.addEventListener('click', () => {
@@ -226,6 +241,12 @@ export class Hud {
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-preset]').forEach((b) => b.classList.toggle('active', b.dataset.aiPreset === preset));
   }
 
+  /** Highlight the current damage setting; the damage diagram shows only when it's on. */
+  setDamage(mode: string): void {
+    this.root.querySelectorAll<HTMLButtonElement>('[data-damage]').forEach((b) => b.classList.toggle('active', b.dataset.damage === mode));
+    this.el.damageMini!.style.display = mode === 'off' ? 'none' : 'block';
+  }
+
   /** Highlight the current car performance mode. */
   setPerf(mode: string): void {
     this.root.querySelectorAll<HTMLButtonElement>('[data-perf]').forEach((b) => b.classList.toggle('active', b.dataset.perf === mode));
@@ -268,6 +289,11 @@ export class Hud {
 
   /** `race`: race laps and the car's own box (1-based) while racing; undefined in practice. */
   update(car: CarState, simTime: number, session: Session, hasLines: boolean, inBoxStopped: boolean, race?: { laps: number; box: number }, reset?: { holdFrac: number; penaltySec: number }): void {
+    // Damage diagram: each zone green -> amber -> red.
+    for (const z of this.el.damageMini!.querySelectorAll<SVGRectElement>('[data-zone]')) {
+      const d = Math.max(0, Math.min(1, car.damage[z.dataset.zone as keyof CarState['damage']]));
+      z.style.fill = d < 0.02 ? 'rgba(80, 200, 90, 0.85)' : `hsla(${Math.round(50 * (1 - d))}, 85%, 50%, 0.95)`;
+    }
     // Reset to track: a fill while R is held, then the race penalty countdown.
     const note = this.el.resetNote!;
     const pen = reset?.penaltySec ?? 0, hold = reset?.holdFrac ?? 0;

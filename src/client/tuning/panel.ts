@@ -2,7 +2,7 @@
 // tick, so changes apply to the running car immediately. Save writes them back to /config.
 // Tuning is Justin's job; this file's job is to be a good instrument.
 import GUI, { type Controller } from 'lil-gui';
-import type { AiConfig, AssistsConfig, CarBuild, ContactConfig, PhysicsConfig, RaceConfig, Rules, SlipstreamConfig, SurfaceDef, WorldState } from '../../sim';
+import type { AiConfig, AssistsConfig, CarBuild, DamageConfig, ContactConfig, PhysicsConfig, RaceConfig, Rules, SlipstreamConfig, SurfaceDef, WorldState } from '../../sim';
 import type { VfxConfig } from '../vfx/triggers';
 import type { VfxQuality } from '../vfx/vfx';
 import type { AudioConfig } from '../audio/targets';
@@ -83,6 +83,20 @@ const RANGES: Record<string, [number, number, number]> = {
   'ai.recovery.backwardsDeg': [60, 180, 5],
   'contact.carFriction': [0, 1.5, 0.01],
   'contact.carRestitution': [0, 1, 0.01],
+  'damage.thresholdMps': [0, 30, 0.5],
+  'damage.perMps': [0, 0.3, 0.005],
+  'damage.strength': [0, 3, 0.05],
+  'damage.wallMult': [0, 3, 0.05],
+  'damage.barrierMult': [0, 3, 0.05],
+  'damage.carMult': [0, 3, 0.05],
+  'damage.endZone': [0.1, 1, 0.05],
+  'damage.effects.frontGripLoss': [0, 1, 0.01],
+  'damage.effects.rearGripLoss': [0, 1, 0.01],
+  'damage.effects.rearDragLoss': [0, 0.5, 0.01],
+  'damage.effects.sideGripLoss': [0, 1, 0.01],
+  'damage.effects.pullDeg': [0, 15, 0.5],
+  'damage.repair.wingSec': [0, 30, 0.5],
+  'damage.repair.suspensionSec': [0, 60, 1],
   'assists.abs.peakPct': [0.5, 1.2, 0.01],
   'assists.abs.cornerShare': [0, 1, 0.01],
   'race.defaultLaps': [1, 30, 1],
@@ -143,11 +157,13 @@ export interface TuningTargets {
   slipstream: SlipstreamConfig & Record<string, unknown>;
   /** config/assists.json, live: ABS. */
   assists: AssistsConfig;
+  /** config/damage.json, live: car damage. */
+  damage: DamageConfig;
   /** Called when the team/spec/setup changes, to rebuild the player's car. */
   onBuildChange(build: CarBuild): void;
 }
 
-async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai' | 'contact' | 'race' | 'slipstream' | 'assists', value: unknown): Promise<string> {
+async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai' | 'contact' | 'race' | 'slipstream' | 'assists' | 'damage', value: unknown): Promise<string> {
   const res = await fetch(`/__tuning/save/${name}`, { method: 'POST', headers: { 'x-tuning-panel': '1' }, body: formatTrackJson(value) });
   return res.ok ? `config/${name}.json` : `${name}: ${await res.text()}`;
 }
@@ -259,6 +275,15 @@ export class TuningPanel {
     this.slider(as, this.t.assists.abs, 'cornerShare', 'assists.abs.cornerShare', 'allows for cornering (0 none - 1 full)');
     as.close();
 
+    const dmg = gui.addFolder('Car damage (when the menu setting is on)');
+    for (const key of ['thresholdMps', 'perMps', 'strength', 'wallMult', 'barrierMult', 'carMult', 'endZone'] as const) this.slider(dmg, this.t.damage, key, `damage.${key}`);
+    for (const section of ['effects', 'repair'] as const) {
+      const sub = dmg.addFolder(section);
+      for (const key of Object.keys(this.t.damage[section])) this.slider(sub, this.t.damage[section] as unknown as Record<string, number>, key, `damage.${section}.${key}`);
+      sub.close();
+    }
+    dmg.close();
+
     const race = gui.addFolder('Race (next race)');
     for (const key of Object.keys(this.t.race)) if (typeof (this.t.race as unknown as Record<string, unknown>)[key] === 'number') this.slider(race, this.t.race, key, `race.${key}`);
     race.close();
@@ -293,9 +318,9 @@ export class TuningPanel {
       status.msg = m;
       statusCtl.updateDisplay();
     };
-    const all = () => ({ physics, surfaces: this.t.surfacesConfig, rules, vfx: this.t.vfx, audio: this.t.audio, ai: this.t.ai, contact: this.t.contact, race: this.t.race, slipstream: this.t.slipstream, assists: this.t.assists });
+    const all = () => ({ physics, surfaces: this.t.surfacesConfig, rules, vfx: this.t.vfx, audio: this.t.audio, ai: this.t.ai, contact: this.t.contact, race: this.t.race, slipstream: this.t.slipstream, assists: this.t.assists, damage: this.t.damage });
     io.add({
-      save: async () => !import.meta.env.DEV ? show('Save only works on the local dev server: use Copy all settings') : show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai), saveConfig('contact', this.t.contact), saveConfig('race', this.t.race), saveConfig('slipstream', this.t.slipstream), saveConfig('assists', this.t.assists)])).join(', ')),
+      save: async () => !import.meta.env.DEV ? show('Save only works on the local dev server: use Copy all settings') : show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai), saveConfig('contact', this.t.contact), saveConfig('race', this.t.race), saveConfig('slipstream', this.t.slipstream), saveConfig('assists', this.t.assists), saveConfig('damage', this.t.damage)])).join(', ')),
     }, 'save').name('Save to /config');
     io.add({ copy: () => void navigator.clipboard.writeText(formatTrackJson(physics)).then(() => show('physics.json copied')) }, 'copy').name('Copy physics JSON');
     // Every config file the panel edits, keyed by file name: paste it to Claude to write them to /config.
@@ -344,6 +369,7 @@ export class TuningPanel {
       <div>throttle ${bar(c.controls.throttle)}  brake ${bar(c.controls.brake)}</div>
       <div>steer ${c.controls.steer >= 0 ? '+' : ''}${c.controls.steer.toFixed(2)}   yaw ${(c.angVel * 57.3).toFixed(0)}°/s</div>
       <div>tow ${pct(c.tow)} less drag   dirty air ${pct(c.dirtyAir)} less downforce</div>
+      <div>damage: front wing ${pct(c.damage.frontWing)} (front grip -${pct(c.damage.frontWing * this.t.damage.effects.frontGripLoss)})  rear wing ${pct(c.damage.rearWing)}  left ${pct(c.damage.left)}  right ${pct(c.damage.right)}</div>
       <div>fuel ${c.fuelKg.toFixed(1)} kg (${pct(c.fuelKg / physics.fuel.tankKg)})   mass ${(physics.car.dryMassKg + c.fuelKg).toFixed(0)} kg</div>
       <table><tr><th></th><th>surface</th><th>wear</th><th>slip</th><th>slip/peak</th><th>grip kN</th><th>load kN</th></tr>${rows}</table>
       <div class="flags">${flags || '&nbsp;'}</div>`;

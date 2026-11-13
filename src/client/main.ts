@@ -1,4 +1,4 @@
-import { aiInputSource, driverSkill, skilledPreset, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { aiInputSource, driverSkill, skilledPreset, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -10,6 +10,7 @@ import {
   raceConfig,
   slipstream,
   assists,
+  damage,
   getTrackJsonStub,
   loadBackground,
   loadMask,
@@ -76,6 +77,9 @@ async function main(): Promise<void> {
     const { equalise: _old, ...rest } = b;
     return perfMode === 'equal' ? { ...rest, equalise: ctx.race.equalise } : rest;
   };
+  // Car damage setting (Car damage card), remembered in this browser. Off by default (Justin).
+  let damageMode: DamageMode = (() => { try { const v = localStorage.getItem('jr2.damage'); return v === 'visual' || v === 'realistic' ? v : 'off'; } catch { return 'off'; } })();
+  const settings = (): SessionSettings => ({ damage: damageMode });
   // AI driver skill: seeded once per page load, so the same drivers carry through a whole race weekend.
   const driverSeed = crypto.getRandomValues(new Uint32Array(1))[0]!;
   const skillOn = (): boolean => (perfMode === 'equal' ? aiCfg.skill?.inEqual : aiCfg.skill?.inTeam) ?? false;
@@ -133,7 +137,7 @@ async function main(): Promise<void> {
     if (!racingLine) aiCount = 0;
     const builds: CarBuild[] = [me, ...aiBuilds(me, aiCount)];
     if (aiCount === 0) for (let i = 1; i <= extra; i++) builds.push(physics.defaultCar);
-    curr = createWorld(ctx, builds);
+    curr = createWorld(ctx, builds, settings());
     prev = curr;
     drivers = aiCount === 0 ? [keyboard, ...Array.from({ length: extra }, (_, k) => new DonutInput(k + 1))] : [keyboard, ...aiDrivers(aiCount)];
     hud.setAi(aiCount, aiPreset);
@@ -151,7 +155,7 @@ async function main(): Promise<void> {
     const count = Math.max(1, aiCount);
     const builds: CarBuild[] = [me, ...aiBuilds(me, count)];
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!; // client-side: the sim itself stays seeded
-    curr = createRaceWorld(ctx, builds, { laps, seed, playerSlot: grid === 'pole' ? 0 : grid === 'back' ? count : undefined, grid: order });
+    curr = createRaceWorld(ctx, builds, { laps, seed, playerSlot: grid === 'pole' ? 0 : grid === 'back' ? count : undefined, grid: order, settings: settings() });
     prev = curr;
     drivers = [keyboard, ...aiDrivers(count)];
     hud.setAi(aiCount, aiPreset);
@@ -174,7 +178,7 @@ async function main(): Promise<void> {
     const count = Math.max(1, aiCount);
     const builds: CarBuild[] = [me, ...aiBuilds(me, count)];
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
-    curr = createQualiWorld(ctx, builds, seed, pitQueuePoses(racingLine, builds.length, json.pxPerMeter)!);
+    curr = createQualiWorld(ctx, builds, seed, pitQueuePoses(racingLine, builds.length, json.pxPerMeter)!, settings());
     prev = curr;
     raceSetup = undefined;
     drivers = [keyboard, ...aiDrivers(count)];
@@ -223,6 +227,13 @@ async function main(): Promise<void> {
       else if (!curr.quali && !raceSetup) startPractice(weekend?.stage === 'practice'); // mid-weekend: applies to the next session
     },
     onRace: (laps, grid) => startRace(laps, grid),
+    onDamage: (mode) => {
+      damageMode = mode;
+      try { localStorage.setItem('jr2.damage', mode); } catch { /* not remembered */ }
+      hud.setDamage(mode);
+      if (raceSetup && !raceSetup.order) startRace(raceSetup.laps, raceSetup.grid);
+      else if (!curr.quali && !raceSetup) startPractice(weekend?.stage === 'practice');
+    },
     onPerf: (mode) => {
       perfMode = mode;
       session.changeSpec(pbSpec(curr.cars[0]!.build.spec)); // a different set of PBs
@@ -259,6 +270,7 @@ async function main(): Promise<void> {
   }
   hud.setLabels(labelMode);
   hud.setPerf(perfMode);
+  hud.setDamage(damageMode);
 
   let prev: WorldState = createWorld(ctx, drivers.length);
   let curr: WorldState = prev;
@@ -318,6 +330,7 @@ async function main(): Promise<void> {
         race: raceConfig,
         slipstream,
         assists,
+        damage,
         volumes: { values: audio.volumes, set: (bus, v) => audio.setVolume(bus, v) },
         onBuildChange: (b) => {
           const build = withPerf(b);

@@ -13,6 +13,7 @@ import { BoxShape, ChainShape, Vec2, World, type Body, type Fixture } from 'plan
 import { bodyOffsetM, type PhysicsConfig } from './car-config';
 import type { SimTrack, WallChain } from './track';
 import type { CarState, ContactConfig, WorldState } from './types';
+import type { Hit, HitKind } from './damage';
 
 interface WallTag {
   kind: 'wall' | 'barrier';
@@ -33,6 +34,8 @@ export interface PhysicsCache {
   ghost: boolean[];
   /** Per car body: just reset to track (rejoin.ts), so it passes through every car until clear. */
   ghostAll: boolean[];
+  /** Contacts this step with their closing speeds (pre-solve), for damage. Cleared when the cars are rewritten. */
+  hits: Hit[];
 }
 
 export function createPhysicsCache(): PhysicsCache {
@@ -46,20 +49,41 @@ export function createPhysicsCache(): PhysicsCache {
     carCar: { friction: 0, restitution: 0 },
     ghost: [],
     ghostAll: [],
+    hits: [],
   };
-  // Car against car: contact.json's own values, not a mix of the two bodies' materials. (A car body's
-  // material still mixes with a wall's, so car-to-car tuning never changes how walls feel.)
   cache.world.on('pre-solve', (contact) => {
-    const a = contact.getFixtureA().getBody(), b = contact.getFixtureB().getBody();
-    if (!a.isDynamic() || !b.isDynamic()) return;
-    // Pit lane ghosting: two cars both in the pit lane don't touch.
+    const fa = contact.getFixtureA(), fb = contact.getFixtureB();
+    const a = fa.getBody(), b = fb.getBody();
     const ia = cache.cars.indexOf(a), ib = cache.cars.indexOf(b);
-    if ((cache.ghost[ia] && cache.ghost[ib]) || cache.ghostAll[ia] || cache.ghostAll[ib]) {
-      contact.setEnabled(false);
-      return;
+    if (a.isDynamic() && b.isDynamic()) {
+      // Pit lane ghosting: two cars both in the pit lane don't touch; nor does a car just reset to track.
+      if ((cache.ghost[ia] && cache.ghost[ib]) || cache.ghostAll[ia] || cache.ghostAll[ib]) {
+        contact.setEnabled(false);
+        return;
+      }
+      // Car against car: contact.json's own values, not a mix of the two bodies' materials. (A car body's
+      // material still mixes with a wall's, so car-to-car tuning never changes how walls feel.)
+      contact.setFriction(cache.carCar.friction);
+      contact.setRestitution(cache.carCar.restitution);
     }
-    contact.setFriction(cache.carCar.friction);
-    contact.setRestitution(cache.carCar.restitution);
+    // Damage (damage.ts): how fast the two surfaces are closing along the contact normal, before the
+    // solver resolves it. A rub closes slowly, a crash fast; resting against a wall, not at all. (Car
+    // bodies are rebuilt every tick, so every contact is new here each step.)
+    const wm = contact.getWorldManifold(null);
+    const n = wm?.pointCount ?? 0;
+    if (!wm || !n) return;
+    let x = 0, y = 0, closing = 0;
+    for (let k = 0; k < n; k++) {
+      const p = wm.points[k]!;
+      x += p.x; y += p.y;
+      const va = a.getLinearVelocityFromWorldPoint(p), vb = b.getLinearVelocityFromWorldPoint(p);
+      closing = Math.max(closing, -((vb.x - va.x) * wm.normal.x + (vb.y - va.y) * wm.normal.y)); // normal points A -> B
+    }
+    if (!(closing > 0)) return;
+    x /= n; y /= n;
+    const kindOf = (f: Fixture): HitKind => ((f.getUserData() as WallTag | null)?.kind === 'barrier' ? 'barrier' : f.getBody().isDynamic() ? 'car' : 'wall');
+    if (ia >= 0) cache.hits.push({ car: ia, x, y, speed: closing, kind: kindOf(fb) });
+    if (ib >= 0) cache.hits.push({ car: ib, x, y, speed: closing, kind: kindOf(fa) });
   });
   return cache;
 }
@@ -110,6 +134,7 @@ export function writeStateToWorld(cache: PhysicsCache, state: WorldState, cfg: P
   state.cars.forEach((car, i) => syncBody(cache.cars[i]!, car, cfg));
   cache.ghost = state.cars.map((car) => contact.pitLaneGhosting !== false && car.inPitLane);
   cache.ghostAll = state.cars.map((car) => !!car.rejoin?.ghost);
+  cache.hits = [];
 }
 
 function syncBody(body: Body, car: CarState, cfg: PhysicsConfig): void {

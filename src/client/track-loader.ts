@@ -7,6 +7,7 @@ import physicsJson from '../../config/physics.json';
 import raceJson from '../../config/race.json';
 import slipstreamJson from '../../config/slipstream.json';
 import assistsJson from '../../config/assists.json';
+import damageJson from '../../config/damage.json';
 import rules from '../../config/rules.json';
 import specsJson from '../../config/specs.json';
 import surfacesConfig from '../../config/surfaces.json';
@@ -50,6 +51,8 @@ export const raceConfig: RaceConfig = raceJson;
 export const slipstream = slipstreamJson;
 /** config/assists.json, live (tuning panel): ABS. */
 export const assists = assistsJson;
+/** config/damage.json, live (tuning panel): car damage. */
+export const damage = damageJson;
 export const catalog: CarCatalog = { teams: teamsJson.teams as TeamDef[], specs: specsJson as unknown as SpecsConfig };
 export { rules };
 const defaults = trackDefaults as TrackDefaults;
@@ -184,5 +187,5 @@ export async function loadOverhead(json: TrackJson): Promise<HTMLImageElement | 
 }
 
 export function simContext(mask: MaskState): SimContext {
-  return { track: mask.track, walls: mask.walls, physics, catalog, rules, contact, race: raceConfig, slipstream, assists, cache: createPhysicsCache() };
+  return { track: mask.track, walls: mask.walls, physics, catalog, rules, contact, race: raceConfig, slipstream, assists, damage, cache: createPhysicsCache() };
 }

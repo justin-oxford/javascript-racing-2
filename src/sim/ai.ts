@@ -4,6 +4,7 @@
 // Pure: aiDrive(state in) -> (input, state out). State is plain data, randomness is a seeded PRNG kept
 // in that state, so the server (card 07) runs it unchanged and replays stay exact.
 import { buildStats } from './car-config';
+import { damageGrip, isDamaged } from './damage';
 import { speedProfile } from './line-optimizer';
 import type { SimTrack } from './track';
 import { surfaceAt } from './track';
@@ -55,7 +56,7 @@ export interface AiConfig {
   /** resetAfterSec: still in trouble (crawling, reversing out, stuck) this long -> reset to track, same as a player (race.json reset). */
   recovery: { stuckSec: number; reverseSec: number; backwardsDeg: number; resetAfterSec?: number };
   /** fuelLaps: pit with this many laps of fuel left (races, practice); qualiFuelLaps: the same in qualifying (light runs). */
-  pits?: { fuelLaps: number; qualiFuelLaps?: number; minWear: number; pitSpeedMarginKph: number };
+  pits?: { fuelLaps: number; qualiFuelLaps?: number; minWear: number; pitSpeedMarginKph: number; repairDamage?: number };
   /** Pit lane driving: fastLaneM = offset from the pit path away from the boxes when driving through; boxApproachM = distance before its box to pull across into it; laneGapM = sideways clearance (beyond a car width) under which a car ahead is "in our lane"; releaseGapM = how far back up the lane a car must be clear before pulling out of the box; latRateMps = how fast it moves across in the lane. */
   pitLane?: { fastLaneM: number; boxApproachM: number; laneGapM: number; releaseGapM: number; latRateMps: number };
   /** Lift and coast: coast (no throttle, no brake) for drops up to coastMaxDropMps; lift liftBeforeBrakeSec before braking. */
@@ -447,11 +448,13 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     // Qualifying runs light: keep going until there's just enough to get back (qualiFuelLaps).
     const lapsLeftWanted = world.quali ? (pits.qualiFuelLaps ?? pits.fuelLaps) : pits.fuelLaps;
     const need = st.fuelPerLap > 0 ? st.fuelPerLap * lapsLeftWanted : (phys.fuel.burnKgPerSec * 40 * lapsLeftWanted) / pits.fuelLaps;
-    let want = car.fuelKg < need || car.wheels.some((wh) => wh.wear < pits.minWear);
+    // Damage (Realistic): pit for repair once any zone is past pits.repairDamage.
+    const broken = world.settings?.damage === 'realistic' && Math.max(car.damage.frontWing, car.damage.rearWing, car.damage.left, car.damage.right) > (pits.repairDamage ?? 0.3);
+    let want = car.fuelKg < need || car.wheels.some((wh) => wh.wear < pits.minWear) || broken;
     // Racing: no stop it doesn't need to reach the flag (enough fuel, tyres not near the cliff).
     if (want && race && st.fuelPerLap > 0) {
       const lapsLeft = race.laps - car.timing.laps;
-      if (car.fuelKg > st.fuelPerLap * (lapsLeft + 0.3) && car.wheels.every((wh) => wh.wear > 0.3)) want = false;
+      if (!broken && car.fuelKg > st.fuelPerLap * (lapsLeft + 0.3) && car.wheels.every((wh) => wh.wear > 0.3)) want = false;
     }
     // Qualifying after the flag: no point stopping, the session is over at the line.
     if (world.quali && world.quali.phase !== 'running') want = false;
@@ -529,7 +532,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // 3. SPEED: what this car can corner and brake at, from its own config and stats.
   const stats = buildStats(car.build, ctx.catalog);
   const mass = phys.car.dryMassKg + Math.max(0, car.fuelKg);
-  const tyre = car.wheels.reduce((a, w) => a + wearGrip(w.wear), 0) / 4;
+  // Grip it has to work with: tyre wear, and (Realistic) damage, both on its own car.
+  const dmgGrip = world.settings?.damage === 'realistic' ? [0, 1, 2, 3].reduce((a, w) => a + damageGrip(car.damage, w, ctx.damage), 0) / 4 : 1;
+  const tyre = (car.wheels.reduce((a, w) => a + wearGrip(w.wear), 0) / 4) * dmgGrip;
   const mu = phys.tyres.baseGrip * stats.grip * tyre;
   const kAero = phys.aero.downforceCoef * stats.downforce;
   const vTop = (phys.engine.topSpeedKph / 3.6) * stats.topSpeed;
@@ -625,7 +630,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   if (pit && !st.serviced && best >= stopQ - 3 && speed * 3.6 < phys.fuel.pitServiceMaxKph * 0.8) {
     // Done when filled to what the pits give: a full tank, or in qualifying the qualifying load.
     const fillTo = world.quali ? Math.min(phys.fuel.tankKg, ctx.race.qualiFuelKg ?? phys.fuel.tankKg) : phys.fuel.tankKg;
-    const full = car.fuelKg >= fillTo - 0.5 && car.wheels.every((wh) => wh.wear > 0.99);
+    const full = car.fuelKg >= fillTo - 0.5 && car.wheels.every((wh) => wh.wear > 0.99) && !isDamaged(car.damage);
     if (!car.servicing) st.serviced = true; // stopped short of / past its box: drive on, try again next lap
     else if (full) {
       st.serviced = true;

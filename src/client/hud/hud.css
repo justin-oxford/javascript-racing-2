@@ -159,3 +159,8 @@
 .reset-note b { color: #ffcc33; margin-left: calc(var(--u) * 6); }
 .reset-note .fill { display: inline-block; vertical-align: middle; width: calc(var(--u) * 60); height: calc(var(--u) * 6); margin-left: calc(var(--u) * 8); background: rgba(255,255,255,0.2); }
 .reset-note .fill span { display: block; height: 100%; background: #ffcc33; }
+
+/* Damage diagram (Car damage card): bottom left, only when damage is on. */
+.damage-mini { display: none; position: absolute; left: calc(var(--u) * 10); bottom: calc(var(--u) * 10); width: calc(var(--u) * 34); height: calc(var(--u) * 60);
+  background: rgba(10, 10, 14, 0.6); border-radius: calc(var(--u) * 4); padding: calc(var(--u) * 4); pointer-events: none; z-index: 1; }
+.damage-mini .body { fill: rgba(255, 255, 255, 0.15); }
