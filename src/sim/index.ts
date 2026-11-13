@@ -11,3 +11,4 @@ export * from './quali';
 export * from './line-optimizer';
 export * from './slipstream';
 export * from './world';
+export * from './rejoin';

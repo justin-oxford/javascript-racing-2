@@ -16,6 +16,8 @@ export interface HudCallbacks {
   onRace(laps: number, grid: 'random' | 'pole' | 'back'): void;
   /** Leave a race for practice. */
   onPractice(): void;
+  /** Practice: put the car back in the pits (the v0.16 R). Ignored in a session. */
+  onPits(): void;
   /** Car performance: team stats, or equalised cars (Equal performance card). Restarts like the AI choice. */
   onPerf(mode: 'team' | 'equal'): void;
   /** Start a race weekend (practice -> qualifying -> race) of the menu's race length. */
@@ -88,6 +90,7 @@ export class Hud {
     const tiles = ['Sector 1', 'Sector 2', 'Sector 3', 'Lap'];
     const specs = Object.entries(this.catalog.specs.specs);
     return `
+      <div class="reset-note" data-id="resetNote"></div>
       <div class="hud-bar" data-id="bar">
         <button class="hud-icon menu" data-id="menuBtn" title="Menu"></button>
         <div class="lap-speed">Lap:<b data-id="lap">0</b>Speed:<b data-id="speed">--</b>kph</div>
@@ -133,6 +136,8 @@ export class Hud {
         <div class="choices race-laps">${[3, 5, 10, 15].map((n) => `<button data-race-laps="${n}">${n} laps</button>`).join('')}</div>
         <div class="choices race-grid">${(['random', 'pole', 'back'] as const).map((g) => `<button data-race-grid="${g}">${{ random: 'Random grid', pole: 'Pole', back: 'Back of grid' }[g]}</button>`).join('')}</div>
         <div class="choices race-go"><button data-id="weekend">RACE WEEKEND</button><button data-id="raceStart">QUICK RACE</button><button data-id="practice">PRACTICE</button></div>
+        <div class="choices"><button data-id="toPits">BACK TO PITS</button></div>
+        <div class="note">Stuck? Hold R for a second to rejoin the track behind where you left it (lap invalidated; in a race you wait out a short penalty). Back to pits: practice only.</div>
         <div class="note">Race weekend: practice, then qualifying (best lap sets the grid), then the race. Quick race skips to the grid. Races use the AI count above (at least 1) and difficulty.</div>
         <div class="title">CAR LABELS (L)</div>
         <div class="choices labels">${(['off', 'position', 'name'] as const).map((m) => `<button data-labels="${m}">${{ off: 'Off', position: 'Position', name: 'Position + name' }[m]}</button>`).join('')}</div>
@@ -165,6 +170,7 @@ export class Hud {
     this.el.raceStart!.addEventListener('click', () => { this.closeMenu(); this.cb.onRace(this.race.laps, this.race.grid); });
     this.el.practice!.addEventListener('click', () => { this.closeMenu(); this.cb.onPractice(); });
     this.el.weekend!.addEventListener('click', () => { this.closeMenu(); this.cb.onWeekend(this.race.laps); });
+    this.el.toPits!.addEventListener('click', () => { this.closeMenu(); this.cb.onPits(); });
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-count]').forEach((b) => b.addEventListener('click', () => this.cb.onAi(Number(b.dataset.aiCount), this.ai.preset)));
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-preset]').forEach((b) => b.addEventListener('click', () => this.cb.onAi(this.ai.count, b.dataset.aiPreset!)));
     this.root.querySelectorAll<HTMLButtonElement>('[data-perf]').forEach((b) => b.addEventListener('click', () => this.cb.onPerf(b.dataset.perf as 'team' | 'equal')));
@@ -261,7 +267,13 @@ export class Hud {
   }
 
   /** `race`: race laps and the car's own box (1-based) while racing; undefined in practice. */
-  update(car: CarState, simTime: number, session: Session, hasLines: boolean, inBoxStopped: boolean, race?: { laps: number; box: number }): void {
+  update(car: CarState, simTime: number, session: Session, hasLines: boolean, inBoxStopped: boolean, race?: { laps: number; box: number }, reset?: { holdFrac: number; penaltySec: number }): void {
+    // Reset to track: a fill while R is held, then the race penalty countdown.
+    const note = this.el.resetNote!;
+    const pen = reset?.penaltySec ?? 0, hold = reset?.holdFrac ?? 0;
+    note.style.display = pen > 0 || hold > 0 ? 'block' : 'none';
+    if (pen > 0) note.innerHTML = `RESET PENALTY <b>${pen.toFixed(1)}</b>`;
+    else if (hold > 0) note.innerHTML = `HOLD R TO RESET <span class="fill"><span style="width:${Math.round(Math.min(1, hold) * 100)}%"></span></span>`;
     this.el.lap!.textContent = race
       ? `${Math.min(race.laps, car.timing.started ? car.timing.laps + 1 : 0)}/${race.laps}`
       : String(car.timing.started ? car.timing.laps + 1 : 0);

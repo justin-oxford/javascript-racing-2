@@ -15,5 +15,7 @@
   "qualiFastForward": 4,
   "qualiFuelKg": 30,
   "_comment_equal": "equalise: in Equal performance mode (race setup), how far each team's six stat multipliers move toward 1.0 (1 = identical cars, Motus included). Spec and setup still apply on top. Team stats mode ignores it.",
-  "equalise": 1
+  "equalise": 1,
+  "_comment_reset": "reset: reset to track (hold R). holdSec = how long R must be held; the car rejoins the racing line backoffM behind the last point where it was fully on track (never ahead), further back until no car is within clearM, and is ghosted for ghostSec (plus any penalty) and then until no car is within clearM. In a race it waits penaltySec stationary at that point (practice/qualifying: no penalty, it rolls off at rejoinKph). cooldownSec between resets. The lap is invalidated.",
+  "reset": { "holdSec": 1, "penaltySec": 5, "cooldownSec": 10, "backoffM": 10, "clearM": 15, "ghostSec": 3, "rejoinKph": 30 }
 }

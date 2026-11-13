@@ -219,7 +219,7 @@ export class RaceHud {
       const delta = from - r.pos;
       const moved = delta > 0 ? `<span class="up">▲${delta}</span>` : delta < 0 ? `<span class="dn">▼${-delta}</span>` : '';
       const pts = r.finished ? pointsFor(r.pos, points) : 0;
-      return `<tr class="${r.car === 0 ? 'me' : ''}"><td>${r.pos}</td><td><span class="sw" style="background:${d.swatch}"></span></td><td>${d.name}</td><td>${from} ${moved}</td><td>${r.laps}</td><td>${t}</td><td>${r.bestLap ? lapText(r.bestLap) : '---'}</td><td>${r.pitStops}</td><td><b>${pts || ''}</b></td><td>${r.jumpStart ? '<span class="jump">JUMP START</span>' : ''}</td></tr>`;
+      return `<tr class="${r.car === 0 ? 'me' : ''}"><td>${r.pos}</td><td><span class="sw" style="background:${d.swatch}"></span></td><td>${d.name}</td><td>${from} ${moved}</td><td>${r.laps}</td><td>${t}</td><td>${r.bestLap ? lapText(r.bestLap) : '---'}</td><td>${r.pitStops}</td><td><b>${pts || ''}</b></td><td>${[r.jumpStart ? '<span class="jump">JUMP START</span>' : '', r.resets ? `<span class="jump">${r.resets} RESET${r.resets > 1 ? 'S' : ''}</span>` : ''].filter(Boolean).join(' ')}</td></tr>`;
     });
     const mine = raceResults(race).find((r) => r.car === 0);
     const sub = this.weekend ? `Race weekend complete${mine?.finished ? `: P${mine.pos}, ${pointsFor(mine.pos, points)} point${pointsFor(mine.pos, points) === 1 ? '' : 's'}` : ''}` : '';

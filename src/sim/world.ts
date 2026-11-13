@@ -1,3 +1,4 @@
+import { applyResets, newRejoin, trackRejoin } from './rejoin';
 import { buildStats, type CarCatalog, type PhysicsConfig } from './car-config';
 import { applyCarForce, prepareCache, readStateFromWorld, setCarMass, stepWorld, type PhysicsCache } from './planck-cache';
 import type { SimTrack, WallChain } from './track';
@@ -168,6 +169,7 @@ export function createCar(posePx: Pose, build: CarBuild, ctx: SimContext): CarSt
     tow: 0,
     dirtyAir: 0,
     timing: newTiming(),
+    rejoin: newRejoin(),
   };
 }
 
@@ -467,14 +469,18 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
  * inputs[i] drives cars[i]; a missing input is treated as neutral.
  * Uses ctx.cache (Planck) as scratch, rebuilt from `world` every tick (see planck-cache.ts).
  */
-export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimContext): WorldState {
+export function step(world0: WorldState, inputs: readonly CarInput[], ctx: SimContext): WorldState {
   const dt = TICK_DT;
+  // Reset to track first (rejoin.ts): a reset car starts this tick at its new place, so timing never sees
+  // the jump as a drive across a line. Cars serving a reset penalty are held still.
+  const resets = applyResets(world0.cars, inputs, ctx.track, ctx.race.reset, TICK_HZ, !!world0.race);
+  const world: WorldState = resets.cars === world0.cars ? world0 : { ...world0, cars: resets.cars };
   prepareCache(ctx.cache, world, ctx.track, ctx.walls, ctx.physics, ctx.contact);
 
   // On the grid and under the lights, cars are held: the drivers' inputs are ignored (but read for jump starts).
   // In qualifying, cars waiting to leave the pit lane (and retired ones) are held the same way.
   const raceHeld = raceHolds(world.race);
-  const controls = world.cars.map((car, i) => rampControls(car.controls, raceHeld || qualiHolds(world.quali, i, world.tick) ? NEUTRAL_INPUT : (inputs[i] ?? NEUTRAL_INPUT), ctx.physics, dt));
+  const controls = world.cars.map((car, i) => rampControls(car.controls, raceHeld || resets.held[i] || qualiHolds(world.quali, i, world.tick) ? NEUTRAL_INPUT : (inputs[i] ?? NEUTRAL_INPUT), ctx.physics, dt));
   const wake = wakeEffects(world.cars, ctx.physics.car.widthM, ctx.slipstream);
   const forces = world.cars.map((car, i) => applyCarForces(i, car, controls[i]!, ctx, dt, { tow: wake.tow[i]!, dirtyAir: wake.dirtyAir[i]! }));
   stepWorld(ctx.cache, dt, ctx.physics);
@@ -516,10 +522,17 @@ export function step(world: WorldState, inputs: readonly CarInput[], ctx: SimCon
     }
     return next;
   });
+  // Reset to track bookkeeping, once every car has moved: last on-track point, ghosts clearing.
+  const tracked = cars.map((c, i) => {
+    const allLegal = c.wheels.every((w) => ctx.track.surfaces[w.surface]!.legal);
+    const rejoin = trackRejoin(c, allLegal, cars, i, ctx.track, ctx.race.reset);
+    return rejoin === c.rejoin ? c : { ...c, rejoin };
+  });
+  cars.splice(0, cars.length, ...tracked);
 
   const tick = world.tick + 1;
   if (world.quali) return { tick, cars, events, quali: updateQuali(world.quali, tick, dt, cars, inputs.map((x) => x ?? NEUTRAL_INPUT), events, ctx.race) };
   if (!world.race) return { tick, cars, events };
-  const race = updateRace(world.race, tick, dt, world.cars, cars, inputs.map((x) => x ?? NEUTRAL_INPUT), events, ctx.track, ctx.race);
+  const race = updateRace(world.race, tick, dt, world0.cars, cars, inputs.map((x) => x ?? NEUTRAL_INPUT), events, ctx.track, ctx.race);
   return { tick, cars, events, race };
 }

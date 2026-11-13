@@ -52,7 +52,8 @@ export interface AiConfig {
   /** Driver skill (Equal performance card): spread = +- fraction of pace between drivers; on in Equal mode by default (inEqual), off in Team stats (inTeam). */
   skill?: { spread: number; inEqual: boolean; inTeam: boolean };
   presets: Record<string, AiPreset>;
-  recovery: { stuckSec: number; reverseSec: number; backwardsDeg: number };
+  /** resetAfterSec: still in trouble (crawling, reversing out, stuck) this long -> reset to track, same as a player (race.json reset). */
+  recovery: { stuckSec: number; reverseSec: number; backwardsDeg: number; resetAfterSec?: number };
   /** fuelLaps: pit with this many laps of fuel left (races, practice); qualiFuelLaps: the same in qualifying (light runs). */
   pits?: { fuelLaps: number; qualiFuelLaps?: number; minWear: number; pitSpeedMarginKph: number };
   /** Pit lane driving: fastLaneM = offset from the pit path away from the boxes when driving through; boxApproachM = distance before its box to pull across into it; laneGapM = sideways clearance (beyond a car width) under which a car ahead is "in our lane"; releaseGapM = how far back up the lane a car must be clear before pulling out of the box; latRateMps = how fast it moves across in the lane. */
@@ -311,6 +312,9 @@ export interface AiState {
   stuckTicks: number;
   /** Ticks left of a reverse-out manoeuvre. */
   recoverTicks: number;
+  /** Reset fallback: ticks spent crawling or stuck (reverse-outs not working); resets it has done. */
+  troubleTicks: number;
+  resets: number;
   /** Current sideways offset from the line, metres (+ = right). */
   offset: number;
   /** A mistake in progress: kind and ticks left. */
@@ -339,6 +343,7 @@ export interface AiState {
 export function newAiState(seed: number): AiState {
   return {
     mode: 'race', near: -1, lastErr: 0, stuckTicks: 0, recoverTicks: 0, offset: 0, mistake: undefined, rng: seed >>> 0 || 1,
+    troubleTicks: 0, resets: 0,
     pitWanted: false, serviced: false, fuelAtLap: -1, fuelPerLap: 0, stuckEvents: 0, mistakes: 0, pitStops: 0, attack: false, launchTick: -1, trust: 1, lastAllowed: 0,
   };
 }
@@ -844,6 +849,25 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
 }
 
 /** Wrap aiDrive as an InputSource for car `i` (keyboard-compatible). */
+/**
+ * Reset to track for the AI: crawling or stuck for recovery.resetAfterSec (reversing out hasn't got it
+ * going) -> hold reset, same as a player and with the same penalty. troubleTicks < 0 = holding it.
+ * After the reset it re-finds its place on the line.
+ */
+function resetFallback(world: WorldState, i: number, st: AiState, ctx: SimContext, cfg: AiConfig): AiState {
+  const car = world.cars[i]!;
+  if (car.rejoin.count > st.resets) return { ...st, resets: car.rejoin.count, troubleTicks: 0, near: -1, mode: 'race', recoverTicks: 0, stuckTicks: 0, offset: 0, pitWanted: st.pitWanted };
+  const after = cfg.recovery.resetAfterSec;
+  const race = world.race, q = world.quali?.cars[i];
+  const waiting = !after || st.mode === 'pit' || car.inPitLane || car.servicing || car.rejoin.penaltyTicks > 0
+    || (race && (race.phase === 'grid' || race.phase === 'lights' || race.cars[i]?.finished)) || (q && (q.retired || world.tick < q.releaseTick));
+  if (waiting) return st.troubleTicks ? { ...st, troubleTicks: 0 } : st;
+  const speed = Math.hypot(car.vx, car.vy);
+  if (st.troubleTicks < 0) return st; // holding reset until it happens
+  const trouble = speed < 3 ? st.troubleTicks + 1 : speed > 6 ? 0 : st.troubleTicks;
+  return { ...st, troubleTicks: trouble > after / TICK_DT ? -1 : trouble };
+}
+
 export function aiInputSource(
   i: number,
   get: () => { world: WorldState; ctx: SimContext; line: RacingLine | undefined },
@@ -857,8 +881,8 @@ export function aiInputSource(
       const { world, ctx, line } = get();
       if (!line || !world.cars[i]) return { throttle: 0, brake: 0, steer: 0 };
       const out = aiDrive(world, i, src.state, line, ctx, preset(), cfg());
-      src.state = out.state;
-      return out.input;
+      src.state = resetFallback(world, i, out.state, ctx, cfg());
+      return src.state.troubleTicks < 0 ? { ...out.input, reset: true } : out.input;
     },
   };
   return src;

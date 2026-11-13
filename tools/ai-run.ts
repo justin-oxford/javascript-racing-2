@@ -104,12 +104,12 @@ const wall = (performance.now() - t0) / 1000;
 const fmt = (t: number | undefined) => (t === undefined ? '   -   ' : `${Math.floor(t / 60)}:${(t % 60).toFixed(3).padStart(6, '0')}`);
 const median = (a: number[]) => { const b = [...a].sort((x, y) => x - y); return b.length ? b[Math.floor(b.length / 2)] : undefined; };
 console.log(`${trackId}, ${cars} AI cars (${presetName}), target ${laps} laps: ${(tick / 60).toFixed(0)} s simulated in ${wall.toFixed(1)} s (${(tick / 60 / wall).toFixed(0)}x real time)\n`);
-console.log('car team          engine  laps valid  best      median    spread   invalid walls barrier contacts stuck mistakes pits');
+console.log('car team          engine  laps valid  best      median    spread   invalid walls barrier contacts stuck mistakes pits resets');
 const rows = world.cars.map((c, i) => {
   const s = stats[i]!, d = drivers[i]!.state, team = catalog.teams.find((t) => t.id === c.build.team)!;
   const best = s.laps.length ? Math.min(...s.laps) : undefined, med = median(s.laps);
   const sd = s.laps.length > 1 ? Math.sqrt(s.laps.reduce((a, x) => a + (x - (med ?? 0)) ** 2, 0) / s.laps.length) : 0;
-  return { i, best, line: `${String(i).padStart(3)} ${team.name.padEnd(13)} ${buildStats(c.build, catalog).engine.toFixed(2).padStart(6)}  ${String(c.timing.laps).padStart(4)} ${String(s.laps.length).padStart(5)}  ${fmt(best)}  ${fmt(med)}  ${sd.toFixed(2).padStart(6)}s ${String(s.invalid).padStart(7)} ${String(s.walls).padStart(5)} ${String(s.barriers).padStart(7)} ${String(s.contacts).padStart(8)} ${String(d.stuckEvents).padStart(5)} ${String(d.mistakes).padStart(8)} ${String(d.pitStops).padStart(4)}` };
+  return { i, best, line: `${String(i).padStart(3)} ${team.name.padEnd(13)} ${buildStats(c.build, catalog).engine.toFixed(2).padStart(6)}  ${String(c.timing.laps).padStart(4)} ${String(s.laps.length).padStart(5)}  ${fmt(best)}  ${fmt(med)}  ${sd.toFixed(2).padStart(6)}s ${String(s.invalid).padStart(7)} ${String(s.walls).padStart(5)} ${String(s.barriers).padStart(7)} ${String(s.contacts).padStart(8)} ${String(d.stuckEvents).padStart(5)} ${String(d.mistakes).padStart(8)} ${String(d.pitStops).padStart(4)} ${String(d.resets).padStart(6)}` };
 });
 for (const r of rows) console.log(r.line);
 const stuck = drivers.reduce((a, d) => a + d.state.stuckEvents, 0);

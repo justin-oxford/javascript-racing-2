@@ -151,3 +151,11 @@
   background: rgba(64, 160, 255, 0.85);
 }
 .hud-bar .tow.on { visibility: visible; }
+
+/* Reset to track: hold progress, then the race penalty countdown. Centre of the screen, above the cars. */
+.reset-note { display: none; position: absolute; left: 50%; top: 38%; transform: translateX(-50%); z-index: 2;
+  background: rgba(10, 10, 14, 0.82); color: #fff; padding: calc(var(--u) * 6) calc(var(--u) * 12); border-radius: calc(var(--u) * 4);
+  font-size: calc(var(--u) * 12); letter-spacing: 0.06em; pointer-events: none; white-space: nowrap; }
+.reset-note b { color: #ffcc33; margin-left: calc(var(--u) * 6); }
+.reset-note .fill { display: inline-block; vertical-align: middle; width: calc(var(--u) * 60); height: calc(var(--u) * 6); margin-left: calc(var(--u) * 8); background: rgba(255,255,255,0.2); }
+.reset-note .fill span { display: block; height: 100%; background: #ffcc33; }

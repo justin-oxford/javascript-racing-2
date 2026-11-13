@@ -1,3 +1,4 @@
+import type { RejoinState } from './rejoin';
 // All sim state is plain, JSON-serializable data. No classes, no hidden state.
 import type { QualiState } from './quali';
 import type { RaceState } from './race';
@@ -13,6 +14,8 @@ export interface CarInput {
   brake: number;
   /** -1 (left) .. 1 (right) */
   steer: number;
+  /** Reset to track (POLISH card): held ~1 s puts the car back on the racing line. Absent = not pressed. */
+  reset?: boolean;
 }
 
 /**
@@ -105,6 +108,8 @@ export interface CarState extends Pose {
   dirtyAir: number;
   /** Lap/sector timing (see timing.ts). */
   timing: LapTiming;
+  /** Reset to track: last on-track point, hold, cooldown, penalty, ghost (rejoin.ts). */
+  rejoin: RejoinState;
 }
 
 /** Things that happened this tick, for the client to react to (log, sound, HUD). */

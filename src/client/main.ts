@@ -232,6 +232,11 @@ async function main(): Promise<void> {
       else if (!curr.quali && !raceSetup) startPractice(weekend?.stage === 'practice');
     },
     onPractice: () => startPractice(),
+    onPits: () => {
+      if (curr.race || curr.quali) return;
+      curr = resetCar(curr, 0, json.spawn, ctx);
+      prev = curr;
+    },
     onWeekend: (laps) => startWeekend(laps),
     onLabels: (m) => setLabels(m),
   }, () => renderer.trackHeight, siteUrl, Object.keys(aiCfg.presets));
@@ -262,12 +267,10 @@ async function main(): Promise<void> {
   let fps = TICK_HZ; // display smoothing starts at the expected rate, not 0
 
   keyboard.onAction((a) => {
-    // In a race, R (reset to pits) and 0-9 (grid slots) are off: they'd teleport you round the lap.
-    if ((curr.race || curr.quali) && (a.type === 'reset' || a.type === 'gridSlot')) return;
-    if (a.type === 'reset') {
-      curr = resetCar(curr, 0, json.spawn, ctx);
-      prev = curr;
-    } else if (a.type === 'toggleDebug') {
+    // In a race, 0-9 (grid slots) are off: they'd teleport you round the lap. (R is reset to track now:
+    // held, in the sim; back to the pits is a menu button.)
+    if ((curr.race || curr.quali) && a.type === 'gridSlot') return;
+    if (a.type === 'toggleDebug') {
       debug = !debug;
     } else if (a.type === 'mute') {
       console.info(`[audio] ${audio.toggleMute() ? 'muted' : 'unmuted'}`);
@@ -522,7 +525,7 @@ async function main(): Promise<void> {
       if (me) {
         hud.fuelTankKg = physics.fuel.tankKg;
         const race = curr.race;
-        hud.update(me, (curr.tick + alpha) * TICK_DT, session, !!json.timingLines.startFinish, stoppedInBox(), race ? { laps: race.laps, box: (race.cars[0]?.box ?? -1) + 1 } : undefined);
+        hud.update(me, (curr.tick + alpha) * TICK_DT, session, !!json.timingLines.startFinish, stoppedInBox(), race ? { laps: race.laps, box: (race.cars[0]?.box ?? -1) + 1 } : undefined, { holdFrac: me.rejoin.holdTicks / Math.max(1, ctx.race.reset.holdSec * TICK_HZ), penaltySec: me.rejoin.penaltyTicks / TICK_HZ });
         raceHud.weekend = weekend;
         raceHud.update(curr, race?.sharedBoxes ? `${ctx.track.boxes.length} pit boxes for ${curr.cars.length} cars: shared` : '');
       }

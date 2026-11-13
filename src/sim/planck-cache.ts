@@ -31,6 +31,8 @@ export interface PhysicsCache {
   carCar: { friction: number; restitution: number };
   /** Per car body: in the pit lane with ghosting on, so it passes through other such cars. */
   ghost: boolean[];
+  /** Per car body: just reset to track (rejoin.ts), so it passes through every car until clear. */
+  ghostAll: boolean[];
 }
 
 export function createPhysicsCache(): PhysicsCache {
@@ -43,6 +45,7 @@ export function createPhysicsCache(): PhysicsCache {
     wallMaterial: { restitution: NaN, friction: NaN },
     carCar: { friction: 0, restitution: 0 },
     ghost: [],
+    ghostAll: [],
   };
   // Car against car: contact.json's own values, not a mix of the two bodies' materials. (A car body's
   // material still mixes with a wall's, so car-to-car tuning never changes how walls feel.)
@@ -50,7 +53,8 @@ export function createPhysicsCache(): PhysicsCache {
     const a = contact.getFixtureA().getBody(), b = contact.getFixtureB().getBody();
     if (!a.isDynamic() || !b.isDynamic()) return;
     // Pit lane ghosting: two cars both in the pit lane don't touch.
-    if (cache.ghost[cache.cars.indexOf(a)] && cache.ghost[cache.cars.indexOf(b)]) {
+    const ia = cache.cars.indexOf(a), ib = cache.cars.indexOf(b);
+    if ((cache.ghost[ia] && cache.ghost[ib]) || cache.ghostAll[ia] || cache.ghostAll[ib]) {
       contact.setEnabled(false);
       return;
     }
@@ -105,6 +109,7 @@ export function writeStateToWorld(cache: PhysicsCache, state: WorldState, cfg: P
   }
   state.cars.forEach((car, i) => syncBody(cache.cars[i]!, car, cfg));
   cache.ghost = state.cars.map((car) => contact.pitLaneGhosting !== false && car.inPitLane);
+  cache.ghostAll = state.cars.map((car) => !!car.rejoin?.ghost);
 }
 
 function syncBody(body: Body, car: CarState, cfg: PhysicsConfig): void {

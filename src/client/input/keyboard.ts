@@ -2,7 +2,6 @@ import type { CarInput, InputSource } from '../../sim';
 
 /** Discrete, non-driving actions from the v0.16 bindings. */
 export type KeyboardAction =
-  | { type: 'reset' }
   | { type: 'toggleDebug' }
   | { type: 'cycleVfx' }
   | { type: 'mute' }
@@ -15,6 +14,7 @@ const THROTTLE = ['KeyW', 'ArrowUp'];
 const BRAKE = ['KeyS', 'ArrowDown', 'KeyZ', 'Space'];
 const LEFT = ['KeyA', 'ArrowLeft'];
 const RIGHT = ['KeyD', 'ArrowRight'];
+/** Reset to track: held, not tapped (the sim wants race.json reset.holdSec of it). */
 const RESET = 'KeyR';
 const DEBUG = 'KeyK';
 const VFX = 'KeyV';
@@ -49,13 +49,13 @@ export class KeyboardInput implements InputSource {
       throttle: any(THROTTLE) ? 1 : 0,
       brake: any(BRAKE) ? 1 : 0,
       steer: (any(RIGHT) ? 1 : 0) - (any(LEFT) ? 1 : 0),
+      reset: this.down.has(RESET),
     };
   }
 
   private handleAction(code: string): void {
     let action: KeyboardAction | undefined;
-    if (code === RESET) action = { type: 'reset' };
-    else if (code === DEBUG) action = { type: 'toggleDebug' };
+    if (code === DEBUG) action = { type: 'toggleDebug' };
     else if (code === VFX) action = { type: 'cycleVfx' };
     else if (code === MUTE) action = { type: 'mute' };
     else if (code === LABELS) action = { type: 'cycleLabels' };

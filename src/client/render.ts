@@ -13,6 +13,8 @@ function lerpAngle(a: number, b: number, t: number): number {
 /** Sim pose between two ticks, in METRES. */
 export function interpolatePose(prev: CarState | undefined, curr: CarState, alpha: number): Pose {
   if (!prev) return curr;
+  // A jump (reset to track, back to pits): draw it where it is now, don't slide it across the track.
+  if ((curr.x - prev.x) ** 2 + (curr.y - prev.y) ** 2 > 10 * 10) return curr;
   return {
     x: lerp(prev.x, curr.x, alpha),
     y: lerp(prev.y, curr.y, alpha),
@@ -197,6 +199,7 @@ export class Renderer {
       ctx.translate(c.x * ppm, c.y * ppm);
       ctx.rotate(c.heading);
       ctx.translate(0, -look.bodyOffsetM * ppm); // heading 0 points up (-y): the body centre is ahead
+      if (car.rejoin?.ghost) ctx.globalAlpha = 0.45; // just reset to track: ghosted until clear (no contact)
       if (!look.drawCar(ctx, car, i, l, this.scale)) {
         ctx.fillStyle = '#e8e8e8';
         ctx.fillRect(-w / 2, -l / 2, w, l);

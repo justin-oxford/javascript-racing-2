@@ -4,6 +4,7 @@
 // Practice has no race state: any box services any car, and nothing is held or classified.
 import type { SimTrack } from './track';
 import { timingSequence } from './timing';
+import type { ResetConfig } from './rejoin';
 import type { CarInput, CarState, SimEvent } from './types';
 
 /** config/race.json */
@@ -24,6 +25,8 @@ export interface RaceConfig {
   qualiFuelKg: number;
   /** Sim speed-up once the player's qualifying session is over (client only). */
   qualiFastForward: number;
+  /** Reset to track (POLISH card). */
+  reset: ResetConfig;
   /** Equal performance mode: how far team multipliers move toward 1.0 (0-1). */
   equalise: number;
   /** Points for P1, P2, ... in a race. */
@@ -48,6 +51,8 @@ export interface RaceCar {
   inStop: boolean;
   /** Throttle while the lights were on. Flagged on the results; no penalty yet. */
   jumpStart: boolean;
+  /** Resets to track since lights out (rejoin.ts); each served a penalty hold. */
+  resets: number;
   /** Fastest valid lap, seconds; 0 = none yet. */
   bestLap: number;
   finished: boolean;
@@ -118,7 +123,7 @@ export function newRaceState(order: readonly number[], laps: number, seed: numbe
     sharedBoxes: nBoxes > 0 && nBoxes < order.length,
     cars: order.map((_, car) => {
       const slot = slotOf.get(car)!;
-      return { slot, box: nBoxes ? slot % nBoxes : -1, near: -1, progress: 0, crossings: [], pitStops: 0, inStop: false, jumpStart: false, bestLap: 0, finished: false, finishLaps: 0, finishTime: 0 };
+      return { slot, box: nBoxes ? slot % nBoxes : -1, near: -1, progress: 0, crossings: [], pitStops: 0, inStop: false, jumpStart: false, resets: 0, bestLap: 0, finished: false, finishLaps: 0, finishTime: 0 };
     }),
     order: [...order],
   };
@@ -130,9 +135,9 @@ export function raceHolds(race: RaceState | undefined): boolean {
 }
 
 // The racing line in metres plus the start/finish index, memoised per track (static data, not state).
-interface ProgressLine { x: Float64Array; y: Float64Array; n: number; sf: number }
+export interface ProgressLine { x: Float64Array; y: Float64Array; n: number; sf: number }
 const lines = new WeakMap<SimTrack, ProgressLine | null>();
-function progressLine(track: SimTrack): ProgressLine | null {
+export function progressLine(track: SimTrack): ProgressLine | null {
   let l = lines.get(track);
   if (l !== undefined) return l;
   const ppm = track.json.pxPerMeter, pts = track.json.racingLine, sf = track.json.timingLines.startFinish;
@@ -201,6 +206,7 @@ export function updateRace(race: RaceState, tick: number, dt: number, prev: read
     if (!rc.finished) rc.progress = p.progress;
     if (racing && !rc.finished && car.timing.sectorStart !== was.timing.sectorStart) rc.crossings = [...rc.crossings, car.timing.sectorStart];
     if (car.servicing && !rc.inStop) { rc.pitStops++; rc.inStop = true; }
+    if (racing && car.rejoin.count > was.rejoin.count) rc.resets++;
     if (!car.inPitLane) rc.inStop = false;
   });
   for (const e of events) {
@@ -268,6 +274,8 @@ export interface ResultRow {
   bestLap: number;
   pitStops: number;
   jumpStart: boolean;
+  /** Resets to track during the race (each one served a penalty hold). */
+  resets: number;
 }
 
 export function raceResults(race: RaceState): ResultRow[] {
@@ -278,6 +286,6 @@ export function raceResults(race: RaceState): ResultRow[] {
     const gap = k === 0 ? undefined
       : c.finished && laps === w.finishLaps ? { seconds: c.finishTime - w.finishTime, laps: 0 }
       : { seconds: 0, laps: Math.max(1, w.finishLaps - laps) };
-    return { pos: k + 1, car, laps, time: c.finishTime, finished: c.finished, gap, bestLap: c.bestLap, pitStops: c.pitStops, jumpStart: c.jumpStart };
+    return { pos: k + 1, car, laps, time: c.finishTime, finished: c.finished, gap, bestLap: c.bestLap, pitStops: c.pitStops, jumpStart: c.jumpStart, resets: c.resets };
   });
 }
