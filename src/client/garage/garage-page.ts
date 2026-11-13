@@ -77,7 +77,7 @@ export class GaragePage {
       const reader = new FileReader();
       reader.onload = () => {
         const url = String(reader.result), img = new Image();
-        img.onload = () => { this.h.liveries.setLivery(this.pick.id, img); this.newLiveries.set(this.pick.id, url); const sm = (e.target as HTMLElement).parentElement?.querySelector('small'); if (sm) sm.textContent = 'new (unsaved): 256 x 512, drawn over the paint, under the shading; only where there's bodywork'; this.msg(`livery set for ${this.pick.name} (${img.width} x ${img.height})`); };
+        img.onload = () => { this.h.liveries.setLivery(this.pick.id, img); this.newLiveries.set(this.pick.id, url); const sm = (e.target as HTMLElement).parentElement?.querySelector('small'); if (sm) sm.textContent = 'new (unsaved): 256 x 512, drawn over the paint, under the shading; only where there is bodywork'; this.msg(`livery set for ${this.pick.name} (${img.width} x ${img.height})`); };
         img.src = url;
       };
       reader.readAsDataURL(file);
