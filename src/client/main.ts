@@ -30,7 +30,9 @@ import hudConfig from '../../config/hud.json';
 import { Hud } from './hud/hud';
 import { RaceHud } from './hud/race-hud';
 import { drawCarLabels, LABEL_MODES, nextLabelMode, type LabelMode } from './hud/car-labels';
-import { sessionOrder, teamCode } from './hud/running-order';
+import { player, sessionOrder, setPlayerIdentity, teamCode } from './hud/running-order';
+import { MainMenu, type RecordRow } from './menu/main-menu';
+import { DEFAULT_SETTINGS, nameCode, pbPrefix, ProfileStore, type Profile, type ProfileSettings } from './menu/profile';
 import { Liveries } from './livery';
 import liveryConfig from '../../config/livery.json';
 import racingLineConfig from '../../config/racing-line.json';
@@ -67,19 +69,30 @@ async function main(): Promise<void> {
   const aiCfg = aiJson as unknown as AiConfig;
   let racingLine: RacingLine | undefined = buildRacingLine(mask.track);
   const params = new URLSearchParams(location.search);
-  const remembered = (() => { try { return JSON.parse(localStorage.getItem('jr2.ai') ?? '{}') as { count?: number; preset?: string }; } catch { return {}; } })();
-  let aiCount = Math.min(9, Math.max(0, Number(params.get('ai') ?? remembered.count ?? 0) || 0));
-  let aiPreset = params.get('level') ?? remembered.preset ?? aiCfg.defaultPreset;
+  // Player profiles (Main menu + profiles card): name, helmet, team, settings and keys live in the active
+  // profile in this browser. The first one is seeded from the settings remembered before profiles existed.
+  const kv = browserStore();
+  const legacy = (k: string): string | null => kv.getItem(k);
+  const legacyAi = (() => { try { return JSON.parse(legacy('jr2.ai') ?? '{}') as { count?: number; preset?: string }; } catch { return {}; } })();
+  const profiles = new ProfileStore(kv, () => Math.random().toString(36).slice(2, 10));
+  let profile: Profile = profiles.active({
+    helmet: liveryConfig.playerHelmet,
+    settings: { ...DEFAULT_SETTINGS, ai: { count: legacyAi.count ?? 0, preset: legacyAi.preset ?? '' }, perf: legacy('jr2.perf') === 'equal' ? 'equal' : 'team', damage: (['visual', 'realistic'] as const).find((m) => m === legacy('jr2.damage')) ?? 'off', labels: LABEL_MODES.find((m) => m === legacy('jr2.labels')) ?? 'position' },
+  });
+  /** Change the active profile's settings (and remember them). */
+  const persist = (f: (s: ProfileSettings) => ProfileSettings): void => { profile = profiles.save({ ...profile, settings: f(profile.settings) }); };
+  let aiCount = Math.min(9, Math.max(0, Number(params.get('ai') ?? profile.settings.ai.count) || 0));
+  let aiPreset = params.get('level') ?? (profile.settings.ai.preset || aiCfg.defaultPreset);
   if (!aiCfg.presets[aiPreset]) aiPreset = aiCfg.defaultPreset;
-  // Car performance (Equal performance card): team stats or equalised cars, remembered in this browser.
-  let perfMode: 'team' | 'equal' = (() => { try { return localStorage.getItem('jr2.perf') === 'equal' ? 'equal' : 'team'; } catch { return 'team'; } })();
+  // Car performance (Equal performance card): team stats or equalised cars.
+  let perfMode: 'team' | 'equal' = profile.settings.perf;
   /** A build with this session's performance mode on it (every car, the player's too). */
   const withPerf = (b: CarBuild): CarBuild => {
     const { equalise: _old, ...rest } = b;
     return perfMode === 'equal' ? { ...rest, equalise: ctx.race.equalise } : rest;
   };
   // Car damage setting (Car damage card), remembered in this browser. Off by default (Justin).
-  let damageMode: DamageMode = (() => { try { const v = localStorage.getItem('jr2.damage'); return v === 'visual' || v === 'realistic' ? v : 'off'; } catch { return 'off'; } })();
+  let damageMode: DamageMode = profile.settings.damage;
   const settings = (): SessionSettings => ({ damage: damageMode });
   // AI driver skill: seeded once per page load, so the same drivers carry through a whole race weekend.
   const driverSeed = crypto.getRandomValues(new Uint32Array(1))[0]!;
@@ -99,9 +112,18 @@ async function main(): Promise<void> {
   const startBuild = curr0Build();
   /** PBs are kept per track + spec + performance mode: Equal-mode laps don't compare with team-stats laps. */
   const pbSpec = (spec: string): string => (perfMode === 'equal' ? `${spec}-equal` : spec);
-  const session = new Session(browserStore(), json.id, pbSpec(startBuild.spec), startBuild.team);
+  /** This profile's PB store: its own key prefix (the first profile keeps the pre-profile keys). */
+  const pbStore = (p: Profile) => {
+    const pre = pbPrefix(p);
+    return { getItem: (k: string) => kv.getItem(pre + k), setItem: (k: string, v: string) => kv.setItem(pre + k, v), keys: () => kv.keys().filter((k) => (pre ? k.startsWith(pre) : !k.startsWith('p.'))).map((k) => k.slice(pre.length)) };
+  };
+  let session = new Session(pbStore(profile), json.id, pbSpec(startBuild.spec), startBuild.team);
+  /** The player's car from the profile: preferred team and spec on the default car. */
   function curr0Build(): CarBuild {
-    return physics.defaultCar;
+    const d = physics.defaultCar;
+    const team = profile.team && ctx.catalog.teams.some((t) => t.id === profile.team) ? profile.team : d.team;
+    const spec = profile.settings.spec && ctx.catalog.specs.specs[profile.settings.spec] ? profile.settings.spec : d.spec;
+    return { ...d, team, spec };
   }
   /** Swap the player's car build and put it back in the pits (spec/team change). A race restarts. */
   const rebuildCar = (b: CarBuild): void => {
@@ -208,12 +230,14 @@ async function main(): Promise<void> {
       if (b.spec === spec) return;
       rebuildCar({ ...b, spec });
       session.changeSpec(pbSpec(spec)); // spec change resets times
+      persist((s) => ({ ...s, spec }));
     },
     onTeam: (team) => {
       const b = curr.cars[0]!.build;
       if (b.team === team) return;
       rebuildCar({ ...b, team });
       session.changeTeam(team); // team change keeps times so teams can be compared
+      profile = profiles.save({ ...profile, team });
     },
     onSetup: (slot, value) => {
       if (!stoppedInBox()) return; // setup changes only while stopped in a pit box
@@ -225,14 +249,14 @@ async function main(): Promise<void> {
     onAi: (count, preset) => {
       aiCount = count;
       aiPreset = preset;
-      try { localStorage.setItem('jr2.ai', JSON.stringify({ count, preset })); } catch { /* private window: not remembered */ }
+      persist((s) => ({ ...s, ai: { count, preset } }));
       if (raceSetup && !raceSetup.order) startRace(raceSetup.laps, raceSetup.grid);
       else if (!curr.quali && !raceSetup) startPractice(weekend?.stage === 'practice'); // mid-weekend: applies to the next session
     },
     onRace: (laps, grid) => startRace(laps, grid),
     onDamage: (mode) => {
       damageMode = mode;
-      try { localStorage.setItem('jr2.damage', mode); } catch { /* not remembered */ }
+      persist((s) => ({ ...s, damage: mode }));
       hud.setDamage(mode);
       if (raceSetup && !raceSetup.order) startRace(raceSetup.laps, raceSetup.grid);
       else if (!curr.quali && !raceSetup) startPractice(weekend?.stage === 'practice');
@@ -240,7 +264,7 @@ async function main(): Promise<void> {
     onPerf: (mode) => {
       perfMode = mode;
       session.changeSpec(pbSpec(curr.cars[0]!.build.spec)); // a different set of PBs
-      try { localStorage.setItem('jr2.perf', mode); } catch { /* not remembered */ }
+      persist((s) => ({ ...s, perf: mode }));
       hud.setPerf(mode);
       if (raceSetup && !raceSetup.order) startRace(raceSetup.laps, raceSetup.grid);
       else if (!curr.quali && !raceSetup) startPractice(weekend?.stage === 'practice');
@@ -263,21 +287,95 @@ async function main(): Promise<void> {
     onStartRace: () => startWeekendRace(),
   }, () => ({ height: renderer.trackHeight, pxPerMeter: json.pxPerMeter }), () => ctx.race);
 
-  // Car labels: remembered per browser; position by default.
-  let labelMode: LabelMode = 'position';
-  try { const s = localStorage.getItem('jr2.labels') as LabelMode | null; if (s && LABEL_MODES.includes(s)) labelMode = s; } catch { /* private window */ }
+  // Car labels: from the profile; position by default.
+  let labelMode: LabelMode = profile.settings.labels;
   function setLabels(m: LabelMode): void {
     labelMode = m;
     hud.setLabels(m);
-    try { localStorage.setItem('jr2.labels', m); } catch { /* private window: not remembered */ }
+    if (profile.settings.labels !== m) persist((s) => ({ ...s, labels: m }));
   }
   hud.setLabels(labelMode);
   hud.setPerf(perfMode);
   hud.setDamage(damageMode);
 
+  // ---- Profile -> game (Main menu + profiles card) ----
+  /** The pause menu is open: no sim ticks. (The main menu leaves the world running behind it.) */
+  let paused = false;
+  /** Make the game match a profile: identity, keys, sound, effects, labels and session choices. */
+  const applyProfile = (p: Profile): void => {
+    const switched = p.id !== profile.id;
+    const carChanged = p.team !== profile.team || p.settings.spec !== profile.settings.spec;
+    profile = p;
+    setPlayerIdentity(nameCode(p.name), p.name);
+    keyboard.setBindings(p.keybinds);
+    for (const [bus, v] of Object.entries(p.settings.volumes)) if (bus in audio.volumes) audio.setVolume(bus as Parameters<typeof audio.setVolume>[0], v);
+    if (vfx.quality !== p.settings.vfx) vfx.setQuality(p.settings.vfx);
+    if (labelMode !== p.settings.labels) setLabels(p.settings.labels);
+    aiCount = p.settings.ai.count;
+    aiPreset = aiCfg.presets[p.settings.ai.preset] ? p.settings.ai.preset : aiCfg.defaultPreset;
+    perfMode = p.settings.perf;
+    damageMode = p.settings.damage;
+    hud.setAi(aiCount, aiPreset);
+    hud.setPerf(perfMode);
+    hud.setDamage(damageMode);
+    const b = curr0Build();
+    if (switched) session = new Session(pbStore(p), json.id, pbSpec(b.spec), b.team);
+    // A different car (team/spec) shows at once outside a session; a session keeps its cars until restarted.
+    if ((switched || carChanged) && !curr.race && !curr.quali) {
+      session.changeSpec(pbSpec(b.spec));
+      session.changeTeam(b.team);
+      rebuildCar(b);
+    }
+  };
+  /** Local PBs on this track for the active profile (Records tab). */
+  const records = (): RecordRow[] => {
+    const store = pbStore(profile), prefix = `jsr.pb.${json.id}.`;
+    const out: RecordRow[] = [];
+    for (const k of store.keys()) {
+      if (!k.startsWith(prefix)) continue;
+      const [spec = '', team = ''] = k.slice(prefix.length).split('.');
+      try {
+        const lap = (JSON.parse(store.getItem(k) ?? 'null') as { lap?: number } | null)?.lap;
+        if (lap) out.push({ spec: spec.replace(/-equal$/, ''), equal: spec.endsWith('-equal'), team, lap });
+      } catch { /* skip a bad entry */ }
+    }
+    return out;
+  };
+  const menu = new MainMenu({
+    catalog: ctx.catalog,
+    aiPresets: Object.keys(aiCfg.presets),
+    defaultPreset: aiCfg.defaultPreset,
+    trackName: json.name,
+    profiles,
+    volumes: () => (['master', 'engine', 'tyres', 'impacts', 'ui'] as const).filter((b) => b in audio.volumes).map((bus) => ({ bus, value: audio.volumes[bus] })),
+    records,
+    onProfile: (p) => applyProfile(p),
+    onStart: (kind) => {
+      const s = profile.settings;
+      if (kind === 'practice') startPractice();
+      else if (kind === 'race') startRace(s.race.laps, s.race.grid);
+      else startWeekend(s.race.laps);
+    },
+    onResume: () => {},
+    onRestart: () => {
+      if (curr.quali) startQuali();
+      else if (raceSetup) startRace(raceSetup.laps, raceSetup.grid, raceSetup.order);
+      else startPractice(weekend?.stage === 'practice');
+    },
+    onQuit: () => startPractice(),
+    onOpenChange: (open, mode) => {
+      keyboard.suspended = open;
+      keyboard.release();
+      paused = open && mode === 'pause'; // the main menu leaves the world running behind it
+    },
+  });
+
   let prev: WorldState = createWorld(ctx, drivers.length);
   let curr: WorldState = prev;
   startPractice();
+  applyProfile(profile);
+  // The front door: the main menu on load, unless a dev URL param skips straight in.
+  if (!['track', 'ai', 'edit', 'garage', 'level', 'cars'].some((k) => params.has(k))) menu.open('main');
   let debug = false;
   let fps = TICK_HZ; // display smoothing starts at the expected rate, not 0
 
@@ -285,14 +383,18 @@ async function main(): Promise<void> {
     // In a race, 0-9 (grid slots) are off: they'd teleport you round the lap. (R is reset to track now:
     // held, in the sim; back to the pits is a menu button.)
     if ((curr.race || curr.quali) && a.type === 'gridSlot') return;
-    if (a.type === 'toggleDebug') {
+    if (a.type === 'pause') {
+      if (!menu.isOpen) menu.open('pause');
+    } else if (a.type === 'toggleDebug') {
       debug = !debug;
     } else if (a.type === 'mute') {
       console.info(`[audio] ${audio.toggleMute() ? 'muted' : 'unmuted'}`);
     } else if (a.type === 'cycleLabels') {
       setLabels(nextLabelMode(labelMode));
     } else if (a.type === 'cycleVfx') {
-      console.info(`[vfx] quality: ${vfx.cycleQuality()}`);
+      const q = vfx.cycleQuality();
+      persist((s) => ({ ...s, vfx: q }));
+      console.info(`[vfx] quality: ${q}`);
     }
     else if (a.type === 'gridSlot') {
       // Practice: 1-9, 0 = slot 10.
@@ -375,6 +477,7 @@ async function main(): Promise<void> {
         benchFrame: (n = 300) => {
           const t0 = performance.now();
           for (let k = 0; k < n; k++) {
+            if (paused) { drawFrame(1, 1 / 60); continue; } // a real frame: paused = no sim
             const inputs = drivers.map((d) => d.read(curr.tick));
             prev = curr;
             curr = step(curr, inputs, ctx);
@@ -423,7 +526,7 @@ async function main(): Promise<void> {
     drawCar: (c, car, index, lengthPx, devicePerTrackPx) => {
       const team = ctx.catalog.teams.find((t) => t.id === car.build.team);
       if (!team) return false;
-      liveries.draw(c, car, { primary: team.colors.primary, helmet: index === 0 ? liveryConfig.playerHelmet : team.colors.helmet }, lengthPx, devicePerTrackPx, physics);
+      liveries.draw(c, car, { primary: team.colors.primary, helmet: index === 0 ? profile.helmet : team.colors.helmet }, lengthPx, devicePerTrackPx, physics);
       return true;
     },
   };
@@ -441,6 +544,7 @@ async function main(): Promise<void> {
 
   const loopHooks = {
     tick() {
+      if (paused) return; // pause menu: the world stands still (rendering carries on)
       const q = curr.quali;
       const n = q && q.phase !== 'results' && q.cars[0]?.done ? Math.max(1, Math.round(ctx.race.qualiFastForward)) : 1;
       for (let k = 0; k < n; k++) loopHooks.simTick();
@@ -528,7 +632,7 @@ async function main(): Promise<void> {
           if (!editor) {
             const codes = curr.cars.map((car, i) => {
               const team = ctx.catalog.teams.find((t) => t.id === car.build.team);
-              return { code: i === 0 ? 'YOU' : teamCode(team?.name ?? '???'), swatch: team?.colors.primary ?? '#888' };
+              return { code: i === 0 ? player.code : teamCode(team?.name ?? '???'), swatch: team?.colors.primary ?? '#888' };
             });
             drawCarLabels(c, prev, curr, alpha, labelMode, sessionOrder(curr, ctx.catalog), codes, json.pxPerMeter, lw, physics.car.lengthM * json.pxPerMeter * 0.55 + 3 * lw);
           }

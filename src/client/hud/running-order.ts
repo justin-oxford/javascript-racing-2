@@ -5,7 +5,7 @@ export interface OrderEntry {
   /** 1-based race position. */
   pos: number;
   car: number;
-  /** Three-letter code ("YOU" for the player). */
+  /** Three-letter code (the player's profile code for car 0). */
   code: string;
   name: string;
   swatch: string;
@@ -13,6 +13,13 @@ export interface OrderEntry {
   gap: string;
   state: '' | 'pit' | 'finished';
   me: boolean;
+}
+
+/** How the local player shows in the running order, labels and results: their profile's code and name. */
+export const player = { code: 'YOU', name: 'You' };
+export function setPlayerIdentity(code: string, name: string): void {
+  player.code = code;
+  player.name = name;
 }
 
 export const gapText = (g: Gap | undefined): string => (!g ? '' : g.laps ? `+${g.laps} LAP${g.laps > 1 ? 'S' : ''}` : `+${g.seconds.toFixed(3)}`);
@@ -30,8 +37,8 @@ export function runningOrder(world: WorldState, catalog: CarCatalog): OrderEntry
     return {
       pos: k + 1,
       car,
-      code: car === 0 ? 'YOU' : teamCode(team?.name ?? '???'),
-      name: car === 0 ? 'You' : (team?.name ?? '?'),
+      code: car === 0 ? player.code : teamCode(team?.name ?? '???'),
+      name: car === 0 ? player.name : (team?.name ?? '?'),
       swatch: team?.colors.primary ?? '#888',
       gap: !started ? '' : k === 0 ? 'LEADER' : gapText(raceGap(race, car, race.order[0]!)),
       state: rc.finished ? 'finished' : world.cars[car]!.inPitLane ? 'pit' : '',
@@ -81,8 +88,8 @@ export function qualiEntries(world: WorldState, catalog: CarCatalog): OrderEntry
     return {
       pos: k + 1,
       car,
-      code: car === 0 ? 'YOU' : teamCode(team?.name ?? '???'),
-      name: car === 0 ? 'You' : (team?.name ?? '?'),
+      code: car === 0 ? player.code : teamCode(team?.name ?? '???'),
+      name: car === 0 ? player.name : (team?.name ?? '?'),
       swatch: team?.colors.primary ?? '#888',
       gap: !c.bestLap ? 'NO TIME' : k === 0 ? lapText(c.bestLap) : `+${(c.bestLap - pole).toFixed(3)}`,
       state: c.done ? 'finished' : world.cars[car]!.inPitLane ? 'pit' : '',

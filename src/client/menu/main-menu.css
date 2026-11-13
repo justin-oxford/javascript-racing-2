@@ -1,0 +1,56 @@
+/* Main menu + pause menu: a full-window overlay over the (idle) track, v0.16 palette. Fixed, readable
+   sizes (the HUD scales with the canvas; a menu shouldn't shrink to nothing on a small window). */
+.jr-menu { display: none; position: fixed; inset: 0; z-index: 50; background: rgba(12, 12, 14, 0.72); color: #f1faee;
+  font-family: "Formula1 Regular", system-ui, sans-serif; font-size: 14px; align-items: center; justify-content: center; padding: 16px; }
+.jr-menu.open { display: flex; }
+.jr-menu b, .jr-menu h2, .jr-menu h3, .jr-menu .brand, .jr-menu button { font-family: "Formula1 Bold", system-ui, sans-serif; font-weight: normal; }
+.jr-menu .panel { display: flex; width: min(980px, 100%); max-height: calc(100vh - 32px); background: #252525; border-radius: 8px; overflow: hidden; box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5); }
+.jr-menu .side { flex: none; width: 200px; background: #1b1b1b; padding: 18px 14px; display: flex; flex-direction: column; gap: 6px; }
+.jr-menu .brand { font-size: 20px; line-height: 1.05; letter-spacing: 0.04em; color: #e63946; margin-bottom: 10px; }
+.jr-menu .who { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.jr-menu .who b { display: block; font-size: 14px; }
+.jr-menu .who small { opacity: 0.6; letter-spacing: 0.1em; }
+.jr-menu .helmet { width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.7); flex: none; }
+.jr-menu .track { margin-top: auto; opacity: 0.5; font-size: 12px; }
+.jr-menu button { color: inherit; font-size: 13px; cursor: pointer; border: none; border-radius: 4px; padding: 8px 12px; background: #484a47; }
+.jr-menu button:hover:not(:disabled) { background: #5a5c58; }
+.jr-menu button:disabled { opacity: 0.35; cursor: default; }
+.jr-menu .tab { text-align: left; background: transparent; font-size: 15px; padding: 9px 10px; }
+.jr-menu .tab.on { background: #e63946; }
+.jr-menu .body { flex: 1; padding: 20px 24px; overflow-y: auto; }
+.jr-menu h2 { margin: 0 0 14px; font-size: 22px; }
+.jr-menu h3 { margin: 20px 0 10px; font-size: 16px; }
+.jr-menu .big { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+.jr-menu .big button { font-size: 16px; padding: 14px 20px; }
+.jr-menu .go { background: #e63946; }
+.jr-menu .go:hover:not(:disabled) { background: #f04a57; }
+.jr-menu .rows { display: grid; grid-template-columns: 150px 1fr; gap: 10px 14px; align-items: center; margin: 14px 0; }
+.jr-menu .rows > label { opacity: 0.8; }
+.jr-menu .choices, .jr-menu .inline, .jr-menu .keys { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.jr-menu .choices button.on { background: #e63946; }
+.jr-menu .note { opacity: 0.65; font-size: 12px; line-height: 1.5; margin: 6px 0; }
+.jr-menu select, .jr-menu input[type="text"], .jr-menu input:not([type]) { background: #1b1b1b; color: inherit; border: 1px solid #484a47; border-radius: 4px; padding: 7px 8px; font: inherit; min-width: 180px; }
+.jr-menu input[type="color"] { width: 48px; height: 32px; border: none; background: none; padding: 0; cursor: pointer; }
+.jr-menu input[type="range"] { width: min(260px, 100%); accent-color: #e63946; }
+.jr-menu .code { font-family: "Formula1 Bold", system-ui, sans-serif; letter-spacing: 0.15em; background: #1b1b1b; padding: 6px 10px; border-radius: 4px; }
+.jr-menu .file { position: relative; overflow: hidden; display: inline-block; background: #484a47; border-radius: 4px; padding: 8px 12px; font-family: "Formula1 Bold", system-ui, sans-serif; font-size: 13px; cursor: pointer; }
+.jr-menu .file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.jr-menu .binds { grid-template-columns: 190px 1fr; gap: 6px 14px; }
+.jr-menu .key { display: inline-flex; align-items: center; gap: 4px; background: #1b1b1b; border: 1px solid #484a47; border-radius: 4px; padding: 3px 4px 3px 8px; font-family: "Formula1 Bold", system-ui, sans-serif; font-size: 12px; }
+.jr-menu .key.clash { border-color: #e63946; color: #ff8a93; }
+.jr-menu .key button { background: transparent; padding: 0 4px; font-size: 13px; opacity: 0.6; }
+.jr-menu .keys .add { padding: 3px 9px; }
+.jr-menu .keys .add.wait { background: #e63946; }
+.jr-menu .warn { color: #ff8a93; font-size: 12px; }
+.jr-menu table.rec { border-collapse: collapse; width: 100%; max-width: 560px; }
+.jr-menu table.rec th, .jr-menu table.rec td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #333; }
+.jr-menu table.rec th { opacity: 0.6; font-weight: normal; }
+@media (max-width: 640px) {
+  .jr-menu { padding: 0; }
+  .jr-menu .panel { flex-direction: column; max-height: 100vh; border-radius: 0; }
+  .jr-menu .side { width: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px 16px; }
+  .jr-menu .brand { display: none; }
+  .jr-menu .track { display: none; }
+  .jr-menu .body { padding: 16px; }
+  .jr-menu .rows, .jr-menu .binds { grid-template-columns: 1fr; gap: 6px; }
+}
