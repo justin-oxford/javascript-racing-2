@@ -17,11 +17,11 @@ export interface CarInput {
   /** -1 (left) .. 1 (right) */
   steer: number;
   /** Reset to track (POLISH card): held ~1 s puts the car back on the racing line. Absent = not pressed. */
-  reset?: boolean;
+  reset?: boolean | undefined;
   /** Engine mode the driver wants (absent = keep the current one). */
-  engineMode?: EngineMode;
+  engineMode?: EngineMode | undefined;
   /** Battery deploy held (push-to-pass). */
-  deploy?: boolean;
+  deploy?: boolean | undefined;
 }
 
 /**
