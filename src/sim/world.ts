@@ -488,7 +488,9 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
   // Practice (ownBox -1): any box. Race: only the car's own box; someone else's does nothing.
   const service = car.inPitBox && kph < cfg.fuel.pitServiceMaxKph && (ownBox < 0 || car.pitBox === ownBox);
   // Tyre pressure (setup), the compound, and race-length scaling.
-  const wearMul = setupEffects(car.build.setup, ctx.catalog).wear * compoundWear(car.compound, ctx.strategy) * scale;
+  // ...and dirty air (Race noise card: following closely through corners costs tyre, not just downforce).
+  const dirtyWear = 1 + (ctx.slipstream.dirtyAir.wearMul ?? 0) * (car.dirtyAir / Math.max(1e-6, ctx.slipstream.dirtyAir.maxDownforceLoss));
+  const wearMul = setupEffects(car.build.setup, ctx.catalog).wear * compoundWear(car.compound, ctx.strategy) * scale * dirtyWear;
 
   const wheels = car.wheels.map((wheel, w) => {
     let dw = cfg.wear.cornerPerSec * v4 * (Math.abs(forces[w]!.lat) / quarterWeight); // by actual lateral load

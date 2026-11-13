@@ -5,7 +5,8 @@ import type { CarState } from './types';
 /** config/slipstream.json (the sim's part; wind/wake are client feedback). */
 export interface SlipstreamConfig {
   tow: { maxDragReduction: number; minRangeM: number; maxRangeM: number; wakeWidthCars: number; wakeWiden: number; maxAngleDeg: number };
-  dirtyAir: { maxDownforceLoss: number; dirtyRangeM: number; cornerG: number };
+  /** wearMul (Race noise card): tyre wear x (1 + wearMul x dirtyAir / maxDownforceLoss); absent = 0. */
+  dirtyAir: { maxDownforceLoss: number; dirtyRangeM: number; cornerG: number; wearMul?: number };
   /** AI: how keenly each difficulty preset (by name; "default" otherwise) tucks into a tow, 0..1. */
   aiTowEagerness: Record<string, number>;
 }

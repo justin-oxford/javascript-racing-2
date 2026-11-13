@@ -33,7 +33,8 @@
     "racecraft-probe": "tsx tools/racecraft-probe.ts",
     "pass-probe": "tsx tools/pass-probe.ts",
     "strategy-probe": "tsx tools/strategy-probe.ts",
-    "optimize-exit-line": "tsx tools/optimize-exit-line.ts"
+    "optimize-exit-line": "tsx tools/optimize-exit-line.ts",
+    "noise-probe": "tsx tools/noise-probe.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

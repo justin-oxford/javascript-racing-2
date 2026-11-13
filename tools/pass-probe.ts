@@ -50,14 +50,24 @@ function duel(attacker: DriverStats, defender: DriverStats, gapM: number, v: num
       }
     }
     const gap = (prog(0) - prog(1)) * 2;
-    if (process.env.LAPS) for (const e of w.events) if (e.type === 'lap') console.log('lap car', e.car, e.time.toFixed(2), 'deploying', w.cars.map((c) => c.ers.deploying).join('/'), 'batt', w.cars.map((c) => c.ers.batteryKJ.toFixed(0)).join('/'));
+    if (process.env.LAPS) for (const e of w.events) if (e.type === 'lap') console.log('lap car', e.car, e.time.toFixed(2), 'wear', w.cars[e.car]!.wheels.map((x) => Math.round(x.wear * 1000) / 10).join('/'), 'deploying', w.cars.map((c) => c.ers.deploying).join('/'), 'batt', w.cars.map((c) => c.ers.batteryKJ.toFixed(0)).join('/'));
     if (process.env.TRACE && (t % 30 === 0 || (process.env.TRACE === '2' && ai[1]!.state.passTarget >= 0 && t % 5 === 0)) && t < 60 * 45) console.log((t / 60).toFixed(1), 'gap', gap, 'v', w.cars.map((c) => Math.hypot(c.vx, c.vy).toFixed(1)).join('/'), 'craft', ai[1]!.state.craft, 'off', ai[1]!.state.offset.toFixed(2), 'tgt', ai[1]!.state.passTarget, 'near', ai[1]!.state.near, 'brk', ai[1]!.state.lastAllowed.toFixed(1));
     if (t > 120) { sumGap += gap; nGap++; ahead = gap < -3; if (ahead && firstPassSec < 0) firstPassSec = t / 60; }
   }
+  if (process.env.WEAR) console.log(`wear after ${laps} laps: defender ${(100 - w.cars[0]!.wheels.reduce((x, h) => x + h.wear, 0) * 25).toFixed(2)}% used, attacker (following) ${(100 - w.cars[1]!.wheels.reduce((x, h) => x + h.wear, 0) * 25).toFixed(2)}% used; laps ${w.cars[0]!.timing.laps}/${w.cars[1]!.timing.laps}`);
   return { ahead, firstPassSec, contacts, avgGap: sumGap / Math.max(1, nGap), tries: ai[1]!.state.passTries, made: ai[1]!.state.passesMade, conceded: ai[0]!.state.concessions };
 }
 
 const avg = { pace: 50, aggression: 50, racecraft: 50, consistency: 80, tyres: 50 };
+// --care: following closely with poor vs good TYRE MANAGEMENT (same pace, near-equal cars): tyre life used.
+if (args.includes('--care')) {
+  for (const tyres of [20, 90]) {
+    process.env.WEAR = '1';
+    console.log(`follower TYRE MANAGEMENT ${tyres}:`);
+    duel({ ...avg, pace: 60, tyres }, { ...avg, pace: 60 }, 10, 30);
+  }
+  process.exit(0);
+}
 for (const [label, aggr, defAggr] of [['low aggression ', 25, 50], ['high aggression', 90, 50], ['high aggr vs a conceding defender', 90, 10]] as const) {
   const t = { ahead: 0, passed: 0, runs: 0, contacts: 0, tries: 0, made: 0, conceded: 0, gap: 0 };
   for (const gap of [8, 12, 16]) for (const v of [30, 40]) {

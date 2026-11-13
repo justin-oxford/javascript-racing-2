@@ -52,11 +52,43 @@ export interface AiConfig {
   start?: { reactionMinSec: number; reactionMaxSec: number };
   /** AI racecraft card: three lines picked by race situation (racecraft.ts). */
   racecraft?: RacecraftConfig;
+  /** Race noise card: mistake kinds and what raises their chance (absent: the old late-brake / wide 50:50). */
+  mistakes?: MistakeConfig;
+  /** Race noise card: ATTACK / DEFEND drive pushMargin closer to the limit (x (1.5 - tyre care)). */
+  fight?: { pushMargin: number; dirtyBackOff?: number };
   /** AI overtaking card: pulling out of a tow, the overlap rule, conceding, blue flags (racecraft.ts). */
   overtaking?: OvertakingConfig;
 }
 
 const G = 9.81;
+
+/** config/ai.json "mistakes" (Race noise card). */
+export interface MistakeConfig {
+  /** Relative weights of each kind. */
+  kinds: { lateBrake: number; wide: number; wheelspin: number; spin: number };
+  durationSec: number;
+  /** Late brake: reads the corner this far on (brakes for it late) and plans its braking x lateBrakeMul. */
+  lateBrakeAheadM: number;
+  lateBrakeMul: number;
+  /** How long a mistake waits for its moment (a braking zone, a corner, a slow exit) before it's forgotten. */
+  armSec?: number;
+  /** Wide: this far toward the outside through the corner. */
+  wideM: number;
+  /** Wheelspin: out of a corner below wheelspinMaxMps, traction control off and full throttle. */
+  wheelspinMaxMps: number;
+  /** Spin: a steering flick of spinSteer for spinSec, mid-corner. */
+  spinSteer: number;
+  spinSec: number;
+  /** Chance x (1 + pressureMul) with a car within pressureSec behind; x (1 + attackMul) in ATTACK;
+   *  x (1 + wearMul x tyre used); x (1 + fuelMul x tank fill). */
+  pressureMul: number;
+  pressureSec: number;
+  attackMul: number;
+  wearMul: number;
+  fuelMul: number;
+}
+/** No "mistakes" config: the behaviour from before the Race noise card. */
+const MISTAKES_OLD: MistakeConfig = { kinds: { lateBrake: 1, wide: 1, wheelspin: 0, spin: 0 }, durationSec: 2, lateBrakeAheadM: 12, lateBrakeMul: 1.35, wideM: 1.5, wheelspinMaxMps: 0, spinSteer: 0, spinSec: 0, pressureMul: 0, pressureSec: 0, attackMul: 0, wearMul: 0, fuelMul: 0 };
 /** No "overtaking" config: the behaviour from before the AI overtaking card (pull out 3 s before braking, the car
  *  ahead always has the right of way, no closer following, no conceding, no blue flags). */
 const OVERTAKING_OFF: OvertakingConfig = { overlapM: -1, pullOutSec: 3, pullOutAggrSec: 0, attackHeadwaySec: 0.35, closeUntilBrakeSec: Infinity, attackFollowBrake: 0.8, commitM: 0, concedeBelow: 0, blueLaps: Infinity, blueBehindM: 0, blueLift: 0 };
@@ -332,8 +364,12 @@ export interface AiState {
   lineTarget: LineId;
   /** Current sideways offset from the line, metres (+ = right). */
   offset: number;
-  /** A mistake in progress: kind and ticks left. */
-  mistake: { kind: 'lateBrake' | 'wide'; ticks: number } | undefined;
+  /** A mistake in progress: kind, ticks left, and (spin) which way the steering flick goes. */
+  mistake: { kind: 'lateBrake' | 'wide' | 'wheelspin' | 'spin'; ticks: number; dir?: number; active?: boolean; armed?: number } | undefined;
+  /** The kind of the latest mistake (for the probes). */
+  lastMistake: string;
+  /** Seconds to the next braking point last tick (when a late-brake mistake strikes). */
+  brakeInSec: number;
   /** Seeded PRNG state (mulberry32). */
   rng: number;
   /** Pits: wants to stop next time round; has been serviced this stop; fuel use per lap (measured). */
@@ -357,7 +393,7 @@ export interface AiState {
 
 export function newAiState(seed: number): AiState {
   return {
-    mode: 'race', near: -1, lastErr: 0, stuckTicks: 0, recoverTicks: 0, offset: 0, mistake: undefined, rng: seed >>> 0 || 1,
+    mode: 'race', near: -1, brakeInSec: Infinity, lastMistake: '', lastErr: 0, stuckTicks: 0, recoverTicks: 0, offset: 0, mistake: undefined, rng: seed >>> 0 || 1,
     troubleTicks: 0, resets: 0, saving: false, modeTicks: { save: 0, standard: 0, push: 0 }, deployTicks: 0,
     craft: 'manage', craftHold: 0, craftEval: 0, lineW: [1, 0, 0], craftTicks: { manage: 0, attack: 0, defend: 0, nurse: 0 }, lineChanges: 0, lineTarget: 'neutral', conceding: false, passTarget: -1, passSide: 0, passTries: 0, passesMade: 0, concessions: 0, blueYield: false, blueYields: 0,
     pitWanted: false, serviced: false, fuelAtLap: -1, fuelPerLap: 0, stuckEvents: 0, mistakes: 0, pitStops: 0, attack: false, launchTick: -1, trust: 1, lastAllowed: 0,
@@ -579,14 +615,45 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     return { input: { throttle: 0, brake: 1, steer: 0 }, state: st };
   }
 
-  // Mistakes: occasionally a late brake or a wide line, for ~2 s (never in the pits).
+  // MISTAKES (Race noise card): now and then a late brake, a wide line, wheelspin out of a slow corner or
+  // (rarely) a half-spin, for a moment; the car then does what the physics says (never in the pits). More
+  // likely with a car close behind, attacking, on worn tyres or a heavy tank; CONSISTENCY and the difficulty
+  // preset set the base rate (mistakesPerMin).
+  const mk = cfg.mistakes ?? MISTAKES_OLD;
   [r, st.rng] = rand(st.rng);
-  if (!pit && !st.mistake && r < (preset.mistakesPerMin / 60) * TICK_DT) {
-    [r, st.rng] = rand(st.rng);
-    st.mistake = { kind: r < 0.5 ? 'lateBrake' : 'wide', ticks: Math.round(2 / TICK_DT) };
-    st.mistakes++;
+  if (!pit && !st.mistake) {
+    const fx = Math.sin(car.heading), fy = -Math.cos(car.heading), v = Math.max(5, Math.hypot(car.vx, car.vy));
+    const pressed = mk.pressureMul > 0 && world.cars.some((c, j) => {
+      if (j === i) return false;
+      const lon = (c.x - car.x) * fx + (c.y - car.y) * fy, lat = -(c.x - car.x) * fy + (c.y - car.y) * fx;
+      return lon < 0 && -lon < mk.pressureSec * v && Math.abs(lat) < 4;
+    });
+    const worn = 1 - car.wheels.reduce((a, w) => a + w.wear, 0) / 4;
+    const rate = (preset.mistakesPerMin / 60) * (pressed ? 1 + mk.pressureMul : 1) * (st.craft === 'attack' ? 1 + mk.attackMul : 1)
+      * (1 + mk.wearMul * worn) * (1 + mk.fuelMul * car.fuelKg / Math.max(1, phys.fuel.tankKg));
+    if (r < rate * TICK_DT) {
+      [r, st.rng] = rand(st.rng);
+      const k = mk.kinds, sum = k.lateBrake + k.wide + k.wheelspin + k.spin || 1;
+      const x = r * sum;
+      const kind = x < k.lateBrake ? 'lateBrake' : x < k.lateBrake + k.wide ? 'wide' : x < k.lateBrake + k.wide + k.wheelspin ? 'wheelspin' : 'spin';
+      [r, st.rng] = rand(st.rng);
+      // Armed until its moment comes (up to armSec): a late brake at the next braking zone, a wide line or a
+      // half-spin at the next corner, wheelspin on the next slow exit. Fired at random it mostly landed on a
+      // straight and did nothing.
+      st.mistake = { kind, ticks: Math.round(mk.durationSec / TICK_DT), dir: r < 0.5 ? -1 : 1, active: !cfg.mistakes, armed: Math.round((mk.armSec ?? 0) / TICK_DT) };
+      st.mistakes++;
+      st.lastMistake = kind;
+    }
   }
-  if (st.mistake && --st.mistake.ticks <= 0) st.mistake = undefined;
+  if (st.mistake && !st.mistake.active) {
+    const m = st.mistake, cornerAhead = [3, 6, 10].some((q) => Math.abs(path.k[idx(best + q)]!) > 0.02);
+    const go = m.kind === 'lateBrake' ? st.brakeInSec < 2 : m.kind === 'wheelspin' ? speed < mk.wheelspinMaxMps && car.controls.throttle > 0.5 && Math.abs(path.k[best]!) > 0.01 : cornerAhead;
+    if (go) st.mistake = { ...m, active: true };
+    else if ((m.armed ?? 0) <= 1) st.mistake = undefined;
+    else st.mistake = { ...m, armed: (m.armed ?? 0) - 1 };
+  } else if (st.mistake && --st.mistake.ticks <= 0) st.mistake = undefined;
+  /** The mistake acting this tick (armed ones wait for their moment). */
+  const mistakeNow = st.mistake?.active ? st.mistake.kind : undefined;
 
   // 3. SPEED: what this car can corner and brake at, from its own config and stats.
   const stats = buildStats(car.build, ctx.catalog);
@@ -631,7 +698,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // Following, it brakes earlier (followBrake, safety); attacking, less so (attackFollowBrake): braking that much
   // earlier gave away every metre it gained in the corners (AI overtaking card).
   const ovb = cfg.overtaking ?? OVERTAKING_OFF;
-  const late = (st.mistake?.kind === 'lateBrake' ? 1.35 : 1) * (following ? (cfg.racecraft?.enabled && st.craft === 'attack' && !pit ? ovb.attackFollowBrake : 0.8) : 1);
+  const late = (mistakeNow === 'lateBrake' ? mk.lateBrakeMul : 1) * (following ? (cfg.racecraft?.enabled && st.craft === 'attack' && !pit ? ovb.attackFollowBrake : 0.8) : 1);
   /** Braking it plans with at speed v: each axle gives the lesser of its brake share and its grip. */
   const bias = phys.brakes.frontBias, wf = phys.car.weightFront, brakeF = phys.brakes.maxForceN * stats.brakes;
   const brakeA = (v: number) => {
@@ -666,9 +733,16 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     const prof = { at: (q: number) => { let v = Infinity; for (const p of profs) if (p) v = Math.min(v, p[q]!); return v; } };
     // A late braker (mistake) reads the target 12 m on. (Attacking alongside no longer brakes later: on
     // lap one the whole field is alongside someone, and they all went wide into turn 1 together.)
-    const ahead = st.mistake?.kind === 'lateBrake' ? 6 : 1;
-    allowed = prof.at(idx(best + ahead)) * Math.sqrt(Math.max(0.05, tyre)) * st.trust;
+    const ahead = mistakeNow === 'lateBrake' ? Math.max(1, Math.round(mk.lateBrakeAheadM / SPACING_M)) : 1;
+    // FIGHTING (Race noise card): attacking or defending, it drives pushMargin closer to the limit (a careful
+    // tyre manager less so); the extra slip costs tyre life through the physics.
+    const push = cfg.racecraft?.enabled && (st.craft === 'attack' || st.craft === 'defend') ? 1 + (cfg.fight?.pushMargin ?? 0) * (1.5 - (preset.tyreCare ?? 0.5)) : 1;
+    // ...and in dirty air a good tyre manager backs off a little (dirtyBackOff x tyre care, full in the worst of
+    // it) rather than slide on what downforce is left.
+    const backOff = 1 - (cfg.fight?.dirtyBackOff ?? 0) * (preset.tyreCare ?? 0.5) * (car.dirtyAir / Math.max(1e-6, ctx.slipstream.dirtyAir.maxDownforceLoss));
+    allowed = prof.at(idx(best + ahead)) * Math.sqrt(Math.max(0.05, tyre)) * st.trust * push * backOff;
     for (let q = 1, look = Math.ceil((speed * 6) / SPACING_M); q <= look; q++) if (prof.at(idx(best + q)) < speed * 0.9) { brakeInSec = (q * SPACING_M) / Math.max(1, speed); brakingSoon = brakeInSec <= 3; break; }
+    st.brakeInSec = brakeInSec;
     // Coasting decel ~ aero drag (+ a little rolling resistance). Two uses, both short:
     //  - a SMALL drop ahead (a fast kink, <= coastMaxDropMps): coast down to it instead of braking at all;
     //  - a real braking zone: lift liftBeforeBrakeSec before the braking point, then brake.
@@ -714,7 +788,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // 4. TRAFFIC. Only cars it will actually reach count: close behind them, or closing fast enough to
   // hit within ~2 s. Pass on the side they're not on if there's room; otherwise follow at a gap
   // (not "their speed minus a bit", which chains slowdowns around the whole field). No passing in pits.
-  let wantOffset = !pit && st.mistake?.kind === 'wide' ? Math.sign(path.k[best]!) * -1.5 : 0;
+  let wantOffset = !pit && mistakeNow === 'wide' ? -Math.sign(path.k[best]! || path.k[idx(best + 6)]!) * mk.wideM : 0;
   // In the pit lane, keep to the FAST LANE (away from the box side) so cars parked in their boxes aren't
   // in the way; pull across into its own box only when nearly there (pitLane.boxApproachM).
   const pl = { fastLaneM: 1.5, boxApproachM: 24, laneGapM: 0.3, releaseGapM: 20, latRateMps: 5, creepMps: 1.5, ...cfg.pitLane };
@@ -766,7 +840,13 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   /** Their speed along the path (to yield to: drop just under it, so the pair actually separates). */
   let speedL = 0, speedR = 0;
   // (Not in the pit lane: that's single file, below; cars parked in their boxes beside it aren't "alongside".)
-  if (!pit) others.forEach((o, oi) => {
+  // (Past the end of the pit lane, rejoining: the cars on the track count too, or it merged into them.)
+  const rejoining = !!pit && best > pit.laneTo;
+  // Leaving the pits gives way: a car on the track (off our path) from 20 m behind to just ahead, and we drop
+  // below its speed and slot in behind (the pit exit road runs beside the line before it joins: cars ran side
+  // by side into the merge and ground to a halt together).
+  if (rejoining) for (const o of others) if (o && Math.abs(o.side) > 1.5 && o.ahead > -20 && o.ahead < 4) allowed = Math.min(allowed, Math.max(0, o.along - 3));
+  if (!pit || rejoining) others.forEach((o, oi) => {
     if (!o || Math.abs(o.ahead) >= phys.car.lengthM + 1) return;
     // A car lapping us always has it (blue flags).
     // The corner both cars judge it by: the next one from the rear car of the two (from each car's own spot,
@@ -835,7 +915,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
       st.passTarget = -1;
     } else wantOffset = st.passSide * preset.overtakeOffsetM;
   }
-  for (const [oi, o] of (pit ? [] : others).entries()) {
+  for (const [oi, o] of (pit && !rejoining ? [] : others).entries()) {
     if (!o) continue;
     const { ahead, side, along: otherFwd } = o;
     const committed = st.passTarget === oi;
@@ -877,7 +957,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // Room for an offset lane over the road AHEAD (the next ~2 s, at least 40 m), not just here: a car
   // carrying a lane offset into a hairpin runs off the outside. (Half a car width + a little margin.)
   let maxR = Math.max(0, path.right[best]! - 1.5), maxL = Math.max(0, path.left[best]! - 1.5);
-  for (let q = 1, look = Math.ceil(Math.max(40, speed * 2) / SPACING_M); q <= look; q++) {
+  // (A wide mistake looks only ~0.6 s ahead: with the 2 s look the room clamp kept it on the line.)
+  for (let q = 1, look = Math.ceil((mistakeNow === 'wide' ? Math.max(12, speed * 0.6) : Math.max(40, speed * 2)) / SPACING_M); q <= look; q++) {
     const j = idx(best + q);
     maxR = Math.min(maxR, Math.max(0, path.right[j]! - 1.5));
     maxL = Math.min(maxL, Math.max(0, path.left[j]! - 1.5));
@@ -941,6 +1022,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // clean driving slowly wins it back (~1%/10 s). Nearly off: lift and brake now.
   st.trust = runningOut < 1.6 ? Math.max(0.85, st.trust - 0.0008) : Math.min(1, st.trust + 0.00002);
   const saturated = runningOut < 0.9;
+  // A half-spin mistake: a steering flick mid-corner for spinSec (the physics decides how bad it gets).
+  const spinFlick = mistakeNow === 'spin' && st.mistake!.ticks > Math.round((mk.durationSec - mk.spinSec) / TICK_DT);
+  if (spinFlick) steer += (st.mistake!.dir ?? 1) * mk.spinSteer;
   steer = clamp(steer, -1, 1);
   // Slow and pointing well off the line (after a spin or reversing out): full lock toward it.
   if (speed < 8 && Math.abs(err) > 0.8) steer = Math.sign(err);
@@ -965,7 +1049,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // Rear stepping out (body slip: the car pointing a different way from where it's going): lift, the
   // way a driver feathers the throttle out of a slow corner. Gentle slip is fine, more cuts harder.
   const slip = speed > 5 ? Math.abs(wrap(Math.atan2(car.vx, -car.vy) - car.heading)) : 0;
-  if (slip > 0.08) throttle *= clamp(1 - (slip - 0.08) / 0.12, 0, 1);
+  if (slip > 0.08 && mistakeNow !== 'wheelspin') throttle *= clamp(1 - (slip - 0.08) / 0.12, 0, 1);
   // Traction control on the tyres (card 03b: wheel.usage = slip as a fraction of the tyre's peak):
   // rears nearing their peak -> less throttle. (An ABS the same way was tried and dropped:
   // it let cars overshoot corners into walls; the brake cap below already keeps the fronts honest.)
@@ -973,7 +1057,11 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   const rearUse = Math.max(car.wheels[2].usage, car.wheels[3].usage);
   // Tyre care (driver stat): a careful driver lets the rears slip less (less wear, a touch slower out).
   const tcSlip = aids.tcSlip * (1 - 0.06 * ((preset.tyreCare ?? 0.5) - 0.5) * 2);
-  if (rearUse > tcSlip) throttle *= clamp(1 - (rearUse - tcSlip) / aids.tcRange, 0, 1);
+  // A wheelspin mistake: out of a slow corner, traction control off and full throttle.
+  // (A half-spin flick goes with a stab of throttle: that's what swaps the rear round.)
+  const spinning = (mistakeNow === 'wheelspin' && speed < mk.wheelspinMaxMps && throttle > 0.3 && !pit) || spinFlick;
+  if (spinning) throttle = 1;
+  else if (rearUse > tcSlip) throttle *= clamp(1 - (rearUse - tcSlip) / aids.tcRange, 0, 1);
   // Facing well off the line at low speed (e.g. after a spin): don't floor it.
   if (Math.abs(err) > 1 && speed < 8) throttle = Math.min(throttle, 0.4);
   // Brake like a driver who knows the car: never press harder than the front tyres can use at this

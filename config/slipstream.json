@@ -1,7 +1,7 @@
 {
   "_comment": "Slipstream (tow) + dirty air (card). TOW: a car 5-40 m behind another (minRangeM..maxRangeM), inside its wake (wakeWidthCars x car width, widening by wakeWiden at max range) and heading within maxAngleDeg of it gets up to maxDragReduction less aero drag: strongest close, fading to zero at max range, scaled by alignment. Several cars ahead: the strongest tow, never stacked. DIRTY AIR: within dirtyRangeM behind a car while cornering harder than cornerG, up to maxDownforceLoss of downforce goes (0 = off), so the tow is a straight-line weapon. aiTowEagerness: how keenly AI difficulty presets tuck in behind a car on a straight (0 = never). wind / wake: client feedback (sound when tucked in, faint VFX streaks on high).",
   "tow": { "maxDragReduction": 0.3, "minRangeM": 5, "maxRangeM": 40, "wakeWidthCars": 1.5, "wakeWiden": 0.5, "maxAngleDeg": 20 },
-  "dirtyAir": { "maxDownforceLoss": 0.1, "dirtyRangeM": 20, "cornerG": 0.6 },
+  "dirtyAir": { "maxDownforceLoss": 0.1, "dirtyRangeM": 30, "cornerG": 0.6, "wearMul": 25 },
   "aiTowEagerness": { "easy": 0.3, "medium": 0.7, "hard": 1, "default": 0.7 },
   "wind": { "gain": 0.22, "baseHz": 1100, "fullKph": 320, "towDuck": 0.6, "towHzDrop": 0.45 },
   "wake": { "minKph": 150, "perSec": 14, "lifetimeSec": 0.45, "opacity": 0.1, "lengthM": 3 }

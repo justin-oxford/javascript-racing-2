@@ -36,6 +36,10 @@ export interface PhysicsCache {
   ghostAll: boolean[];
   /** Contacts this step with their closing speeds (pre-solve), for damage. Cleared when the cars are rewritten. */
   hits: Hit[];
+  /** The tick of the state last written to the world (a step that doesn't follow it rebuilds the world). */
+  lastTick?: number;
+  /** The wall chains in metres for the current track (converted once; the world itself is rebuilt each tick). */
+  wallVerts?: { track: SimTrack; walls: readonly WallChain[]; chains: Vec2[][] };
 }
 
 export function createPhysicsCache(): PhysicsCache {
@@ -51,6 +55,12 @@ export function createPhysicsCache(): PhysicsCache {
     ghostAll: [],
     hits: [],
   };
+  attachPreSolve(cache);
+  return cache;
+}
+
+/** The contact rules (ghosting, car-to-car material, hits for damage), on the cache's current world. */
+function attachPreSolve(cache: PhysicsCache): void {
   cache.world.on('pre-solve', (contact) => {
     const fa = contact.getFixtureA(), fb = contact.getFixtureB();
     const a = fa.getBody(), b = fb.getBody();
@@ -85,7 +95,6 @@ export function createPhysicsCache(): PhysicsCache {
     if (ia >= 0) cache.hits.push({ car: ia, x, y, speed: closing, kind: kindOf(fb) });
     if (ib >= 0) cache.hits.push({ car: ib, x, y, speed: closing, kind: kindOf(fa) });
   });
-  return cache;
 }
 
 function buildWalls(cache: PhysicsCache, track: SimTrack, walls: readonly WallChain[], cfg: PhysicsConfig): void {
@@ -98,9 +107,11 @@ function buildWalls(cache: PhysicsCache, track: SimTrack, walls: readonly WallCh
   cache.walls = [];
   const ppm = track.json.pxPerMeter;
   const body = world.createBody({ type: 'static' });
-  for (const w of walls) {
-    const verts = [];
-    for (let i = 0; i < w.points.length; i += 2) verts.push(Vec2(w.points[i]! / ppm, w.points[i + 1]! / ppm));
+  // The chains in metres, converted once per track (the world is rebuilt every tick).
+  if (cache.wallVerts?.track !== track || cache.wallVerts.walls !== walls)
+    cache.wallVerts = { track, walls, chains: walls.map((w) => Array.from({ length: Math.floor(w.points.length / 2) }, (_, k) => Vec2(w.points[2 * k]! / ppm, w.points[2 * k + 1]! / ppm))) };
+  for (const [wi, w] of walls.entries()) {
+    const verts = cache.wallVerts.chains[wi]!;
     if (verts.length < 3) continue;
     const tag: WallTag = { kind: w.barrier ? 'barrier' : 'wall' };
     cache.walls.push(
@@ -181,7 +192,19 @@ export function readStateFromWorld(cache: PhysicsCache): BodyReadout[] {
  * cars from plain state, and apply live-tuned wall material.
  */
 export function prepareCache(cache: PhysicsCache, state: WorldState, track: SimTrack, walls: readonly WallChain[], cfg: PhysicsConfig, contact: ContactConfig): void {
-  if (cache.track !== track || cache.walls_ !== walls) buildWalls(cache, track, walls, cfg);
+  // A fresh Planck world whenever this step doesn't carry on from the last one the cache stepped (a new
+  // session at tick 0, a different world, a re-simulation from an older state): its broadphase tree (and so
+  // the order contacts are found and solved in) depends on its whole history, so the same state stepped
+  // differently after a different past (a race run after another in the same process went another way).
+  // Rebuilding every tick would make every step history-free but costs ~3x the sim time (800 wall edges).
+  const continues = cache.lastTick !== undefined && state.tick === cache.lastTick + 1 && cache.track === track && cache.walls_ === walls;
+  if (!continues) {
+    cache.world = new World({ gravity: Vec2(0, 0), allowSleep: false });
+    cache.cars = [];
+    attachPreSolve(cache);
+    buildWalls(cache, track, walls, cfg);
+  }
+  cache.lastTick = state.tick;
   cache.carCar = { friction: contact.carFriction, restitution: contact.carRestitution };
   writeStateToWorld(cache, state, cfg, contact);
   const m = cache.wallMaterial;
