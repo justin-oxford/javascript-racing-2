@@ -5,7 +5,7 @@
 //     and lowest wheel wear per lap (soft quicker first and off the cliff first; hard the reverse). Gives the
 //     lifeLaps to put in config/strategy.json.
 //  3. RACE: 10 AI, --laps (default 20), seeded start compounds and the AI's own stops: compounds each car used.
-// Usage: npm run strategy-probe [-- --k 0.6 --laps 20 --seed 1 --matched --skip-stints]
+// Usage: npm run strategy-probe [-- --k 0.6 --laps 20 --seed 1 --matched --skip-stints --stops]
 import aiJson from '../config/ai.json' with { type: 'json' };
 import { aiInputSource, aiStartCompound, buildRacingLine, COMPOUNDS, consumableScale, createRaceWorld, createWorld, step, wearGrip, type AiConfig, type CarBuild, type Compound, type WorldState } from '../src/sim/index.ts';
 import { catalog, defaultTrackIdNode, loadTrackNode, simContextNode } from './load-track-node.ts';
@@ -69,8 +69,15 @@ if (!args.includes('--skip-stints')) {
   const ai = builds.map((_, i) => aiInputSource(i, () => ({ world: w, ctx, line }), () => cfg.presets[cfg.defaultPreset]!, () => cfg, seed * 100 + i));
   const used: Compound[][] = builds.map((b) => [b.compound!]);
   for (let t = 0; t < 60 * 60 * 40 && w.race!.phase !== 'results'; t++) {
+    const prev = w;
     w = step(w, ai.map((d) => d.read(w.tick)), ctx);
     w.cars.forEach((c, i) => { if (c.compound !== used[i]!.at(-1)) used[i]!.push(c.compound); });
+    // --stops: each stop as it starts (why: fuel and the most worn tyre) and what it got.
+    if (args.includes('--stops')) w.cars.forEach((c, i) => {
+      const p = prev.cars[i]!;
+      if (c.servicing && !p.servicing) console.log(`  car ${i} stops at ${w.race!.cars[i]!.progress.toFixed(2)} laps: fuel ${c.fuelKg.toFixed(1)} kg, worst tyre ${Math.round(Math.min(...c.wheels.map((x) => x.wear)) * 100)}% ${c.compound}, board ${c.pitPlan.compound}${c.pitPlan.tyres ? '' : ' (no tyres)'}`);
+      if (!c.servicing && p.servicing && p.stop) console.log(`  car ${i} leaves: fuel ${c.fuelKg.toFixed(1)} kg (target ${p.stop.fuelToKg.toFixed(1)})`);
+    });
   }
   const multi = used.filter((u) => new Set(u).size > 1).length;
   console.log(`\nRACE ${laps} laps, 10 AI${settings.raceLength ? ', race length matched (x' + scale.toFixed(2) + ')' : ''}: finished ${w.race!.phase === 'results'}; stops ${ai.map((d) => d.state.pitStops).join(' ')}`);

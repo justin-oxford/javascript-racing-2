@@ -529,7 +529,7 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
   if (service) {
     if (!stop) {
       // Qualifying fills to its own light load whatever the board says.
-      const target = fillToKg ?? stopFuelTarget(car.pitPlan, fuelKg, cfg.fuel.tankKg, lapsToGo, progressLaps && progressLaps > 0.5 ? fuelUsedKg / progressLaps : undefined, ctx.strategy);
+      const target = fillToKg ?? stopFuelTarget(car.pitPlan, fuelKg, cfg.fuel.tankKg, lapsToGo, progressLaps && progressLaps > 0.5 ? fuelUsedKg / progressLaps : undefined, ctx.strategy, scale);
       stop = startStop(car.pitPlan, Math.min(cfg.fuel.tankKg, target), isDamaged(car.damage, 0), ctx.strategy);
     }
     if (stop.fitting !== null) {

@@ -84,10 +84,11 @@ export function consumableScale(mode: RaceLengthMode | undefined, laps: number |
  * The fuel a stop fills the tank to. FUEL_TO_END: enough for the laps left (+ margin) at the fuel used per lap
  * so far; with no race (or no measure yet) a full tank.
  */
-export function stopFuelTarget(plan: PitPlan, fuelKg: number, tankKg: number, lapsToGo: number | undefined, fuelPerLapKg: number | undefined, cfg: StrategyConfig): number {
+export function stopFuelTarget(plan: PitPlan, fuelKg: number, tankKg: number, lapsToGo: number | undefined, fuelPerLapKg: number | undefined, cfg: StrategyConfig, scale = 1): number {
   if (plan.fuelKg !== FUEL_TO_END) return Math.min(tankKg, fuelKg + plan.fuelKg);
   if (lapsToGo === undefined || !fuelPerLapKg || fuelPerLapKg <= 0) return tankKg;
-  return Math.min(tankKg, Math.max(fuelKg, (Math.max(0, lapsToGo) + cfg.service.fuelEndMarginLaps) * fuelPerLapKg));
+  // The margin is in the reference race's laps (race length matched: a lap here is `scale` of those).
+  return Math.min(tankKg, Math.max(fuelKg, (Math.max(0, lapsToGo) + cfg.service.fuelEndMarginLaps / scale) * fuelPerLapKg));
 }
 
 /** A new stop from the plan. */

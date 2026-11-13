@@ -39,7 +39,7 @@ export interface AiConfig {
   /** resetAfterSec: still in trouble (crawling, reversing out, stuck) this long -> reset to track, same as a player (race.json reset). */
   recovery: { stuckSec: number; reverseSec: number; backwardsDeg: number; resetAfterSec?: number };
   /** fuelLaps: pit with this many laps of fuel left (races, practice); qualiFuelLaps: the same in qualifying (light runs). */
-  pits?: { fuelLaps: number; qualiFuelLaps?: number; minWear: number; pitSpeedMarginKph: number; repairDamage?: number; entryCornerMargin?: number };
+  pits?: { fuelLaps: number; qualiFuelLaps?: number; minWear: number; pitSpeedMarginKph: number; repairDamage?: number; entryCornerMargin?: number; reachLaps?: number };
   /** Pit lane driving: fastLaneM = offset from the pit path away from the boxes when driving through; boxApproachM = distance before its box to pull across into it; laneGapM = sideways clearance (beyond a car width) under which a car ahead is "in our lane"; releaseGapM = how far back up the lane a car must be clear before pulling out of the box; latRateMps = how fast it moves across in the lane. */
   pitLane?: { fastLaneM: number; boxApproachM: number; laneGapM: number; releaseGapM: number; latRateMps: number; creepMps?: number };
   /** Lift and coast: coast (no throttle, no brake) for drops up to coastMaxDropMps; lift liftBeforeBrakeSec before braking. */
@@ -490,8 +490,12 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     }
     if (st.fuelAtLap < 0) st.fuelAtLap = car.fuelKg;
     // Qualifying runs light: keep going until there's just enough to get back (qualiFuelLaps).
-    const lapsLeftWanted = world.quali ? (pits.qualiFuelLaps ?? pits.fuelLaps) : pits.fuelLaps;
-    const need = st.fuelPerLap > 0 ? st.fuelPerLap * lapsLeftWanted : (phys.fuel.burnKgPerSec * 40 * lapsLeftWanted) / pits.fuelLaps;
+    // Race length matched (Race strategy card): a lap burns `scale` laps' worth of fuel and tyre, so margins
+    // counted in laps are counted in the reference race's laps (/ scale), or a short race pits far too early.
+    const scale = consumableScale(world.settings?.raceLength, race?.laps, ctx.strategy);
+    // ...but never under reachLaps real laps: it has to get round to the pit entry on what's left.
+    const lapsLeftWanted = Math.max((world.quali ? (pits.qualiFuelLaps ?? pits.fuelLaps) : pits.fuelLaps) / scale, pits.reachLaps ?? 0);
+    const need = st.fuelPerLap > 0 ? st.fuelPerLap * lapsLeftWanted : (phys.fuel.burnKgPerSec * 40 * scale * lapsLeftWanted) / pits.fuelLaps;
     // Damage (Realistic): pit for repair once any zone is past pits.repairDamage.
     const broken = world.settings?.damage === 'realistic' && Math.max(car.damage.frontWing, car.damage.rearWing, car.damage.left, car.damage.right) > (pits.repairDamage ?? 0.3);
     let want = car.fuelKg < need || car.wheels.some((wh) => wh.wear < pits.minWear) || broken;
@@ -503,14 +507,17 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
       // (the box is before the line) that read a lap more than was left, so a "to the end" fill looked short.
       const lapsLeft = race.laps - (race.cars[i]?.progress ?? car.timing.laps);
       const perLapStd = st.fuelPerLap / (ctx.ers.modes[car.ers.mode]?.fuel ?? 1);
-      const needStd = perLapStd * (lapsLeft + 0.3), needSave = needStd * ctx.ers.modes.save.fuel;
+      const needStd = perLapStd * (lapsLeft + 0.3 / scale), needSave = needStd * ctx.ers.modes.save.fuel;
       if (car.fuelKg < needStd && car.fuelKg >= needSave) st.saving = true;
       const enough = car.fuelKg > (st.saving ? needSave : needStd);
       if (want && !broken && enough && car.wheels.every((wh) => wh.wear > 0.3)) want = false;
     }
     // Qualifying after the flag: no point stopping, the session is over at the line.
     if (world.quali && world.quali.phase !== 'running') want = false;
+    // In a race the decision is re-made every tick: once it's sure to reach the flag (and the tyres last) it
+    // stops wanting a stop (latched, it pitted for nothing on the last lap). Elsewhere it stays wanted.
     if (line.pit && want) st.pitWanted = true;
+    else if (race && st.fuelPerLap > 0) st.pitWanted = false;
     if (line.pit && st.pitWanted) {
       const toEntry = (line.pit.entry - st.near + line.n) % line.n;
       if (toEntry <= 3 || toEntry >= line.n - 2) {
@@ -1006,10 +1013,10 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // grippiest compound that lasts the laps left (or, in practice, the same again).
   let pitPlan: PitPlan | undefined;
   if (st.pitWanted || st.mode === 'pit') {
-    const scale = consumableScale(world.settings?.raceLength, race?.laps, ctx.strategy);
     const lapsToGo = race ? Math.max(0, race.laps - (race.cars[i]?.progress ?? car.timing.laps)) : 0;
-    const compound = race ? aiCompound(lapsToGo, scale, ctx.strategy) : car.compound;
-    pitPlan = { compound, fuelKg: FUEL_TO_END, tyres: true, repair: isDamaged(car.damage) };
+    const compound = race ? aiCompound(lapsToGo, consumableScale(world.settings?.raceLength, race?.laps, ctx.strategy), ctx.strategy) : car.compound;
+    // Serviced and waiting to leave the box: ask for nothing more (it used to get a second tyre change).
+    pitPlan = st.serviced ? { compound: car.compound, fuelKg: 0, tyres: false, repair: false } : { compound, fuelKg: FUEL_TO_END, tyres: true, repair: isDamaged(car.damage) };
   }
   return { input: { throttle, brake, steer, engineMode, deploy, ...(pitPlan ? { pitPlan } : {}) }, state: st };
 }

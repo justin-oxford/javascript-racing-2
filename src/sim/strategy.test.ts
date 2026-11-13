@@ -42,6 +42,8 @@ describe('strategy', () => {
     expect(stopFuelTarget({ ...plan, fuelKg: FUEL_TO_END }, 20, 110, 10, 7, cfg)).toBeCloseTo((10 + cfg.service.fuelEndMarginLaps) * 7);
     expect(stopFuelTarget({ ...plan, fuelKg: FUEL_TO_END }, 20, 110, undefined, undefined, cfg)).toBe(110);
     expect(stopFuelTarget({ ...plan, fuelKg: FUEL_TO_END }, 90, 110, 1, 7, cfg)).toBe(90); // never drains
+    // Race length matched (x4): the margin is in the reference race's laps, so a quarter of a lap here.
+    expect(stopFuelTarget({ ...plan, fuelKg: FUEL_TO_END }, 5, 110, 2, 28, cfg, 4)).toBeCloseTo((2 + cfg.service.fuelEndMarginLaps / 4) * 28);
   });
 
   it('a stop is done when the tyres are fitted, the fuel is in and any asked-for repair is finished', () => {
