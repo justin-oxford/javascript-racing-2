@@ -48,8 +48,12 @@ export class Liveries {
   private helmetShade!: Canvas;
   private tyre!: Canvas;
   private dropShadow!: Canvas;
-  /** Full-size composites by team colour + helmet colour. */
+  /** Full-size composites by team colour + helmet colour (+ livery). */
   private readonly full = new Map<string, Canvas>();
+  /** Livery card phase 2: a livery image per team (over the paint, under the shading), and a version so a
+   *  new one (the garage) re-composites. */
+  private readonly liveryImg = new Map<string, { img: CanvasImageSource; v: number }>();
+  private liveryV = 0;
   /** Downscaled caches by key + device size. */
   private readonly sized = new Map<string, { size: number; canvas: Canvas }>();
   /** Template pixels from the car's centre (the sprite is centred on the car body). */
@@ -126,9 +130,20 @@ export class Liveries {
     return out;
   }
 
-  /** The car minus tyres and shadow, tinted: body, paint, shading, helmet. */
-  private composite(primary: string, helmet: string): Canvas {
-    const key = `${primary}|${helmet}`;
+  /** Set (or clear) a team's livery image; the next draw re-composites. */
+  setLivery(teamId: string, img: CanvasImageSource | undefined): void {
+    if (img) this.liveryImg.set(teamId, { img, v: ++this.liveryV });
+    else this.liveryImg.delete(teamId);
+  }
+
+  /** Load each team's livery PNG (teams.json "livery"), if any; missing files are skipped with a warning. */
+  async loadLiveries(teams: ReadonlyArray<{ id: string; livery?: string | undefined }>, siteUrl: (p: string) => string): Promise<void> {
+    await Promise.all(teams.filter((t) => t.livery).map((t) => loadImage(siteUrl(t.livery!)).then((img) => this.setLivery(t.id, img), (e) => console.warn(String(e)))));
+  }
+
+  /** The car minus tyres and shadow, tinted: body, paint, livery, shading, helmet. */
+  private composite(primary: string, helmet: string, livery?: { img: CanvasImageSource; v: number }): Canvas {
+    const key = `${primary}|${helmet}|${livery?.v ?? 0}`;
     let c = this.full.get(key);
     if (c) return c;
     const { width: w, height: h } = this.cfg.template;
@@ -145,6 +160,14 @@ export class Liveries {
     const g = c2d(c);
     g.drawImage(this.body, 0, 0);
     g.drawImage(tint(this.paint, primary, 'source-in'), 0, 0); // paint layer is pure white + alpha
+    if (livery) {
+      // The livery only where there's bodywork to paint (the paint layer's alpha).
+      const l = canvas(w, h), lg = c2d(l);
+      lg.drawImage(livery.img, 0, 0, w, h);
+      lg.globalCompositeOperation = 'destination-in';
+      lg.drawImage(this.paint, 0, 0);
+      g.drawImage(l, 0, 0);
+    }
     g.drawImage(this.shading, 0, 0);
     g.drawImage(tint(this.helmetShade, helmet, 'multiply'), 0, 0);
     this.full.set(key, c);
@@ -164,7 +187,7 @@ export class Liveries {
    * Draw a car. ctx is already translated to the car's centre and rotated to its heading, in track
    * pixels; `lengthPx` is the car's length in track pixels; `devicePerTrackPx` = backing pixels per track pixel.
    */
-  draw(ctx: CanvasRenderingContext2D, car: CarState, colours: { primary: string; helmet: string }, lengthPx: number, devicePerTrackPx: number, physics: PhysicsConfig): void {
+  draw(ctx: CanvasRenderingContext2D, car: Pick<CarState, 'steerAngle'>, colours: { primary: string; helmet: string; team?: string }, lengthPx: number, devicePerTrackPx: number, physics: PhysicsConfig): void {
     const s = lengthPx / this.carLenPx; // track px per template px
     const dev = s * devicePerTrackPx; // backing px per template px
     const { width: w, height: h, tyres } = this.cfg.template;
@@ -187,8 +210,9 @@ export class Liveries {
       } else ctx.drawImage(tyre, px - tw / 2, py - th / 2, tw, th);
     }
 
-    const key = `${colours.primary}|${colours.helmet}`;
-    const body = this.sizedCopy(key, this.composite(colours.primary, colours.helmet), dev);
+    const liv = colours.team ? this.liveryImg.get(colours.team) : undefined;
+    const key = `${colours.primary}|${colours.helmet}|${liv?.v ?? 0}`;
+    const body = this.sizedCopy(key, this.composite(colours.primary, colours.helmet, liv), dev);
     ctx.drawImage(body, -this.cx * s, -this.cy * s, w * s, h * s);
   }
 }

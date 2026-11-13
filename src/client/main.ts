@@ -28,6 +28,7 @@ import {
 } from './track-loader';
 import aiJson from '../../config/ai.json';
 import driversJson from '../../config/drivers.json';
+import teamsFile from '../../config/teams.json';
 import audioConfig from '../../config/audio.json';
 import hudConfig from '../../config/hud.json';
 import { Hud, SETUP_LABELS } from './hud/hud';
@@ -501,6 +502,21 @@ async function main(): Promise<void> {
     }
   });
 
+  // Livery card phase 2: each team's livery PNG (teams.json), and the garage page (?garage=1).
+  void liveries.loadLiveries(ctx.catalog.teams, siteUrl);
+  if (params.has('garage')) {
+    const { GaragePage } = await import('./garage/garage-page');
+    new GaragePage({
+      catalog: ctx.catalog, liveries, physics, teamsFile: teamsFile as { _comment?: string },
+      onDrive: (team) => {
+        menu.close?.();
+        const b = curr.cars[0]!.build;
+        if (b.team !== team) { rebuildCar({ ...b, team }); session.changeTeam(team); profile = profiles.save({ ...profile, team }); }
+        startPractice();
+      },
+    });
+  }
+
   // Dev-only tools. Dynamic imports keep them out of the production bundle.
   const editor = import.meta.env.DEV && new URLSearchParams(location.search).has('edit')
     ? new (await import('./editor/editor')).TrackEditor(renderer, json, (kerbUse) => {
@@ -637,7 +653,7 @@ async function main(): Promise<void> {
     drawCar: (c, car, index, lengthPx, devicePerTrackPx) => {
       const team = ctx.catalog.teams.find((t) => t.id === car.build.team);
       if (!team) return false;
-      liveries.draw(c, car, { primary: team.colors.primary, helmet: index === 0 ? profile.helmet : team.colors.helmet }, lengthPx, devicePerTrackPx, physics);
+      liveries.draw(c, car, { primary: team.colors.primary, helmet: index === 0 ? profile.helmet : team.colors.helmet, team: team.id }, lengthPx, devicePerTrackPx, physics);
       return true;
     },
   };

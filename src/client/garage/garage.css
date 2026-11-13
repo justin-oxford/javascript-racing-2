@@ -1,0 +1,17 @@
+/* The garage dev page (Livery card, phase 2). */
+.garage { position: fixed; inset: 0; z-index: 50; background: rgba(12, 12, 16, 0.96); color: #eee; font: 13px system-ui, sans-serif; overflow: auto; padding: 16px; box-sizing: border-box; }
+.garage .g-head { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+.garage .g-head span { opacity: 0.7; flex: 1; }
+.garage .g-row { display: block; border-radius: 6px; margin-bottom: 12px; max-width: 100%; }
+.garage .g-main { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+.garage .g-zoom { border-radius: 6px; }
+.garage .g-form { display: grid; grid-template-columns: 110px minmax(200px, 360px); gap: 8px 12px; align-items: center; }
+.garage .g-form small { display: block; opacity: 0.65; margin-top: 4px; }
+.garage .g-stat { display: flex; gap: 8px; align-items: center; }
+.garage .g-stat input { flex: 1; }
+.garage .g-buttons { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.garage button { background: #2a2b31; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 6px 10px; cursor: pointer; }
+.garage button.go { background: #ffd400; color: #111; border-color: #ffd400; font-weight: 700; }
+.garage .g-msg { grid-column: 1 / -1; color: #9cd2ff; opacity: 1; }
+.garage input, .garage select { background: #1d1e23; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 4px; }
+@media (max-width: 600px) { .garage .g-form { grid-template-columns: 90px 1fr; } }

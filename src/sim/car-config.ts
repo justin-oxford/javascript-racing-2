@@ -59,7 +59,9 @@ export interface TeamDef {
   id: string;
   name: string;
   /** Livery colours (hex). primary tints the bodywork; helmet = the AI driver's helmet. */
-  colors: { primary: string; secondary: string; helmet: string };
+  colors: { primary: string; secondary: string; helmet: string; accent?: string };
+  /** Livery card phase 2: a livery PNG (template size, 256x512) drawn over the paint, under the shading; site path. */
+  livery?: string;
   stats: Stats;
 }
 

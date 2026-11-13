@@ -5,7 +5,7 @@
 // - dev: POST /__editor/save-track/<id> writes tracks/<id>/track.json (the editor's Save button)
 // - dev: POST /__tuning/save/<name> writes config/<name>.json (the tuning panel's Save button)
 // - build: copy tracks/<id>/*.png into dist/tracks/<id>/ so the game can fetch them at runtime
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join, relative, sep } from 'node:path';
 import type { Plugin, ViteDevServer } from 'vite';
@@ -101,6 +101,28 @@ export function trackPlugin(): Plugin {
           if (parsed.id !== id) throw new Error(`track.json id "${String(parsed.id)}" doesn't match ${id}`);
           writeFileSync(join(tracksDir(), id, 'track.json'), body);
           res.end('saved');
+        });
+      });
+
+      // Livery card phase 2, the garage's Save (dev only): teams.json, and a team's livery PNG (base64 body).
+      server.middlewares.use('/__garage/teams', (req, res) => {
+        readDevPost(req, res, 'x-garage', (body) => {
+          const parsed = JSON.parse(body) as { teams?: unknown };
+          if (!Array.isArray(parsed.teams)) throw new Error('not a teams.json');
+          writeFileSync(join(root, 'config', 'teams.json'), body);
+          res.end('saved');
+        });
+      });
+      server.middlewares.use('/__garage/livery/', (req, res) => {
+        const id = (req.url ?? '').replace(/^\//, '').split('?')[0]!;
+        if (!/^[a-z0-9-]+$/.test(id)) { res.statusCode = 400; res.end('bad team id'); return; }
+        readDevPost(req, res, 'x-garage', (body) => {
+          const png = Buffer.from(body.replace(/^data:image\/png;base64,/, ''), 'base64');
+          if (png.readUInt32BE(0) !== 0x89504e47) throw new Error('not a PNG');
+          const dir = join(root, 'public', 'assets', 'Cars', 'liveries');
+          mkdirSync(dir, { recursive: true });
+          writeFileSync(join(dir, `${id}.png`), png);
+          res.end(`assets/Cars/liveries/${id}.png`);
         });
       });
 
