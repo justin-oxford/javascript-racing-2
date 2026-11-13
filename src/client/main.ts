@@ -1,4 +1,4 @@
-import { nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, driverSkill, skilledPreset, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, driverSkill, skilledPreset, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -27,9 +27,11 @@ import {
   type MaskState,
 } from './track-loader';
 import aiJson from '../../config/ai.json';
+import aiSetups from '../../config/ai-setups.json';
 import audioConfig from '../../config/audio.json';
 import hudConfig from '../../config/hud.json';
-import { Hud } from './hud/hud';
+import { Hud, SETUP_LABELS } from './hud/hud';
+import { BalanceTracker } from './hud/balance';
 import { RaceHud } from './hud/race-hud';
 import { drawCarLabels, LABEL_MODES, nextLabelMode, type LabelMode } from './hud/car-labels';
 import { player, sessionOrder, setPlayerIdentity, teamCode } from './hud/running-order';
@@ -131,7 +133,9 @@ async function main(): Promise<void> {
     const d = physics.defaultCar;
     const team = profile.team && ctx.catalog.teams.some((t) => t.id === profile.team) ? profile.team : d.team;
     const spec = profile.settings.spec && ctx.catalog.specs.specs[profile.settings.spec] ? profile.settings.spec : d.spec;
-    return { ...d, team, spec };
+    // Setup: this track's preset from the profile (Garage), else the default car's.
+    const setup = normalizeSetup(profile.setups[json.id] ?? d.setup, ctx.catalog.specs.setup.range);
+    return { ...d, team, spec, setup };
   }
   /** Swap the player's car build and put it back in the pits (spec/team change). A race restarts. */
   const rebuildCar = (b: CarBuild): void => {
@@ -154,7 +158,9 @@ async function main(): Promise<void> {
     aiInputSource(k + 1, () => ({ world: curr, ctx, line: racingLine }), () => skilledPreset(aiCfg.presets[aiPreset] ?? aiCfg.presets[aiCfg.defaultPreset]!, skillOn() ? driverSkill(driverSeed, k + 1, aiCfg.skill?.spread ?? 0) : 0), () => aiCfg, 1000 + k));
   const aiBuilds = (me: CarBuild, count: number): CarBuild[] => {
     const teams = ctx.catalog.teams.filter((t) => t.id !== me.team);
-    return Array.from({ length: count }, (_, k) => withPerf({ ...physics.defaultCar, spec: me.spec, team: teams[k % teams.length]!.id }));
+    // The AI runs this track's searched setup (config/ai-setups.json, npm run setup-search), else neutral.
+    const aiSetup = normalizeSetup((aiSetups as Record<string, unknown>)[json.id] ?? physics.defaultCar.setup, ctx.catalog.specs.setup.range);
+    return Array.from({ length: count }, (_, k) => withPerf({ ...physics.defaultCar, setup: aiSetup, spec: me.spec, team: teams[k % teams.length]!.id }));
   };
   /** Player's fuel use per lap (HUD fuel margin): fuel and lap count at the last line crossing. */
   const fuelLap = { laps: -1, kg: 0, perLap: 0 };
@@ -165,6 +171,19 @@ async function main(): Promise<void> {
   /** (Re)start practice: the player plus aiCount AI cars, everyone back on the grid. */
   // Track evolution (POLISH card): a new weekend or standalone session starts from the profile's starting
   // state; the sessions of a weekend carry the surface over (marbles swept, a little rubber lost).
+  /** After every sim tick (the loop and the dev bench alike): the balance readout and evolution redraws. */
+  function afterTick(): void {
+    // Setup balance readout: in practice, which axle lets go first in each corner (player only).
+    if (balance && !curr.race && !curr.quali && curr.cars[0]) {
+      balance.update(curr.cars[0]);
+      if (curr.tick % 30 === 0) hud.setBalance(balance.corners.map((_, k) => ({ name: `T${k + 1}`, ...balance!.stats[k]!, passes: balance!.stats[k]!.front + balance!.stats[k]!.rear + balance!.stats[k]!.neither })));
+    }
+    // Track evolution visuals: refresh every ~15 s (the skid fade already rebuilds that often, but not
+    // with effects off). A new session's surface shows at once (withSurface).
+    if (curr.surface && curr.tick % (60 * 15) === 0) renderer.invalidateStatic();
+  }
+  /** Setup balance readout (practice). Rebuilt with the racing line; reset when the setup changes. */
+  let balance: BalanceTracker | undefined = racingLine ? new BalanceTracker(racingLine) : undefined;
   const freshSurface = () => (ctx.evolution.enabled ? seedRubber(newSurfaceGrid(ctx.track, ctx.evolution), ctx.track, json.racingLine, profile.settings.trackStart, ctx.evolution) : undefined);
   const withSurface = (w: WorldState, s: SurfaceGrid | undefined): WorldState => {
     renderer.invalidateStatic(); // show the new session's track at once
@@ -267,7 +286,9 @@ async function main(): Promise<void> {
     onSetup: (slot, value) => {
       if (!stoppedInBox()) return; // setup changes only while stopped in a pit box
       const b = curr.cars[0]!.build;
-      const build = { ...b, setup: { ...b.setup, [slot]: value } };
+      const build = { ...b, setup: { ...normalizeSetup(b.setup, ctx.catalog.specs.setup.range), [slot]: value } };
+      profile = profiles.save({ ...profile, setups: { ...profile.setups, [json.id]: { ...build.setup } } }); // this track's preset
+      balance?.reset(); // a new setup: a fresh readout
       curr = setCarBuild(curr, 0, build);
       prev = setCarBuild(prev, 0, build);
     },
@@ -343,7 +364,7 @@ async function main(): Promise<void> {
   /** Make the game match a profile: identity, keys, sound, effects, labels and session choices. */
   const applyProfile = (p: Profile): void => {
     const switched = p.id !== profile.id;
-    const carChanged = p.team !== profile.team || p.settings.spec !== profile.settings.spec;
+    const carChanged = p.team !== profile.team || p.settings.spec !== profile.settings.spec || JSON.stringify(p.setups[json.id]) !== JSON.stringify(profile.setups[json.id]);
     profile = p;
     setPlayerIdentity(nameCode(p.name), p.name);
     keyboard.setBindings(p.keybinds);
@@ -388,6 +409,9 @@ async function main(): Promise<void> {
     nightAvailable: !!night,
     evolution: ctx.evolution.enabled,
     trackName: json.name,
+    trackId: json.id,
+    setupRange: ctx.catalog.specs.setup.range,
+    setupSlots: SETUP_LABELS,
     profiles,
     volumes: () => (['master', 'engine', 'tyres', 'impacts', 'ui'] as const).filter((b) => b in audio.volumes).map((bus) => ({ bus, value: audio.volumes[bus] })),
     records,
@@ -525,6 +549,7 @@ async function main(): Promise<void> {
             const inputs = drivers.map((d) => d.read(curr.tick));
             prev = curr;
             curr = step(curr, inputs, ctx);
+            afterTick();
             vfx.onTick(prev, curr, ctx.track, physics);
             vfx.update(1 / 60);
             drawFrame(1, 1 / 60);
@@ -597,9 +622,7 @@ async function main(): Promise<void> {
       const inputs = drivers.map((d) => d.read(curr.tick));
       prev = curr;
       curr = step(curr, inputs, ctx);
-      // Track evolution visuals: refresh every ~15 s (the skid fade already rebuilds that often, but not
-      // with effects off). A new session's surface shows at once (withSurface).
-      if (curr.surface && curr.tick % (60 * 15) === 0) renderer.invalidateStatic();
+      afterTick();
       vfx.onTick(prev, curr, ctx.track, physics);
       const me = curr.cars[0], was = prev.cars[0];
       if (me && was) {

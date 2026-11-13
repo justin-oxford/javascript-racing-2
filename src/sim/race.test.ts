@@ -26,7 +26,7 @@ import {
 
 const loaded = loadTrackNode('oxford');
 const race: RaceConfig = { ...raceJson, gridSec: 1, holdMinSec: 1, holdMaxSec: 1 };
-const ctx: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as PhysicsConfig)), contact: contactJson, race, slipstream: slipstreamJson };
+const ctx: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as unknown as PhysicsConfig)), contact: contactJson, race, slipstream: slipstreamJson };
 const ppm = ctx.track.json.pxPerMeter;
 const idle: CarInput = { throttle: 0, brake: 0, steer: 0 };
 const build = ctx.physics.defaultCar;

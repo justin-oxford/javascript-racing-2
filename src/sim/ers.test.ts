@@ -10,7 +10,7 @@ import { loadTrackNode, simContextNode } from '../../tools/load-track-node';
 import { createWorld, deployPowerW, newErs, nextEngineMode, step, updateErs, type CarInput, type EngineMode, type PhysicsConfig, type RaceConfig, type SimContext, type WorldState } from './index';
 
 const loaded = loadTrackNode('oxford');
-const ctx: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as PhysicsConfig)), contact: contactJson, race: raceJson as RaceConfig, slipstream: slipstreamJson };
+const ctx: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as unknown as PhysicsConfig)), contact: contactJson, race: raceJson as RaceConfig, slipstream: slipstreamJson };
 const { spawn, pxPerMeter: ppm } = ctx.track.json;
 const f = { x: Math.sin(spawn.heading), y: -Math.cos(spawn.heading) };
 /** One car on the main straight at v m/s, then `ticks` of `input`. */

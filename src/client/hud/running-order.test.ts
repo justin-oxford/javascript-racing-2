@@ -9,7 +9,7 @@ import { catalog, loadTrackNode, simContextNode } from '../../../tools/load-trac
 import { createRaceWorld, type PhysicsConfig, type SimContext, type WorldState } from '../../sim';
 import { lapHead, playerIntervals, runningOrder, teamCode } from './running-order';
 
-const ctx: SimContext = { ...simContextNode(loadTrackNode('oxford'), structuredClone(physicsJson as PhysicsConfig)), contact: contactJson, race: raceJson, slipstream: slipstreamJson };
+const ctx: SimContext = { ...simContextNode(loadTrackNode('oxford'), structuredClone(physicsJson as unknown as PhysicsConfig)), contact: contactJson, race: raceJson, slipstream: slipstreamJson };
 const builds = [0, 1, 2, 3].map((i) => ({ ...ctx.physics.defaultCar, team: catalog.teams[i]!.id }));
 
 /** A race in progress: order 2, 0, 3, 1; everyone has crossed the start line and one more line. */

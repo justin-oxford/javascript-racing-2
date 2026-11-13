@@ -16,7 +16,7 @@ import {
 } from './index';
 
 const loaded = loadTrackNode('oxford');
-const ctx: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as PhysicsConfig)), contact: contactJson, race: raceJson as RaceConfig, slipstream: slipstreamJson };
+const ctx: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as unknown as PhysicsConfig)), contact: contactJson, race: raceJson as RaceConfig, slipstream: slipstreamJson };
 const NONE: CarInput = { throttle: 0, brake: 0, steer: 0 };
 const run = (c: SimContext, w: WorldState, ticks: number, input: CarInput | CarInput[] = NONE): WorldState => {
   for (let t = 0; t < ticks; t++) w = step(w, Array.isArray(input) ? input : w.cars.map(() => input), c);

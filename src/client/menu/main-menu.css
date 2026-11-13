@@ -54,3 +54,10 @@
   .jr-menu .body { padding: 16px; }
   .jr-menu .rows, .jr-menu .binds { grid-template-columns: 1fr; gap: 6px; }
 }
+.jr-menu .rows.setup { grid-template-columns: 110px 1fr; }
+.jr-menu .setup .inline { flex-wrap: nowrap; gap: 8px; }
+.jr-menu .setup .trade { opacity: 0.55; font-size: 11px; width: 120px; flex: none; line-height: 1.2; }
+.jr-menu .setup .trade:first-child { text-align: right; }
+.jr-menu .setup input[type="range"] { flex: 1; min-width: 70px; width: auto; }
+.jr-menu .setup .notch { min-width: 26px; text-align: right; flex: none; }
+@media (max-width: 640px) { .jr-menu .setup .trade { display: none; } }

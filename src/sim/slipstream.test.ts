@@ -56,7 +56,7 @@ describe('two cars down a straight', () => {
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) data[y * w + x] = id(x < wall || y < wall || x >= w - wall || y >= h - wall ? 'wall' : 'asphalt');
     const json: TrackJson = { id: 'strip', name: 'strip', pxPerMeter: PPM, files: { mask: 'mask.png' }, timingLines: {}, racingLine: [], grid: [], spawn: { x: 150, y: h - 100, heading: 0 } };
     const track = createSimTrack(json, { width: w, height: h, data }, surfaces);
-    return { track, walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing), physics: structuredClone(physicsJson) as PhysicsConfig, catalog, rules, contact: contactJson, race: raceJson, slipstream: slip, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, cache: createPhysicsCache() };
+    return { track, walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing), physics: structuredClone(physicsJson) as unknown as PhysicsConfig, catalog, rules, contact: contactJson, race: raceJson, slipstream: slip, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, cache: createPhysicsCache() };
   };
   const run = (slip: SlipstreamConfig) => {
     const ctx = strip(slip);

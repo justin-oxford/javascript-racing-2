@@ -11,7 +11,7 @@ import aiJson from '../../tools/fixtures/ai-baseline.json';
 import { aiInputSource, buildRacingLine, createRaceWorld, createWorld, progressLine, type AiConfig, raceResults, step, type CarInput, type CarState, type PhysicsConfig, type RaceConfig, type SimContext, type WorldState } from './index';
 
 const loaded = loadTrackNode('oxford');
-const ctx: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as PhysicsConfig)), contact: contactJson, race: raceJson as RaceConfig, slipstream: slipstreamJson };
+const ctx: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as unknown as PhysicsConfig)), contact: contactJson, race: raceJson as RaceConfig, slipstream: slipstreamJson };
 const line = progressLine(ctx.track)!;
 const cfg = ctx.race.reset;
 const HOLD: CarInput = { throttle: 0, brake: 0, steer: 0, reset: true };

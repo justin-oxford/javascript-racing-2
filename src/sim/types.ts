@@ -43,10 +43,23 @@ export interface Pose {
 /** Wheel order everywhere: front-left, front-right, rear-left, rear-right. */
 export type Wheels<T> = [T, T, T, T];
 
+/**
+ * Car setup (Car setup overhaul card): seven notched sliders, -range..+range (specs.json setup.range),
+ * 0 = neutral. What each notch does is in specs.json setup; every one trades something.
+ */
 export interface CarSetup {
-  downforce: string;
-  gearing: string;
-  brakes: string;
+  frontWing: number;
+  rearWing: number;
+  /** + = longer (top speed), - = shorter (acceleration). */
+  gearing: number;
+  /** + = more front brake bias. */
+  brakeBias: number;
+  /** Suspension balance: + = stiffer front (understeer), - = stiffer rear (oversteer). */
+  balance: number;
+  /** + = higher (less downforce, kerbs and grass hurt less). */
+  rideHeight: number;
+  /** + = higher pressure (less grip and wear, sharper). */
+  tyrePressure: number;
 }
 
 /** Which car this is: team x spec x setup (SYS - Car model). */

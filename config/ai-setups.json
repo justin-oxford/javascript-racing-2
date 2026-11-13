@@ -1,0 +1,4 @@
+{
+  "_comment": "AI car setups per track (Car setup overhaul card), found by npm run setup-search -- --write (full fuel, a 4-lap solo stint). Notches -range..+range (specs.json setup).",
+  "oxford": { "frontWing": 2, "rearWing": 5, "gearing": -5, "brakeBias": 3, "balance": 4, "rideHeight": -5, "tyrePressure": -5 }
+}

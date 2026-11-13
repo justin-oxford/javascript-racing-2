@@ -77,6 +77,6 @@ export function loadTrackNode(id: string): LoadedTrack {
 }
 
 /** A fresh sim context. Each one owns its own Planck cache, so contexts never share hidden state. */
-export function simContextNode(loaded: LoadedTrack, physics: PhysicsConfig = structuredClone(physicsJson as PhysicsConfig)): SimContext {
+export function simContextNode(loaded: LoadedTrack, physics: PhysicsConfig = structuredClone(physicsJson as unknown as PhysicsConfig)): SimContext {
   return { track: loaded.track, walls: loaded.walls, physics, catalog, rules, contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: evolutionJson, cache: createPhysicsCache() };
 }

@@ -2,7 +2,7 @@ import { evolutionGrip, newSurfaceGrid, updateSurface, type EvolutionConfig, typ
 import { deployPowerW, newErs, updateErs, type EngineMode, type ErsConfig } from './ers';
 import { applyHits, damageDrag, damageGrip, damagePull, isDamaged, NO_DAMAGE, repairStep, type DamageConfig } from './damage';
 import { applyResets, newRejoin, trackRejoin } from './rejoin';
-import { bodyOffsetM, buildStats, type CarCatalog, type PhysicsConfig } from './car-config';
+import { bodyOffsetM, buildStats, setupEffects, type CarCatalog, type PhysicsConfig } from './car-config';
 import { applyCarForce, prepareCache, readStateFromWorld, setCarMass, stepWorld, type PhysicsCache } from './planck-cache';
 import type { SimTrack, WallChain } from './track';
 import { boxAt, surfaceAt } from './track';
@@ -324,13 +324,21 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
   // static weight and they read as unloaded and "skidding".)
   const wf = cfg.car.weightFront;
   const share: Wheels<number> = [wf / 2, wf / 2, (1 - wf) / 2, (1 - wf) / 2];
-  // Dirty air: following closely through a corner costs downforce (slipstream.ts).
-  const vertical = mass * G * (1 + cfg.aero.downforceCoef * stats.downforce * (1 - wake.dirtyAir) * v2);
+  // Setup (Car setup overhaul card): each axle's downforce from its wing (and the ride height), brake bias,
+  // where the cornering load transfer goes (suspension balance), tyre pressure.
+  const setup = setupEffects(car.build.setup, ctx.catalog);
+  // Dirty air: following closely through a corner costs downforce (slipstream.ts). stats.downforce is the
+  // two axles' average; each axle gets its own wing's share.
+  const aeroLoad = mass * G * cfg.aero.downforceCoef * (stats.downforce / Math.max(1e-6, (setup.frontDownforce + setup.rearDownforce) / 2)) * (1 - wake.dirtyAir) * v2;
+  const aeroAxle: Wheels<number> = [aeroLoad * wf * setup.frontDownforce / 2, aeroLoad * wf * setup.frontDownforce / 2, aeroLoad * (1 - wf) * setup.rearDownforce / 2, aeroLoad * (1 - wf) * setup.rearDownforce / 2];
+  const vertical = mass * G + aeroAxle[0] + aeroAxle[1] + aeroAxle[2] + aeroAxle[3];
   const aRight = vFwd * car.angVel; // centripetal acceleration, + = toward the car's right
   const transfer = (mass * aRight * cfg.car.cgHeightM) / cfg.car.trackWidthM;
   const side: Wheels<number> = [-1, 1, -1, 1];
-  const axle: Wheels<number> = [wf, wf, 1 - wf, 1 - wf];
-  const load = share.map((s, w) => Math.max(0, vertical * s - side[w]! * transfer * axle[w]!)) as Wheels<number>;
+  // Lateral load transfer split between the axles: by weight, shifted toward the stiffer end (balance).
+  const tf = clamp(wf + setup.frontTransferAdd, 0.05, 0.95);
+  const axle: Wheels<number> = [tf, tf, 1 - tf, 1 - tf];
+  const load = share.map((s, w) => Math.max(0, mass * G * s + aeroAxle[w]! - side[w]! * transfer * axle[w]!)) as Wheels<number>;
 
   // Longitudinal requests.
   const vTop = cfg.engine.topSpeedKph * KPH * stats.topSpeed;
@@ -352,7 +360,8 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
     drive = -controls.brake * cfg.engine.reverseForceN * clamp((vRev + vFwd) / 0.5, 0, 1);
   }
   const brakeTotal = reversing ? 0 : controls.brake * cfg.brakes.maxForceN * stats.brakes;
-  const brakeShare: Wheels<number> = [cfg.brakes.frontBias / 2, cfg.brakes.frontBias / 2, (1 - cfg.brakes.frontBias) / 2, (1 - cfg.brakes.frontBias) / 2];
+  const bias = clamp(cfg.brakes.frontBias + setup.frontBiasAdd, 0.3, 0.9);
+  const brakeShare: Wheels<number> = [bias / 2, bias / 2, (1 - bias) / 2, (1 - bias) / 2];
 
   // LONGITUDINAL LOAD TRANSFER (card 03b): braking loads the fronts (they bite, the car turns in),
   // throttle loads the rears. dFz = m * a_long * cgHeight / wheelbase, with a_long from this tick's
@@ -384,7 +393,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
     const surf = ctx.track.surfaces[car.wheels[w]!.surface]!;
 
     // Balance knobs (03b): front/rear grip multipliers next to weight distribution and yaw inertia.
-    const cap = gripBase * (w < 2 ? cfg.tyres.frontGrip : cfg.tyres.rearGrip) * wearGrip(car.wheels[w]!.wear) * damageGrip(dmg, w, ctx.damage) * evolutionGrip(surface, p.x, p.y, ctx.evolution) * surf.grip * load[w]!;
+    const cap = gripBase * (w < 2 ? cfg.tyres.frontGrip : cfg.tyres.rearGrip) * wearGrip(car.wheels[w]!.wear) * damageGrip(dmg, w, ctx.damage) * evolutionGrip(surface, p.x, p.y, ctx.evolution) * surf.grip * (surf.id === 'asphalt' ? 1 : setup.offTrackGrip) * load[w]!;
     const capLat = cap * cfg.tyres.lateralGrip;
     const stopCap = (Math.abs(vLong) * wheelMass) / dt; // never push a wheel past standstill
 
@@ -397,7 +406,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
     // s rises to the peak at s = 1, then falls gently toward `falloff` (past the peak: sliding, catchable).
     const t = cfg.tyres;
     const alpha = Math.atan2(Math.abs(vLat), Math.max(Math.abs(vLong), t.lowSpeedMps));
-    const sLat = alpha / ((t.peakSlipDeg * Math.PI) / 180);
+    const sLat = alpha / ((t.peakSlipDeg * setup.peakSlip * Math.PI) / 180);
     // ABS (config/assists.json, keyboard brakes are all or nothing): a wheel gets no more brake than keeps
     // its combined slip at peakPct of the peak, allowing for only cornerShare of how hard it's cornering.
     // Straight-line braking never locks; braking hard while turning hard still can (the inside front).
@@ -459,6 +468,7 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
   const { throttle } = car.controls;
   // Practice (ownBox -1): any box. Race: only the car's own box; someone else's does nothing.
   const service = car.inPitBox && kph < cfg.fuel.pitServiceMaxKph && (ownBox < 0 || car.pitBox === ownBox);
+  const wearMul = setupEffects(car.build.setup, ctx.catalog).wear; // tyre pressure
 
   const wheels = car.wheels.map((wheel, w) => {
     let dw = cfg.wear.cornerPerSec * v4 * (Math.abs(forces[w]!.lat) / quarterWeight); // by actual lateral load
@@ -475,7 +485,7 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
     }
     return {
       ...wheel,
-      wear: service ? 1 : Math.max(0, wheel.wear - dw * dt),
+      wear: service ? 1 : Math.max(0, wheel.wear - dw * wearMul * dt),
       slipDeg: forces[w]!.slipDeg,
       usage: forces[w]!.usage,
       gripN: forces[w]!.gripN,

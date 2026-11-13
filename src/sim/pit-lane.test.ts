@@ -12,7 +12,7 @@ import { catalog, loadTrackNode, simContextNode } from '../../tools/load-track-n
 import { aiInputSource, buildRacingLine, createRaceWorld, createWorld, pitBoxPose, step, type AiConfig, type PhysicsConfig, type RaceConfig, type SimContext, type WorldState } from './index';
 
 const loaded = loadTrackNode('oxford');
-const base: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as PhysicsConfig)), contact: contactJson, race: raceJson as RaceConfig, slipstream: slipstreamJson };
+const base: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as unknown as PhysicsConfig)), contact: contactJson, race: raceJson as RaceConfig, slipstream: slipstreamJson };
 const line = buildRacingLine(loaded.track)!;
 const ppm = loaded.track.json.pxPerMeter;
 

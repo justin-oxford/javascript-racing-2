@@ -20,6 +20,10 @@ export interface MenuDeps {
   nightAvailable: boolean;
   /** Track evolution is on: offer the starting state. */
   evolution: boolean;
+  /** This track's id (setup presets are per track) and the setup sliders' range. */
+  trackId: string;
+  setupRange: number;
+  setupSlots: ReadonlyArray<{ slot: string; label: string; minus: string; plus: string }>;
   trackName: string;
   profiles: ProfileStore;
   /** Audio buses and their current volume. */
@@ -105,7 +109,7 @@ export class MainMenu {
         <div class="side">
           <div class="brand">JAVASCRIPT<br/>RACING</div>
           <div class="who"><span class="helmet" style="background:${esc(p.helmet)}"></span><span><b>${esc(p.name)}</b><small>${nameCode(p.name)}</small></span></div>
-          ${tabs.map(([t, label]) => `<button class="tab${t === this.tab ? ' on' : ''}" data-tab="${t}"${t === 'garage' ? ' disabled title="Coming with livery phase 2"' : ''}>${label}</button>`).join('')}
+          ${tabs.map(([t, label]) => `<button class="tab${t === this.tab ? ' on' : ''}" data-tab="${t}">${label}</button>`).join('')}
           <div class="track">${esc(this.d.trackName)}</div>
         </div>
         <div class="body">${this.mode === 'pause' && this.tab === 'play' ? this.pauseBody() : this.body(p)}</div>
@@ -118,7 +122,7 @@ export class MainMenu {
       case 'profile': return this.profileBody(p);
       case 'settings': return this.settingsBody(p);
       case 'records': return this.recordsBody();
-      default: return '<h2>Garage</h2><p class="note">Liveries and car setup land here with the livery card (phase 2) and the setup overhaul.</p>';
+      default: return this.garageBody(p);
     }
   }
 
@@ -159,6 +163,18 @@ export class MainMenu {
         ${this.d.nightAvailable ? `<label>Time of day</label>${this.choice('night', s.night ? 'night' : 'day', [['day', 'Day'], ['night', 'Night']] as const)}` : ''}
       </div>
       <p class="note">Races use at least one AI. Equal: every team performs the same, AI drivers differ by skill. Realistic damage costs grip; the pits repair it.</p>`;
+  }
+
+  private garageBody(p: Profile): string {
+    const cur = p.setups[this.d.trackId] ?? {}, r = this.d.setupRange;
+    return `<h2>Garage: setup for ${esc(this.d.trackName)}</h2>
+      <p class="note">Saved for this track in your profile and used whenever you drive it. Each slider trades something: no notch is best everywhere. You can also change it in practice when stopped in your pit box (car panel), where the balance readout shows which axle lets go first in each corner.</p>
+      <div class="rows setup">${this.d.setupSlots.map((s) => {
+        const v = Math.max(-r, Math.min(r, Math.round(cur[s.slot] ?? 0)));
+        return `<label>${esc(s.label)}</label><div class="inline"><small class="trade">${esc(s.minus)}</small><input type="range" min="${-r}" max="${r}" step="1" value="${v}" data-setup="${s.slot}" /><small class="trade">${esc(s.plus)}</small><b class="notch">${v > 0 ? '+' + v : v}</b></div>`;
+      }).join('')}</div>
+      <div class="inline"><button data-act="neutralSetup">NEUTRAL</button></div>
+      <p class="note">Liveries come here with the livery card (phase 2).</p>`;
   }
 
   private profileBody(p: Profile): string {
@@ -217,6 +233,7 @@ export class MainMenu {
     if (ds.act === 'deleteProfile') { if (confirm(`Delete the profile "${p.name}" and its settings? (Its lap records stay in this browser.)`)) { this.d.onProfile(this.d.profiles.remove(p.id)); this.render(); } return; }
     if (ds.act === 'export') return this.exportProfile(p);
     if (ds.act === 'resetKeys') return this.save({ ...p, keybinds: completeKeybinds(DEFAULT_KEYBINDS) });
+    if (ds.act === 'neutralSetup') { const setups = { ...p.setups }; delete setups[this.d.trackId]; return this.save({ ...p, setups }); }
     if (ds.bind) { this.capturing = ds.bind as BindAction; return this.render(); }
     if (ds.unbind) return this.save({ ...p, keybinds: unbindKey(p.keybinds, ds.unbind as BindAction, ds.key!) });
     if (ds.set) return this.set(ds.set, ds.val!);
@@ -245,6 +262,9 @@ export class MainMenu {
     if (t.dataset.field === 'name') {
       const code = this.root.querySelector('[data-id="code"]');
       if (code) code.textContent = nameCode(cleanName(t.value) || 'Player');
+    } else if (t.dataset.setup) {
+      const b = t.parentElement?.querySelector('.notch');
+      if (b) b.textContent = Number(t.value) > 0 ? `+${t.value}` : t.value;
     } else if (t.dataset.volume) {
       const p = this.p;
       // Volumes apply live; saved on release (change) so dragging doesn't rewrite the profile every step.
@@ -260,6 +280,7 @@ export class MainMenu {
     else if (f === 'team') this.save({ ...p, team: t.value });
     else if (f === 'active') { const q = this.d.profiles.setActive(t.value); if (q) { this.d.onProfile(q); this.render(); } }
     else if (f === 'import') void this.importProfile(t);
+    else if (t.dataset.setup) this.save({ ...p, setups: { ...p.setups, [this.d.trackId]: { ...(p.setups[this.d.trackId] ?? {}), [t.dataset.setup]: Number(t.value) } } });
     else if (t.dataset.volume) this.save({ ...p, settings: { ...p.settings, volumes: { ...p.settings.volumes, [t.dataset.volume]: Number(t.value) } } });
   }
 

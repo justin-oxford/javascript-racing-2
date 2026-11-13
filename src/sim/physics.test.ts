@@ -15,6 +15,10 @@ import wallTracing from '../../config/wall-tracing.json';
 import { catalog, surfaces } from '../../tools/load-track-node';
 import {
   buildStats,
+  normalizeSetup,
+  NEUTRAL_SETUP,
+  setupEffects,
+  type CarSetup,
   driverSkill,
   skilledPreset,
   createPhysicsCache,
@@ -53,7 +57,7 @@ function arena(wM: number, hM: number, spawnM: Pose, paint?: (xM: number, yM: nu
   return {
     track,
     walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing),
-    physics: structuredClone(physicsJson) as PhysicsConfig,
+    physics: structuredClone(physicsJson) as unknown as PhysicsConfig,
     catalog,
     rules,
     contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, cache: createPhysicsCache(),
@@ -72,16 +76,16 @@ const FULL: CarInput = { throttle: 1, brake: 0, steer: 0 };
 const kph = (ms: number) => ms * 3.6;
 
 describe('car stats (team x spec x setup)', () => {
-  const build = (team: string, spec = 'C1', setup = { downforce: 'Med', gearing: 'Med', brakes: 'Med' }): CarBuild => ({ team, spec, setup });
+  const build = (team: string, spec = 'C1', setup: Partial<CarSetup> = {}): CarBuild => ({ team, spec, setup: { ...NEUTRAL_SETUP, ...setup } });
 
-  it('Foucault C1 Med is the baseline', () => {
+  it('Foucault C1 with a neutral setup is the baseline', () => {
     expect(buildStats(build('foucault'), catalog)).toEqual({ engine: 1, topSpeed: 1, brakes: 1, drag: 1, downforce: 1, grip: 1 });
   });
 
   it('Equal performance: equalise 1 gives every team, Motus included, the same stats; spec and setup still count', () => {
-    const ref = buildStats({ ...build('foucault', 'C2', { downforce: 'High', gearing: 'Short', brakes: 'Med' }), equalise: 1 }, catalog);
+    const ref = buildStats({ ...build('foucault', 'C2', { frontWing: 2, rearWing: 2, gearing: -3 }), equalise: 1 }, catalog);
     for (const t of catalog.teams) {
-      const st = buildStats({ ...build(t.id, 'C2', { downforce: 'High', gearing: 'Short', brakes: 'Med' }), equalise: 1 }, catalog);
+      const st = buildStats({ ...build(t.id, 'C2', { frontWing: 2, rearWing: 2, gearing: -3 }), equalise: 1 }, catalog);
       for (const k of Object.keys(ref) as (keyof typeof ref)[]) expect(st[k]).toBeCloseTo(ref[k], 12);
     }
     expect(buildStats({ ...build('motus'), equalise: 0.5 }, catalog).engine).toBeCloseTo(0.875); // halfway to 1.0
@@ -103,11 +107,22 @@ describe('car stats (team x spec x setup)', () => {
     expect(skilledPreset(p, 0)).toBe(p);
   });
 
-  it('carries v0.16 ratios: Motus is slow, C3 is slower than C1, short gearing trades top speed for accel', () => {
+  it('carries v0.16 ratios: Motus is slow, C3 is slower than C1; setup notches trade (short gearing: accel for top speed, wings: grip for drag)', () => {
     expect(buildStats(build('motus'), catalog).engine).toBeCloseTo(0.75);
     expect(buildStats(build('foucault', 'C3'), catalog).topSpeed).toBeCloseTo(5 / 7);
-    const short = buildStats(build('foucault', 'C1', { downforce: 'High', gearing: 'Short', brakes: 'Med' }), catalog);
-    expect([short.engine, short.topSpeed, short.drag, short.downforce]).toEqual([1.2, 0.95, 1.05, 1.05]);
+    const c = catalog.specs.setup;
+    const short = buildStats(build('foucault', 'C1', { gearing: -3 }), catalog);
+    expect(short.engine).toBeCloseTo(1 - 3 * c.gearing.engine, 9);
+    expect(short.topSpeed).toBeCloseTo(1 - 3 * c.gearing.topSpeed, 9);
+    expect(short.engine).toBeGreaterThan(1);
+    expect(short.topSpeed).toBeLessThan(1);
+    const wings = buildStats(build('foucault', 'C1', { frontWing: 3, rearWing: 3 }), catalog);
+    expect(wings.downforce).toBeGreaterThan(1);
+    expect(wings.drag).toBeGreaterThan(1);
+    // A v0.16-style setup (physics.json's default car) still works: Med = neutral, High downforce = +2 wings.
+    expect(normalizeSetup({ downforce: 'Med', gearing: 'Med', brakes: 'Med' })).toEqual(NEUTRAL_SETUP);
+    expect(normalizeSetup({ downforce: 'High', gearing: 'Short', brakes: 'Med' })).toMatchObject({ frontWing: 2, rearWing: 2, gearing: -3 });
+    expect(normalizeSetup({ frontWing: 9, gearing: -2.6, balance: 'x' })).toMatchObject({ frontWing: 5, gearing: -3, balance: 0 });
   });
 });
 
@@ -201,6 +216,31 @@ describe('physics', () => {
     expect(right[2].wear).toBeLessThan(right[3].wear);
     expect(left[1].wear).toBeLessThan(left[0].wear);
     expect(left[3].wear).toBeLessThan(left[2].wear);
+  });
+
+  it('setup: front wing loads the fronts, balance shifts the transfer, bias the brakes, pressure trades grip for wear', () => {
+    const fx = (setup: Partial<CarSetup>) => setupEffects({ ...NEUTRAL_SETUP, ...setup }, catalog);
+    expect(fx({}).frontDownforce).toBe(1);
+    expect(fx({ frontWing: 3 }).frontDownforce).toBeGreaterThan(1);
+    expect(fx({ frontWing: 3 }).rearDownforce).toBe(1);
+    expect(fx({ rideHeight: -3 }).frontDownforce).toBeGreaterThan(1); // lower = more downforce...
+    expect(fx({ rideHeight: -3 }).offTrackGrip).toBeLessThan(1); // ...but kerbs and grass bite harder
+    expect(fx({ balance: 2 }).frontTransferAdd).toBeGreaterThan(0);
+    expect(fx({ brakeBias: -2 }).frontBiasAdd).toBeLessThan(0);
+    const low = fx({ tyrePressure: -3 }), high = fx({ tyrePressure: 3 });
+    expect(low.grip).toBeGreaterThan(high.grip);
+    expect(low.wear).toBeGreaterThan(high.wear);
+    expect(low.peakSlip).toBeGreaterThan(high.peakSlip); // lazier
+    // On the road: a stiff front (understeer) turns less at the same steer than a stiff rear.
+    const ctx = arena(300, 300, { x: 150, y: 290, heading: 0 });
+    const yaw = (balance: number) => {
+      let w = createWorld(ctx, [{ ...ctx.physics.defaultCar, setup: { ...NEUTRAL_SETUP, balance } }]);
+      w = drive(ctx, w, 60 * 2, { throttle: 0.6, brake: 0, steer: 0 });
+      let y = 0;
+      w = drive(ctx, w, 45, { throttle: 0.6, brake: 0, steer: 0.7 }, (s) => { y += Math.abs(s.cars[0]!.angVel); });
+      return y;
+    };
+    expect(yaw(5)).toBeLessThan(yaw(-5));
   });
 
   it('throttle wears the rears by how hard they are driven: a launch a lot, flat out at speed little', () => {

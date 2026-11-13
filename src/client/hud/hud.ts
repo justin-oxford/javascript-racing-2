@@ -1,6 +1,6 @@
 // The v0.16 HUD, rebuilt: top timing bar, timing dropdown, spec/team menu, vehicle + setup panel.
 // It reads sim state and the session; it never writes sim state. Choices go out through callbacks.
-import { tyreLife, wearGrip } from '../../sim';
+import { normalizeSetup, tyreLife, wearGrip } from '../../sim';
 import type { CarSetup, CarState, CatalogLike } from './hud-types';
 import type { Session, Tile } from './session';
 import type { HudConfig } from './timing-lines';
@@ -9,7 +9,7 @@ import './hud.css';
 export interface HudCallbacks {
   onSpec(spec: string): void;
   onTeam(team: string): void;
-  onSetup(slot: keyof CarSetup, value: string): void;
+  onSetup(slot: keyof CarSetup, value: number): void;
   /** AI opponents: how many (0-9) and which difficulty preset. Restarts practice from the grid. */
   onAi(count: number, preset: string): void;
   /** Start a race (card 06) with the menu's AI count, difficulty, team and spec. */
@@ -37,11 +37,17 @@ const fmt = (t: number | undefined, plus = false): string => {
   return m ? `${sign}${m}:${s}` : `${sign}${(a).toFixed(3)}`;
 };
 
-const SLOTS: Array<{ slot: keyof CarSetup; label: string }> = [
-  { slot: 'downforce', label: 'Downforce' },
-  { slot: 'gearing', label: 'Gearing' },
-  { slot: 'brakes', label: 'Brake Pressure' },
+/** Setup sliders (Car setup overhaul card): what - and + trade, for the labels. */
+export const SETUP_LABELS: Array<{ slot: keyof CarSetup; label: string; minus: string; plus: string }> = [
+  { slot: 'frontWing', label: 'Front wing', minus: 'less front grip, less drag', plus: 'more front grip, more drag' },
+  { slot: 'rearWing', label: 'Rear wing', minus: 'less rear grip, faster on straights', plus: 'more rear grip, slower on straights' },
+  { slot: 'gearing', label: 'Gearing', minus: 'short: acceleration', plus: 'long: top speed' },
+  { slot: 'brakeBias', label: 'Brake bias', minus: 'rearward: rotates, rear can lock', plus: 'forward: stable, fronts lock' },
+  { slot: 'balance', label: 'Suspension', minus: 'stiff rear: oversteer', plus: 'stiff front: understeer' },
+  { slot: 'rideHeight', label: 'Ride height', minus: 'low: downforce, kerbs bite', plus: 'high: less downforce, forgiving' },
+  { slot: 'tyrePressure', label: 'Tyre pressure', minus: 'low: grip, more wear, lazy', plus: 'high: less grip and wear, sharp' },
 ];
+const SLOTS = SETUP_LABELS;
 
 export class Hud {
   private readonly root: HTMLElement;
@@ -168,14 +174,17 @@ export class Hud {
           <div class="fuel"><div>FUEL LEVEL</div><div class="gauge"><div class="level" data-id="fuelLevel"></div><span data-id="fuelPct">100</span></div></div>
         </div>
         <div class="title setup-title">Car Setup Adjustments</div>
-        <div class="setup">${SLOTS.map((s) => `
-          <div class="slot"><div>${s.label.toUpperCase()}</div>
-            <button class="up" data-slot="${s.slot}" data-dir="1">+</button>
-            <div class="value" data-id="setup-${s.slot}">Med</div>
+        <div class="setup notched">${SLOTS.map((s) => `
+          <div class="nslot" title="- ${s.minus} / + ${s.plus}"><span class="lbl">${s.label.toUpperCase()}</span>
             <button class="dn" data-slot="${s.slot}" data-dir="-1">-</button>
+            <span class="track"><span class="mark" data-id="setupMark-${s.slot}"></span></span>
+            <button class="up" data-slot="${s.slot}" data-dir="1">+</button>
+            <span class="value" data-id="setup-${s.slot}">0</span>
           </div>`).join('')}
         </div>
         <div class="hint" data-id="setupHint">Stop in a pit box to change the setup.</div>
+        <div class="title setup-title">Balance (practice: which axle lets go first)</div>
+        <div class="balance" data-id="balance">Drive a few laps.</div>
       </div>`;
   }
 
@@ -198,10 +207,10 @@ export class Hud {
     this.root.querySelectorAll<HTMLButtonElement>('[data-slot]').forEach((b) =>
       b.addEventListener('click', () => {
         const slot = b.dataset.slot as keyof CarSetup;
-        const options = Object.keys(this.catalog.specs.setups[slot] ?? {});
-        const current = this.setup?.[slot] ?? 'Med';
-        const i = Math.max(0, Math.min(options.length - 1, options.indexOf(current) + Number(b.dataset.dir)));
-        if (options[i] && options[i] !== current) this.cb.onSetup(slot, options[i]);
+        const range = this.catalog.specs.setup.range;
+        const current = this.setup?.[slot] ?? 0;
+        const next = Math.max(-range, Math.min(range, current + Number(b.dataset.dir)));
+        if (next !== current) this.cb.onSetup(slot, next);
       }),
     );
     // Buttons shouldn't keep keyboard focus (Space would "click" them instead of braking).
@@ -244,6 +253,18 @@ export class Hud {
     this.ai = { count, preset };
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-count]').forEach((b) => b.classList.toggle('active', Number(b.dataset.aiCount) === count));
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-preset]').forEach((b) => b.classList.toggle('active', b.dataset.aiPreset === preset));
+  }
+
+  /** The balance readout: per corner, front / rear first as a share of passes. */
+  setBalance(rows: Array<{ name: string; front: number; rear: number; passes: number }>): void {
+    const el = this.el.balance!;
+    const seen = rows.filter((r) => r.passes > 0);
+    if (!seen.length) { el.textContent = 'Drive a few laps.'; return; }
+    el.innerHTML = seen.map((r) => {
+      const f = Math.round((100 * r.front) / r.passes), rr = Math.round((100 * r.rear) / r.passes);
+      const tag = f >= 50 && f > rr ? 'under' : rr >= 50 && rr > f ? 'over' : '';
+      return `<span class="corner ${tag}" title="${r.passes} passes: front first ${f}%, rear first ${rr}%">${r.name}<small>${tag === 'under' ? `F ${f}%` : tag === 'over' ? `R ${rr}%` : 'ok'}</small></span>`;
+    }).join('');
   }
 
   /** Highlight the current damage setting; the damage diagram shows only when it's on. */
@@ -349,8 +370,13 @@ export class Hud {
     this.el.fuelPct!.textContent = String(Math.round(fuel * 100));
 
     // Setup: shows the car's setup; changes only while stopped in a pit box.
-    this.setup = car.build.setup;
-    for (const s of SLOTS) this.el[`setup-${s.slot}`]!.textContent = car.build.setup[s.slot];
+    this.setup = normalizeSetup(car.build.setup, this.catalog.specs.setup.range);
+    const range = this.catalog.specs.setup.range;
+    for (const s of SLOTS) {
+      const v = this.setup[s.slot];
+      this.el[`setup-${s.slot}`]!.textContent = v > 0 ? `+${v}` : String(v);
+      this.el[`setupMark-${s.slot}`]!.style.left = `${((v + range) / (2 * range)) * 100}%`;
+    }
     this.root.querySelectorAll<HTMLButtonElement>('[data-slot]').forEach((b) => (b.disabled = !inBoxStopped));
     this.el.setupHint!.textContent = inBoxStopped ? 'In the box: fresh tyres, refuelling. Setup changes apply now.'
       : race && race.box > 0 ? `Your pit box is ${race.box} (outlined when you're in the pit lane). Only your box services you.`

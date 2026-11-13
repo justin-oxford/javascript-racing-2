@@ -28,7 +28,7 @@ function arena(wM: number, hM: number, spawn: { x: number; y: number; heading: n
       data[y * w + x] = idx(x < PPM || y < PPM || x >= w - PPM || y >= h - PPM ? 'wall' : (paint?.(x / PPM, y / PPM) ?? 'asphalt'));
   const json: TrackJson = { id: 't', name: 't', pxPerMeter: PPM, files: { mask: 'm' }, timingLines: {}, racingLine: [], grid: [], spawn: { x: spawn.x * PPM, y: spawn.y * PPM, heading: spawn.heading } };
   const track = createSimTrack(json, { width: w, height: h, data }, surfaces);
-  return { track, walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing), physics: structuredClone(physicsJson) as PhysicsConfig, catalog, rules, contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, cache: createPhysicsCache() };
+  return { track, walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing), physics: structuredClone(physicsJson) as unknown as PhysicsConfig, catalog, rules, contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, cache: createPhysicsCache() };
 }
 
 /** Run inputs, collect each tick's per-wheel FX. */

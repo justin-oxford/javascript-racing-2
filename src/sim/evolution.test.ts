@@ -14,7 +14,7 @@ import {
 } from './index';
 
 const loaded = loadTrackNode('oxford');
-const ctx: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as PhysicsConfig)), contact: contactJson, race: raceJson as RaceConfig, slipstream: slipstreamJson };
+const ctx: SimContext = { ...simContextNode(loaded, structuredClone(physicsJson as unknown as PhysicsConfig)), contact: contactJson, race: raceJson as RaceConfig, slipstream: slipstreamJson };
 const cfg = ctx.evolution;
 const line = buildRacingLine(ctx.track)!;
 const ppm = ctx.track.json.pxPerMeter;

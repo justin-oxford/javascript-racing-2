@@ -2,7 +2,7 @@
 // tick, so changes apply to the running car immediately. Save writes them back to /config.
 // Tuning is Justin's job; this file's job is to be a good instrument.
 import GUI, { type Controller } from 'lil-gui';
-import { surfaceAtPoint, wheelPositions } from '../../sim';
+import { normalizeSetup, SETUP_SLOTS, surfaceAtPoint, wheelPositions } from '../../sim';
 import type { AiConfig, AssistsConfig, CarBuild, DamageConfig, ErsConfig, EvolutionConfig, ContactConfig, PhysicsConfig, RaceConfig, Rules, SlipstreamConfig, SurfaceDef, WorldState } from '../../sim';
 import type { VfxConfig } from '../vfx/triggers';
 import type { VfxQuality } from '../vfx/vfx';
@@ -230,12 +230,11 @@ export class TuningPanel {
 
     // Which car: team x spec x setup.
     const car = gui.addFolder('Car (team × spec × setup)');
-    const sel = structuredClone(physics.defaultCar);
+    const sel = { ...structuredClone(physics.defaultCar), setup: normalizeSetup(physics.defaultCar.setup, catalog.specs.setup.range) };
     const changed = () => this.t.onBuildChange(structuredClone(sel));
     car.add(sel, 'team', Object.fromEntries(catalog.teams.map((t) => [t.name, t.id]))).onChange(changed);
     car.add(sel, 'spec', Object.keys(catalog.specs.specs)).onChange(changed);
-    for (const slot of Object.keys(sel.setup) as Array<keyof CarBuild['setup']>)
-      car.add(sel.setup, slot, Object.keys(catalog.specs.setups[slot] ?? {})).name(`setup: ${slot}`).onChange(changed);
+    for (const slot of SETUP_SLOTS) car.add(sel.setup, slot, -catalog.specs.setup.range, catalog.specs.setup.range, 1).name(`setup: ${slot}`).onChange(changed);
     car.add({ makeDefault: () => (physics.defaultCar = structuredClone(sel)) }, 'makeDefault').name('Use as default car (then Save)');
 
     for (const [section, values] of Object.entries(physics)) {

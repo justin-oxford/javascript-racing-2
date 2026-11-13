@@ -46,7 +46,7 @@ import {
 // Live config objects. The tuning panel edits these in place; the sim reads them every tick.
 export { surfacesConfig };
 export const surfaces: SurfaceDef[] = surfacesConfig.surfaces;
-export const physics = physicsJson as PhysicsConfig;
+export const physics = physicsJson as unknown as PhysicsConfig;
 /** config/contact.json, live (tuning panel). */
 export const contact: ContactConfig = contactJson;
 /** config/race.json. */

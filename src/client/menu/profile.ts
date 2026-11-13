@@ -30,6 +30,8 @@ export interface Profile {
   team: string;
   settings: ProfileSettings;
   keybinds: Keybinds;
+  /** Car setup presets per track id (notches; see the sim's CarSetup). */
+  setups: Record<string, Record<string, number>>;
 }
 
 export interface KeyValueStore {
@@ -93,6 +95,7 @@ export function completeProfile(raw: unknown, id: string): Profile {
     team: typeof p.team === 'string' ? p.team : '',
     settings: completeSettings(p.settings),
     keybinds: completeKeybinds(p.keybinds),
+    setups: p.setups && typeof p.setups === 'object' ? Object.fromEntries(Object.entries(p.setups).filter(([, v]) => v && typeof v === 'object').map(([k, v]) => [k, Object.fromEntries(Object.entries(v).filter(([, n]) => typeof n === 'number' && Number.isFinite(n)))])) : {},
   };
 }
 
@@ -134,7 +137,7 @@ export class ProfileStore {
   }
 
   create(name: string, from?: Profile): Profile {
-    const p = completeProfile({ ...(from ? { settings: from.settings, keybinds: from.keybinds, helmet: from.helmet, team: from.team } : {}), name }, this.newId());
+    const p = completeProfile({ ...(from ? { settings: from.settings, keybinds: from.keybinds, helmet: from.helmet, team: from.team, setups: from.setups } : {}), name }, this.newId());
     this.save(p);
     this.kv.setItem(ACTIVE, p.id);
     return p;
