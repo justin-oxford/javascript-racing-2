@@ -1,0 +1,10 @@
+{
+  "_comment": "Track evolution (POLISH card). A grid of cellM cells over the racing surface. rubber: every wheel lays layPerSec x load share x (0.5 + slip) where it runs; full rubber = +gripBonus grip. marbles: tyre wear x shedPerWear lands throwM to the outside of a corner (scaled by how hard it corners); full marbles = -gripLoss grip; each wheel running over them sweeps sweepPerSec. sessions.rubberLoss: share of rubber gone between sessions of a weekend (marbles are swept to zero). start: a new weekend's rubber along the racing line for Medium / Rubbered, over lineWidthM. enabled: false = fixed grip, as before this card. visual (client only): rubber drawn as rubberRgb up to rubberMaxAlpha; marbles as marbleRgb pebbles, up to marbleDots per cell.",
+  "enabled": true,
+  "cellM": 2,
+  "rubber": { "layPerSec": 0.05, "gripBonus": 0.04 },
+  "marbles": { "shedPerWear": 40, "throwM": 6, "gripLoss": 0.15, "sweepPerSec": 0.25 },
+  "sessions": { "rubberLoss": 0.1 },
+  "start": { "medium": 0.35, "rubbered": 0.7, "lineWidthM": 3 },
+  "visual": { "rubberRgb": "22, 22, 24", "rubberMaxAlpha": 0.55, "marbleRgb": "38, 30, 24", "marbleDots": 14 }
+}

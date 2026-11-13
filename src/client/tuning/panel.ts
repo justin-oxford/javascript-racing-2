@@ -2,7 +2,8 @@
 // tick, so changes apply to the running car immediately. Save writes them back to /config.
 // Tuning is Justin's job; this file's job is to be a good instrument.
 import GUI, { type Controller } from 'lil-gui';
-import type { AiConfig, AssistsConfig, CarBuild, DamageConfig, ErsConfig, ContactConfig, PhysicsConfig, RaceConfig, Rules, SlipstreamConfig, SurfaceDef, WorldState } from '../../sim';
+import { surfaceAtPoint, wheelPositions } from '../../sim';
+import type { AiConfig, AssistsConfig, CarBuild, DamageConfig, ErsConfig, EvolutionConfig, ContactConfig, PhysicsConfig, RaceConfig, Rules, SlipstreamConfig, SurfaceDef, WorldState } from '../../sim';
 import type { VfxConfig } from '../vfx/triggers';
 import type { VfxQuality } from '../vfx/vfx';
 import type { AudioConfig } from '../audio/targets';
@@ -83,6 +84,16 @@ const RANGES: Record<string, [number, number, number]> = {
   'ai.recovery.backwardsDeg': [60, 180, 5],
   'contact.carFriction': [0, 1.5, 0.01],
   'contact.carRestitution': [0, 1, 0.01],
+  'evolution.rubber.layPerSec': [0, 0.5, 0.005],
+  'evolution.rubber.gripBonus': [0, 0.2, 0.005],
+  'evolution.marbles.shedPerWear': [0, 300, 5],
+  'evolution.marbles.throwM': [0, 20, 0.5],
+  'evolution.marbles.gripLoss': [0, 0.6, 0.01],
+  'evolution.marbles.sweepPerSec': [0, 2, 0.05],
+  'evolution.sessions.rubberLoss': [0, 1, 0.01],
+  'evolution.start.medium': [0, 1, 0.05],
+  'evolution.start.rubbered': [0, 1, 0.05],
+  'evolution.start.lineWidthM': [0, 10, 0.5],
   'ers.mode.power': [0.8, 1.2, 0.005],
   'ers.mode.fuel': [0.5, 1.5, 0.01],
   'ers.battery.capacityKJ': [0, 2000, 10],
@@ -168,11 +179,13 @@ export interface TuningTargets {
   damage: DamageConfig;
   /** config/ers.json, live: engine modes and battery deploy. */
   ers: ErsConfig;
+  /** config/evolution.json, live: rubber and marbles. */
+  evolution: EvolutionConfig;
   /** Called when the team/spec/setup changes, to rebuild the player's car. */
   onBuildChange(build: CarBuild): void;
 }
 
-async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai' | 'contact' | 'race' | 'slipstream' | 'assists' | 'damage' | 'ers', value: unknown): Promise<string> {
+async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai' | 'contact' | 'race' | 'slipstream' | 'assists' | 'damage' | 'ers' | 'evolution', value: unknown): Promise<string> {
   const res = await fetch(`/__tuning/save/${name}`, { method: 'POST', headers: { 'x-tuning-panel': '1' }, body: formatTrackJson(value) });
   return res.ok ? `config/${name}.json` : `${name}: ${await res.text()}`;
 }
@@ -294,6 +307,15 @@ export class TuningPanel {
     for (const key of Object.keys(this.t.ers.battery)) this.slider(ersF, this.t.ers.battery as unknown as Record<string, number>, key, `ers.battery.${key}`);
     ersF.close();
 
+    const evoF = gui.addFolder('Track evolution (rubber + marbles)');
+    evoF.add(this.t.evolution, 'enabled').name('on (next session)');
+    for (const section of ['rubber', 'marbles', 'sessions', 'start'] as const) {
+      const sub = evoF.addFolder(section);
+      for (const key of Object.keys(this.t.evolution[section])) this.slider(sub, this.t.evolution[section] as unknown as Record<string, number>, key, `evolution.${section}.${key}`);
+      sub.close();
+    }
+    evoF.close();
+
     const dmg = gui.addFolder('Car damage (when the menu setting is on)');
     for (const key of ['thresholdMps', 'perMps', 'strength', 'wallMult', 'barrierMult', 'carMult', 'endZone'] as const) this.slider(dmg, this.t.damage, key, `damage.${key}`);
     for (const section of ['effects', 'repair'] as const) {
@@ -337,9 +359,9 @@ export class TuningPanel {
       status.msg = m;
       statusCtl.updateDisplay();
     };
-    const all = () => ({ physics, surfaces: this.t.surfacesConfig, rules, vfx: this.t.vfx, audio: this.t.audio, ai: this.t.ai, contact: this.t.contact, race: this.t.race, slipstream: this.t.slipstream, assists: this.t.assists, damage: this.t.damage, ers: this.t.ers });
+    const all = () => ({ physics, surfaces: this.t.surfacesConfig, rules, vfx: this.t.vfx, audio: this.t.audio, ai: this.t.ai, contact: this.t.contact, race: this.t.race, slipstream: this.t.slipstream, assists: this.t.assists, damage: this.t.damage, ers: this.t.ers, evolution: this.t.evolution });
     io.add({
-      save: async () => !import.meta.env.DEV ? show('Save only works on the local dev server: use Copy all settings') : show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai), saveConfig('contact', this.t.contact), saveConfig('race', this.t.race), saveConfig('slipstream', this.t.slipstream), saveConfig('assists', this.t.assists), saveConfig('damage', this.t.damage), saveConfig('ers', this.t.ers)])).join(', ')),
+      save: async () => !import.meta.env.DEV ? show('Save only works on the local dev server: use Copy all settings') : show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai), saveConfig('contact', this.t.contact), saveConfig('race', this.t.race), saveConfig('slipstream', this.t.slipstream), saveConfig('assists', this.t.assists), saveConfig('damage', this.t.damage), saveConfig('ers', this.t.ers), saveConfig('evolution', this.t.evolution)])).join(', ')),
     }, 'save').name('Save to /config');
     io.add({ copy: () => void navigator.clipboard.writeText(formatTrackJson(physics)).then(() => show('physics.json copied')) }, 'copy').name('Copy physics JSON');
     // Every config file the panel edits, keyed by file name: paste it to Claude to write them to /config.
@@ -374,10 +396,12 @@ export class TuningPanel {
     const bar = (v: number) => '█'.repeat(Math.round(v * 10)).padEnd(10, '·');
     const pct = (v: number) => `${(v * 100).toFixed(0)}%`;
     const names = ['FL', 'FR', 'RL', 'RR'];
+    const wp = wheelPositions(c, physics);
     const rows = c.wheels
       .map((w, i) => {
         const sliding = w.usage > 1 ? ' class="slide"' : '';
-        return `<tr><td>${names[i]}</td><td>${surfaces[w.surface]?.id ?? '?'}</td><td>${pct(w.wear)}</td><td>${w.slipDeg.toFixed(1)}°</td><td${sliding}>${pct(Math.min(w.usage, 9.99))}</td><td>${(w.gripN / 1000).toFixed(1)}</td><td>${(w.loadN / 1000).toFixed(1)}</td></tr>`;
+        const evo = surfaceAtPoint(world.surface, wp[i]!.x, wp[i]!.y);
+        return `<tr><td>${names[i]}</td><td>${surfaces[w.surface]?.id ?? '?'}${world.surface ? ` <small>r${Math.round(evo.rubber * 100)} m${Math.round(evo.marbles * 100)}</small>` : ''}</td><td>${pct(w.wear)}</td><td>${w.slipDeg.toFixed(1)}°</td><td${sliding}>${pct(Math.min(w.usage, 9.99))}</td><td>${(w.gripN / 1000).toFixed(1)}</td><td>${(w.loadN / 1000).toFixed(1)}</td></tr>`;
       })
       .join('');
     const flags = [c.inPitLane && 'PIT LIMITER', c.inPitBox && 'PIT BOX', c.offTrack && 'OFF TRACK', c.wallContact && 'WALL', c.barrierContact && 'BARRIER']

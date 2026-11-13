@@ -1,4 +1,4 @@
-import { aiInputSource, driverSkill, skilledPreset, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, driverSkill, skilledPreset, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -12,6 +12,7 @@ import {
   assists,
   damage,
   ers,
+  evolution,
   getTrackJsonStub,
   loadBackground,
   loadMask,
@@ -43,6 +44,7 @@ import vfxConfig from '../../config/vfx.json';
 import { GameAudio } from './audio/audio';
 import { soundTargets, topSpeedKph } from './audio/targets';
 import { Vfx } from './vfx/vfx';
+import { EvolutionLayer } from './vfx/evolution-layer';
 import nightJson from '../../config/night.json';
 import { drawRearLights, previewNight, shadeImage, type NightConfig } from './night';
 import './style.css';
@@ -101,11 +103,14 @@ async function main(): Promise<void> {
   const driverSeed = crypto.getRandomValues(new Uint32Array(1))[0]!;
   const skillOn = (): boolean => (perfMode === 'equal' ? aiCfg.skill?.inEqual : aiCfg.skill?.inTeam) ?? false;
   const vfx = new Vfx(mask.track.mask.width, mask.track.mask.height, vfxConfig);
+  const evoLayer = new EvolutionLayer(evolution.visual ?? { rubberRgb: '22, 22, 24', rubberMaxAlpha: 0.55, marbleRgb: '38, 30, 24', marbleDots: 14 });
+  vfx.wearRubber = !evolution.enabled;
   const audio = new GameAudio(audioConfig);
   const timingLines = new TimingLines(hudConfig);
   // Static layer = background + timing lines + every mark so far. Rebuilt only when something moves.
   renderer.staticPainter = (c) => {
     timingLines.drawStatic(c, ctx.track);
+    evoLayer.draw(c, curr?.surface, json.pxPerMeter); // rubber + marbles from the sim, under the skid marks
     vfx.drawHistory(c);
   };
   renderer.overhead = overhead;
@@ -156,8 +161,16 @@ async function main(): Promise<void> {
   /** The race being run (for Restart), undefined in practice. */
   let raceSetup: { laps: number; grid: 'random' | 'pole' | 'back'; order?: number[] | undefined } | undefined;
   /** The race weekend in progress (practice -> qualifying -> race), undefined otherwise. */
-  let weekend: { laps: number; stage: 'practice' | 'quali' | 'race'; grid?: number[] } | undefined;
+  let weekend: { laps: number; stage: 'practice' | 'quali' | 'race'; grid?: number[]; started?: boolean } | undefined;
   /** (Re)start practice: the player plus aiCount AI cars, everyone back on the grid. */
+  // Track evolution (POLISH card): a new weekend or standalone session starts from the profile's starting
+  // state; the sessions of a weekend carry the surface over (marbles swept, a little rubber lost).
+  const freshSurface = () => (ctx.evolution.enabled ? seedRubber(newSurfaceGrid(ctx.track, ctx.evolution), ctx.track, json.racingLine, profile.settings.trackStart, ctx.evolution) : undefined);
+  const withSurface = (w: WorldState, s: SurfaceGrid | undefined): WorldState => {
+    renderer.invalidateStatic(); // show the new session's track at once
+    const { surface: _old, ...rest } = w;
+    return s ? { ...rest, surface: s } : rest;
+  };
   const startPractice = (keepWeekend = false): void => {
     raceSetup = undefined;
     if (!keepWeekend) weekend = undefined;
@@ -165,7 +178,11 @@ async function main(): Promise<void> {
     if (!racingLine) aiCount = 0;
     const builds: CarBuild[] = [me, ...aiBuilds(me, aiCount)];
     if (aiCount === 0) for (let i = 1; i <= extra; i++) builds.push(physics.defaultCar);
-    curr = createWorld(ctx, builds, settings());
+    // Mid-weekend practice restarts (menu changes) keep the track as it is; anything else starts afresh.
+    const keepTrack = keepWeekend && weekend?.stage === 'practice' && weekend.started && curr?.surface;
+    const was = curr?.surface;
+    curr = withSurface(createWorld(ctx, builds, settings()), keepTrack ? was : freshSurface());
+    if (keepWeekend && weekend) weekend = { ...weekend, started: true };
     prev = curr;
     drivers = aiCount === 0 ? [keyboard, ...Array.from({ length: extra }, (_, k) => new DonutInput(k + 1))] : [keyboard, ...aiDrivers(aiCount)];
     hud.setAi(aiCount, aiPreset);
@@ -178,12 +195,15 @@ async function main(): Promise<void> {
       return startPractice();
     }
     raceSetup = { laps, grid, order };
+    const carried = curr?.surface;
     if (!order) weekend = undefined; // a quick race leaves any weekend
     const me = withPerf(curr?.cars[0]?.build ?? startBuild);
     const count = Math.max(1, aiCount);
     const builds: CarBuild[] = [me, ...aiBuilds(me, count)];
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!; // client-side: the sim itself stays seeded
     curr = createRaceWorld(ctx, builds, { laps, seed, playerSlot: grid === 'pole' ? 0 : grid === 'back' ? count : undefined, grid: order, settings: settings() });
+    // The race of a weekend: the track as qualifying left it, swept. A quick race: the starting state.
+    curr = withSurface(curr, order && carried ? nextSession(carried, ctx.evolution) : freshSurface());
     prev = curr;
     drivers = [keyboard, ...aiDrivers(count)];
     hud.setAi(aiCount, aiPreset);
@@ -206,7 +226,9 @@ async function main(): Promise<void> {
     const count = Math.max(1, aiCount);
     const builds: CarBuild[] = [me, ...aiBuilds(me, count)];
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
+    const fromPractice = curr.surface;
     curr = createQualiWorld(ctx, builds, seed, pitQueuePoses(racingLine, builds.length, json.pxPerMeter)!, settings());
+    curr = withSurface(curr, fromPractice ? nextSession(fromPractice, ctx.evolution) : freshSurface());
     prev = curr;
     raceSetup = undefined;
     drivers = [keyboard, ...aiDrivers(count)];
@@ -364,6 +386,7 @@ async function main(): Promise<void> {
     aiPresets: Object.keys(aiCfg.presets),
     defaultPreset: aiCfg.defaultPreset,
     nightAvailable: !!night,
+    evolution: ctx.evolution.enabled,
     trackName: json.name,
     profiles,
     volumes: () => (['master', 'engine', 'tyres', 'impacts', 'ui'] as const).filter((b) => b in audio.volumes).map((bus) => ({ bus, value: audio.volumes[bus] })),
@@ -457,6 +480,7 @@ async function main(): Promise<void> {
         assists,
         damage,
         ers,
+        evolution,
         volumes: { values: audio.volumes, set: (bus, v) => audio.setVolume(bus, v) },
         onBuildChange: (b) => {
           const build = withPerf(b);
@@ -573,6 +597,9 @@ async function main(): Promise<void> {
       const inputs = drivers.map((d) => d.read(curr.tick));
       prev = curr;
       curr = step(curr, inputs, ctx);
+      // Track evolution visuals: refresh every ~15 s (the skid fade already rebuilds that often, but not
+      // with effects off). A new session's surface shows at once (withSurface).
+      if (curr.surface && curr.tick % (60 * 15) === 0) renderer.invalidateStatic();
       vfx.onTick(prev, curr, ctx.track, physics);
       const me = curr.cars[0], was = prev.cars[0];
       if (me && was) {

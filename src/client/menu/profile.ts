@@ -11,6 +11,8 @@ export interface ProfileSettings {
   labels: 'off' | 'position' | 'name';
   vfx: 'high' | 'low' | 'off';
   race: { laps: number; grid: 'random' | 'pole' | 'back' };
+  /** Track evolution: how rubbered-in a new weekend (or a standalone session) starts. */
+  trackStart: 'green' | 'medium' | 'rubbered';
   /** Night race (Night races card), when the track has night art. */
   night: boolean;
   /** Car spec class (C1..C3); absent = the default car's. */
@@ -44,6 +46,7 @@ export const DEFAULT_SETTINGS: Readonly<ProfileSettings> = Object.freeze<Profile
   vfx: 'high',
   race: { laps: 5, grid: 'random' },
   night: false,
+  trackStart: 'green',
   volumes: {},
 });
 
@@ -74,6 +77,7 @@ function completeSettings(raw: unknown): ProfileSettings {
     race: { laps: Number.isFinite(s.race?.laps) ? Math.max(1, Math.min(99, Math.round(s.race!.laps))) : 5, grid: pick(s.race?.grid, ['random', 'pole', 'back'] as const, 'random') },
     spec: typeof s.spec === 'string' && s.spec ? s.spec : undefined,
     night: s.night === true,
+    trackStart: pick(s.trackStart, ['green', 'medium', 'rubbered'] as const, 'green'),
     volumes: s.volumes && typeof s.volumes === 'object' ? Object.fromEntries(Object.entries(s.volumes).filter(([, v]) => typeof v === 'number' && v >= 0 && v <= 1)) : {},
   };
 }

@@ -39,6 +39,8 @@ const RUBBER_RGB = '38,38,40';
 
 export class Vfx {
   quality: VfxQuality = loadQuality();
+  /** Lay cosmetic rubber from tyre wear (off when track evolution draws the real rubber from the sim). */
+  wearRubber = true;
   /** Rubber laid (permanent: the subtle layer), half resolution, transparent elsewhere. */
   readonly history: HTMLCanvasElement;
   private readonly historyCtx: CanvasRenderingContext2D;
@@ -174,7 +176,7 @@ export class Vfx {
         const a = p0[w], b = p1[w];
         const l = c.layers;
         // Rubber: faint stamps toward a fixed dark tone, only where tyres are loaded.
-        if (fx.rubber > 0 && this.quality === 'high') this.mark(a, b, ppm, c.skid.widthM, `rgba(${RUBBER_RGB},${fx.rubber * l.rubberOpacity})`, this.historyCtx);
+        if (fx.rubber > 0 && this.quality === 'high' && this.wearRubber) this.mark(a, b, ppm, c.skid.widthM, `rgba(${RUBBER_RGB},${fx.rubber * l.rubberOpacity})`, this.historyCtx);
         // Skid marks.
         if (fx.mark > c.skid.minIntensity) {
           const dark = fx.lockup > 0 ? c.skid.lockupDarkness : 1;

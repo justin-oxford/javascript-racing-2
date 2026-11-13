@@ -1,5 +1,6 @@
 // @vitest-environment node
 // Car physics on small synthetic arenas (built here, not real tracks), so each behaviour is isolated.
+import evolutionJson from '../../config/evolution.json';
 import ersJson from '../../config/ers.json';
 import damageJson from '../../config/damage.json';
 import assistsJson from '../../tools/fixtures/assists-baseline.json';
@@ -55,7 +56,7 @@ function arena(wM: number, hM: number, spawnM: Pose, paint?: (xM: number, yM: nu
     physics: structuredClone(physicsJson) as PhysicsConfig,
     catalog,
     rules,
-    contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, cache: createPhysicsCache(),
+    contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, cache: createPhysicsCache(),
   };
 }
 

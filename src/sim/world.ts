@@ -1,3 +1,4 @@
+import { evolutionGrip, newSurfaceGrid, updateSurface, type EvolutionConfig, type SurfaceGrid, type WheelWork } from './evolution';
 import { deployPowerW, newErs, updateErs, type EngineMode, type ErsConfig } from './ers';
 import { applyHits, damageDrag, damageGrip, damagePull, isDamaged, NO_DAMAGE, repairStep, type DamageConfig } from './damage';
 import { applyResets, newRejoin, trackRejoin } from './rejoin';
@@ -40,6 +41,8 @@ export interface SimContext {
   damage: DamageConfig;
   /** config/ers.json: engine modes and battery deploy (live-tunable). */
   ers: ErsConfig;
+  /** config/evolution.json: rubbering in and marbles (live-tunable). */
+  evolution: EvolutionConfig;
   cache: PhysicsCache;
 }
 
@@ -206,8 +209,11 @@ export function startPose(i: number, ctx: SimContext): Pose {
 
 export function createWorld(ctx: SimContext, cars: number | readonly CarBuild[] = 1, settings?: SessionSettings): WorldState {
   const builds = typeof cars === 'number' ? Array.from({ length: cars }, () => ctx.physics.defaultCar) : cars;
-  return { tick: 0, cars: builds.map((b, i) => createCar(startPose(i, ctx), b, ctx)), events: [], ...(settings ? { settings } : {}) };
+  return { tick: 0, cars: builds.map((b, i) => createCar(startPose(i, ctx), b, ctx)), events: [], ...(settings ? { settings } : {}), ...greenTrack(ctx) };
 }
+
+/** A new session's surface: green (track evolution on), or none. Carry one over with nextSession(). */
+const greenTrack = (ctx: SimContext): { surface?: SurfaceGrid } => (ctx.evolution.enabled ? { surface: newSurfaceGrid(ctx.track, ctx.evolution) } : {});
 
 export interface RaceSetup {
   laps: number;
@@ -229,7 +235,7 @@ export function createRaceWorld(ctx: SimContext, builds: readonly CarBuild[], se
   const order = setup.grid && setup.grid.length === builds.length ? [...setup.grid] : gridOrder(builds.length, setup.seed, setup.playerSlot);
   const slotOf = new Map(order.map((car, slot) => [car, slot]));
   const cars = builds.map((b, i) => createCar(startPose(slotOf.get(i)!, ctx), b, ctx));
-  return { tick: 0, cars, events: [], race: newRaceState(order, setup.laps, setup.seed, ctx.track, ctx.race, TICK_HZ), ...(setup.settings ? { settings: setup.settings } : {}) };
+  return { tick: 0, cars, events: [], race: newRaceState(order, setup.laps, setup.seed, ctx.track, ctx.race, TICK_HZ), ...(setup.settings ? { settings: setup.settings } : {}), ...greenTrack(ctx) };
 }
 
 /**
@@ -244,7 +250,7 @@ export function createQualiWorld(ctx: SimContext, builds: readonly CarBuild[], s
   // Qualifying runs light: everyone starts with race.json qualiFuelKg (a pit stop tops back up to it).
   const fuelKg = qualiFuelKg(ctx);
   const cars = builds.map((b, i) => ({ ...createCar(queuePx[place.get(i)!] ?? startPose(i, ctx), b, ctx), fuelKg }));
-  return { tick: 0, cars, events: [], quali, ...(settings ? { settings } : {}) };
+  return { tick: 0, cars, events: [], quali, ...(settings ? { settings } : {}), ...greenTrack(ctx) };
 }
 
 /** Qualifying fuel load, kg (race.json qualiFuelKg, at most a full tank). */
@@ -301,7 +307,7 @@ interface WheelForces {
 }
 
 /** Work out and apply this tick's forces for one car. Returns per-wheel numbers for wear/telemetry. */
-function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimContext, dt: number, wake: { tow: number; dirtyAir: number }, realisticDamage: boolean, power: { mode: EngineMode; deployW: number }): Wheels<WheelForces> {
+function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimContext, dt: number, wake: { tow: number; dirtyAir: number }, realisticDamage: boolean, power: { mode: EngineMode; deployW: number }, surface: SurfaceGrid | undefined): Wheels<WheelForces> {
   const cfg = ctx.physics;
   // Damage effects (Realistic only): grip per wheel, steering pull, drag.
   const dmg = realisticDamage ? car.damage : NO_DAMAGE;
@@ -378,7 +384,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
     const surf = ctx.track.surfaces[car.wheels[w]!.surface]!;
 
     // Balance knobs (03b): front/rear grip multipliers next to weight distribution and yaw inertia.
-    const cap = gripBase * (w < 2 ? cfg.tyres.frontGrip : cfg.tyres.rearGrip) * wearGrip(car.wheels[w]!.wear) * damageGrip(dmg, w, ctx.damage) * surf.grip * load[w]!;
+    const cap = gripBase * (w < 2 ? cfg.tyres.frontGrip : cfg.tyres.rearGrip) * wearGrip(car.wheels[w]!.wear) * damageGrip(dmg, w, ctx.damage) * evolutionGrip(surface, p.x, p.y, ctx.evolution) * surf.grip * load[w]!;
     const capLat = cap * cfg.tyres.lateralGrip;
     const stopCap = (Math.abs(vLong) * wheelMass) / dt; // never push a wheel past standstill
 
@@ -487,6 +493,25 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
   return { fuelKg, wheels, servicing: service, damage, ers };
 }
 
+/** One car's wheels for track evolution this tick: where, how loaded and slipping, how much tyre it shed, outward. */
+function surfaceWork(before: CarState, car: CarState, ctx: SimContext): WheelWork[] {
+  if (car.inPitLane) return [];
+  const cfg = ctx.physics, speed = Math.hypot(car.vx, car.vy);
+  const quarter = ((cfg.car.dryMassKg + Math.max(0, car.fuelKg)) * G) / 4;
+  // Outside of the corner: away from the centre of the turn (turning right = centre to the right).
+  const turn = Math.sign(car.angVel) || 0, r = right(car.heading);
+  const corner = Math.abs(car.angVel * speed) / (cfg.tyres.baseGrip * G);
+  return wheelPositions(car, cfg).map((p, w) => ({
+    x: p.x, y: p.y,
+    load: car.wheels[w]!.loadN / quarter,
+    usage: car.wheels[w]!.usage,
+    wear: Math.max(0, before.wheels[w]!.wear - car.wheels[w]!.wear),
+    outX: -turn * r.x, outY: -turn * r.y,
+    corner,
+    moving: speed > 2,
+  }));
+}
+
 /**
  * Advance the world by exactly one fixed tick. Returns a new state; never mutates the old one.
  * inputs[i] drives cars[i]; a missing input is treated as neutral.
@@ -513,7 +538,7 @@ export function step(world0: WorldState, inputs: readonly CarInput[], ctx: SimCo
     const mode = req?.engineMode && ctx.ers.modes[req.engineMode] ? req.engineMode : car.ers.mode;
     return { mode, deployW: car.fuelKg > 0 && !car.inPitLane ? deployPowerW(car.ers, !!req?.deploy, controls[i]!.throttle, ctx.ers) : 0 };
   });
-  const forces = world.cars.map((car, i) => applyCarForces(i, car, controls[i]!, ctx, dt, { tow: wake.tow[i]!, dirtyAir: wake.dirtyAir[i]! }, damageMode === 'realistic', power[i]!));
+  const forces = world.cars.map((car, i) => applyCarForces(i, car, controls[i]!, ctx, dt, { tow: wake.tow[i]!, dirtyAir: wake.dirtyAir[i]! }, damageMode === 'realistic', power[i]!, world.surface));
   stepWorld(ctx.cache, dt, ctx.physics);
   const bodies = readStateFromWorld(ctx.cache);
 
@@ -558,6 +583,8 @@ export function step(world0: WorldState, inputs: readonly CarInput[], ctx: SimCo
     }
     return next;
   });
+  // Track evolution: what every wheel did this tick lays rubber, sheds marbles to the outside, sweeps them.
+  const surface = world.surface && ctx.evolution.enabled ? updateSurface(world.surface, ctx.track, cars.flatMap((c, i) => surfaceWork(world.cars[i]!, c, ctx)), dt, ctx.evolution) : world.surface;
   // Reset to track bookkeeping, once every car has moved: last on-track point, ghosts clearing.
   const tracked = cars.map((c, i) => {
     const allLegal = c.wheels.every((w) => ctx.track.surfaces[w.surface]!.legal);
@@ -567,7 +594,7 @@ export function step(world0: WorldState, inputs: readonly CarInput[], ctx: SimCo
   cars.splice(0, cars.length, ...tracked);
 
   const tick = world.tick + 1;
-  const keep = world.settings ? { settings: world.settings } : {};
+  const keep = { ...(world.settings ? { settings: world.settings } : {}), ...(surface ? { surface } : {}) };
   if (world.quali) return { ...keep, tick, cars, events, quali: updateQuali(world.quali, tick, dt, cars, inputs.map((x) => x ?? NEUTRAL_INPUT), events, ctx.race) };
   if (!world.race) return { ...keep, tick, cars, events };
   const race = updateRace(world.race, tick, dt, world0.cars, cars, inputs.map((x) => x ?? NEUTRAL_INPUT), events, ctx.track, ctx.race);

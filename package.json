@@ -27,7 +27,8 @@
     "wear-probe": "tsx tools/wear-probe.ts",
     "equal-probe": "tsx tools/equal-probe.ts",
     "damage-probe": "tsx tools/damage-probe.ts",
-    "ers-probe": "tsx tools/ers-probe.ts"
+    "ers-probe": "tsx tools/ers-probe.ts",
+    "evolution-probe": "tsx tools/evolution-probe.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

@@ -1,3 +1,4 @@
+import type { SurfaceGrid } from './evolution';
 import type { EngineMode, ErsState } from './ers';
 import type { DamageMode, DamageState } from './damage';
 import type { RejoinState } from './rejoin';
@@ -134,6 +135,8 @@ export interface WorldState {
   race?: RaceState;
   /** Qualifying (race weekend). Absent otherwise; never together with race. */
   quali?: QualiState;
+  /** Track evolution: rubber and marbles (evolution.ts). Absent = evolution off. */
+  surface?: SurfaceGrid;
   /** Session settings the sim needs every tick (set from the race setup; absent = defaults). */
   settings?: SessionSettings;
 }
