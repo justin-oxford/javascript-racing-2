@@ -1,32 +1,7 @@
 // Setup balance readout (Car setup overhaul card): per corner of the racing line, which axle went past its
 // grip limit first on each of the player's passes (handling-diag's numbers, for one driver, live). "T3: front
 // first 70%" says add front wing / soften the front. Client only; reads sim state.
-import type { CarState, RacingLine } from '../../sim';
-
-export interface Corner { from: number; to: number; dir: 'L' | 'R' }
-
-/** Corners: runs of racing-line points with |curvature| > 1/80 m, small gaps merged, at least 8 m long. */
-export function cornersOf(line: Pick<RacingLine, 'n' | 'k'>): Corner[] {
-  const n = line.n, bend = (q: number) => Math.abs(line.k[((q % n) + n) % n]!) > 1 / 80;
-  const out: Corner[] = [];
-  let start = 0;
-  while (bend(start) && start < n) start++; // begin on a straight so no corner straddles index 0
-  let q = start, cur: { from: number; to: number } | undefined;
-  for (let k = 0; k < n; k++, q++) {
-    const i = q % n;
-    if (bend(i)) { if (!cur) cur = { from: i, to: i }; else cur.to = i; }
-    else if (cur && !(bend(i + 1) || bend(i + 2))) {
-      const len = ((cur.to - cur.from + n) % n) + 1;
-      if (len >= 4) {
-        let sum = 0;
-        for (let j = 0; j < len; j++) sum += line.k[(cur.from + j) % n]!;
-        out.push({ ...cur, dir: sum > 0 ? 'R' : 'L' });
-      }
-      cur = undefined;
-    }
-  }
-  return out;
-}
+import { cornersOf, type CarState, type Corner, type RacingLine } from '../../sim';
 
 export interface CornerBalance { front: number; rear: number; neither: number }
 

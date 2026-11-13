@@ -5,6 +5,7 @@
 // in that state, so the server (card 07) runs it unchanged and replays stay exact.
 import { buildStats } from './car-config';
 import { damageGrip, isDamaged } from './damage';
+import { chooseMode, keepGoodExits, lineFor, LINE_IDS, lineOffsets, offsetPath, type CraftMode, type LineId, type RacecraftConfig } from './racecraft';
 import { speedProfile } from './line-optimizer';
 import type { SimTrack } from './track';
 import { surfaceAt } from './track';
@@ -67,6 +68,8 @@ export interface AiConfig {
   aids?: { tcSlip: number; tcRange: number; trailSteer?: number; trailOverspeedMps?: number; trailMaxPedal?: number };
   /** Race starts: reaction to lights out, a random delay in this range per driver. */
   start?: { reactionMinSec: number; reactionMaxSec: number };
+  /** AI racecraft card: three lines picked by race situation (racecraft.ts). */
+  racecraft?: RacecraftConfig;
 }
 
 const G = 9.81;
@@ -321,6 +324,15 @@ export interface AiState {
   saving: boolean;
   modeTicks: { save: number; standard: number; push: number };
   deployTicks: number;
+  /** Racecraft (racecraft.ts): the mode, ticks until it may change, ticks to the next look; the weight of
+   *  each line (neutral, exit, inside) in the blend; ticks per mode and line changes (ai-run). */
+  craft: CraftMode;
+  craftHold: number;
+  craftEval: number;
+  lineW: [number, number, number];
+  craftTicks: Record<CraftMode, number>;
+  lineChanges: number;
+  lineTarget: LineId;
   /** Current sideways offset from the line, metres (+ = right). */
   offset: number;
   /** A mistake in progress: kind and ticks left. */
@@ -350,6 +362,7 @@ export function newAiState(seed: number): AiState {
   return {
     mode: 'race', near: -1, lastErr: 0, stuckTicks: 0, recoverTicks: 0, offset: 0, mistake: undefined, rng: seed >>> 0 || 1,
     troubleTicks: 0, resets: 0, saving: false, modeTicks: { save: 0, standard: 0, push: 0 }, deployTicks: 0,
+    craft: 'manage', craftHold: 0, craftEval: 0, lineW: [1, 0, 0], craftTicks: { manage: 0, attack: 0, defend: 0, nurse: 0 }, lineChanges: 0, lineTarget: 'neutral',
     pitWanted: false, serviced: false, fuelAtLap: -1, fuelPerLap: 0, stuckEvents: 0, mistakes: 0, pitStops: 0, attack: false, launchTick: -1, trust: 1, lastAllowed: 0,
   };
 }
@@ -396,6 +409,26 @@ function locate(path: AiPath, car: CarState, prev: number, speed: number, ahead 
 // Speed profiles per line x car build x preset x the physics numbers that matter: static data computed
 // once (not state), so a memo is fine; physics tuned live gives a new key and a fresh profile.
 const profiles = new WeakMap<AiPath, Map<string, Float64Array>>();
+
+/** The EXIT and INSIDE lines for a racing line (offsets + their geometry as paths), per racecraft config. */
+const craftLines = new WeakMap<RacingLine, { key: string; offsets: { exit: Float64Array; inside: Float64Array }; paths: [AiPath, AiPath, AiPath] }>();
+function racecraftLines(line: RacingLine, cfg: RacecraftConfig, halfCarM: number, ctx?: SimContext) {
+  const key = JSON.stringify([cfg.insideM, cfg.insideLeadM, cfg.exitStraightM, cfg.exitShiftM, cfg.exitWeight, cfg.exitIterations, cfg.edgeM, halfCarM]);
+  let c = craftLines.get(line);
+  if (!c || c.key !== key) {
+    let offsets = lineOffsets(line, cfg, halfCarM);
+    // Only EXIT lines that are actually faster onto their straight (with the default car's speed profile).
+    if (ctx) {
+      const stats = buildStats(ctx.physics.defaultCar, ctx.catalog), o = { cornerMargin: 1, brakeMargin: 1, fuelKg: ctx.physics.fuel.startKg / 2 };
+      const ex = offsetPath(line, offsets.exit);
+      offsets = keepGoodExits(line, offsets, speedProfile(line.x, line.y, ctx.physics, stats, o), speedProfile(ex.x, ex.y, ctx.physics, stats, o), cfg);
+    }
+    const ex = offsetPath(line, offsets.exit), ins = offsetPath(line, offsets.inside);
+    c = { key, offsets, paths: [line, { ...line, ...ex }, { ...line, ...ins }] };
+    craftLines.set(line, c);
+  }
+  return c;
+}
 function carProfile(line: AiPath, car: CarState, ctx: SimContext, preset: AiPreset): Float64Array {
   const p = ctx.physics;
   const key = JSON.stringify([car.build, preset.cornerMargin, preset.brakeMargin, p.tyres, p.car, p.engine, p.brakes, p.aero]);
@@ -601,12 +634,15 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     // ON THE RACING LINE: this car's own speed profile round the whole line (racing line optimizer card),
     // computed once for its build and preset, then scaled by what's changed since: tyre wear (speed goes
     // with the square root of grip) and how much of its corner speed it has learned to trust.
-    const prof = carProfile(line, car, ctx, preset);
+    // RACECRAFT: the line(s) in use, blended; each has its own speed profile and during a blend the slower counts.
+    const rc = cfg.racecraft?.enabled ? racecraftLines(line, cfg.racecraft, phys.car.widthM / 2, ctx) : undefined;
+    const profs = rc ? rc.paths.map((p, l) => (st.lineW[l]! > 0.01 ? carProfile(p, car, ctx, preset) : undefined)) : [carProfile(line, car, ctx, preset)];
+    const prof = { at: (q: number) => { let v = Infinity; for (const p of profs) if (p) v = Math.min(v, p[q]!); return v; } };
     // A late braker (mistake) reads the target 12 m on. (Attacking alongside no longer brakes later: on
     // lap one the whole field is alongside someone, and they all went wide into turn 1 together.)
     const ahead = st.mistake?.kind === 'lateBrake' ? 6 : 1;
-    allowed = prof[idx(best + ahead)]! * Math.sqrt(Math.max(0.05, tyre)) * st.trust;
-    for (let q = 1, look = Math.ceil((speed * 3) / SPACING_M); q <= look; q++) if (prof[idx(best + q)]! < speed * 0.9) { brakingSoon = true; break; }
+    allowed = prof.at(idx(best + ahead)) * Math.sqrt(Math.max(0.05, tyre)) * st.trust;
+    for (let q = 1, look = Math.ceil((speed * 3) / SPACING_M); q <= look; q++) if (prof.at(idx(best + q)) < speed * 0.9) { brakingSoon = true; break; }
     // Coasting decel ~ aero drag (+ a little rolling resistance). Two uses, both short:
     //  - a SMALL drop ahead (a fast kink, <= coastMaxDropMps): coast down to it instead of braking at all;
     //  - a real braking zone: lift liftBeforeBrakeSec before the braking point, then brake.
@@ -615,7 +651,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     const scale = Math.sqrt(Math.max(0.05, tyre)) * st.trust;
     const liftAhead = Math.ceil((speed * lc.liftBeforeBrakeSec) / SPACING_M);
     for (let q = 1, look = Math.ceil((speed * 4) / SPACING_M); q <= look; q++) {
-      const target = prof[idx(best + q)]! * scale;
+      const target = prof.at(idx(best + q)) * scale;
       if (target >= speed - 0.3) continue;
       if (q <= liftAhead) { coastLimit = 0; break; } // the braking curve starts within ~0.4 s: lift now
       // Only where coasting costs almost nothing: at speed (real drag) and within ~1.5 s of the drop.
@@ -791,7 +827,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   const sgn = idx(t + 1) === t ? -1 : 1;
   const tl = Math.hypot(path.x[t2]! - path.x[t]!, path.y[t2]! - path.y[t]!) || 1;
   const nx = (-(path.y[t2]! - path.y[t]!) / tl) * sgn, ny = ((path.x[t2]! - path.x[t]!) / tl) * sgn; // right of travel
-  const tx = path.x[t]! + nx * st.offset, ty = path.y[t]! + ny * st.offset;
+  // The racecraft line's offset at the target point stacks under the traffic offset.
+  const lineOff = !pit ? craftOffset(st, line, cfg, phys.car.widthM / 2, t) : 0;
+  const tx = path.x[t]! + nx * (st.offset + lineOff), ty = path.y[t]! + ny * (st.offset + lineOff);
   const err = wrap(Math.atan2(tx - car.x, -(ty - car.y)) - car.heading);
   // The wheel angle that arcs the car onto the target, divided by the lock the car has at this speed.
   const ld = Math.max(3, Math.hypot(tx - car.x, ty - car.y));
@@ -861,13 +899,17 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     }
 
   }
-  // ENGINE MODE + DEPLOY (ers.ts; the full racecraft card will refine this): SAVE when it's saving fuel to
-  // reach the flag; PUSH and deploy down a straight while going for a pass on the car ahead.
+  // RACECRAFT (racecraft.ts): every evalSec, the mode from the race situation (held at least holdSec), the
+  // line it wants just ahead, and the blend moving toward it with distance travelled.
+  if (cfg.racecraft?.enabled && !pit) updateCraft(st, world, i, line, cfg.racecraft, others, speed, phys.car.widthM / 2, best);
+  // ENGINE MODE + DEPLOY (ers.ts): SAVE when it's saving fuel to reach the flag; PUSH and deploy down a
+  // straight while ATTACKING (racecraft) and closing on the car ahead, or DEFENDING with one close behind.
   const racing = !race || race.phase === 'racing';
   // Deploy only where it helps a pass and doesn't just run it into the gearbox: closing from 12 m up to the
   // tow range. (Deploying once alongside too raised ai-run contacts ~20% over 4 seeds; closing-only ~5%.)
   const deployTarget = others.some((o) => !!o && ((o.ahead >= 12 && o.ahead <= towCfg.tow.maxRangeM && Math.abs(o.side) < 3.5)));
-  const deploy = racing && !pit && deployTarget && straightAhead && !brakingSoon && throttle > 0.9; // not into a braking zone
+  const craftOk = !cfg.racecraft?.enabled || st.craft === 'attack' || st.craft === 'defend';
+  const deploy = racing && !pit && craftOk && (deployTarget || st.craft === 'defend') && straightAhead && !brakingSoon && throttle > 0.9; // not into a braking zone
   // PUSH only while going for it (deploying): pushing all the time it's close behind just runs it into
   // the car ahead (ai-run: contacts 42 -> 57).
   const engineMode = st.saving ? 'save' : deploy ? 'push' : 'standard';
@@ -877,6 +919,51 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
 }
 
 /** Wrap aiDrive as an InputSource for car `i` (keyboard-compatible). */
+/** The racecraft lines the AI uses on this racing line (EXIT only where it's faster), as offsets per point. */
+export function racecraftOffsets(line: RacingLine, cfg: RacecraftConfig, ctx: SimContext): { exit: Float64Array; inside: Float64Array } {
+  return racecraftLines(line, cfg, ctx.physics.car.widthM / 2, ctx).offsets;
+}
+
+/** This AI's racecraft line offset at line point q: the blend of the three lines' offsets there. */
+function craftOffset(st: AiState, line: RacingLine, cfg: AiConfig, halfCarM: number, q: number): number {
+  if (!cfg.racecraft?.enabled) return 0;
+  const o = craftLines.get(line)?.offsets; // built (and EXITs judged) by the speed plan earlier this tick
+  return o ? st.lineW[1] * o.exit[q]! + st.lineW[2] * o.inside[q]! : 0;
+}
+
+/** Racecraft for one tick: re-evaluate the mode now and then, pick the line ahead, move the blend. */
+function updateCraft(st: AiState, world: WorldState, i: number, line: RacingLine, cfg: RacecraftConfig, others: ReadonlyArray<{ ahead: number; side: number; along: number } | undefined>, speed: number, halfCarM: number, best: number): void {
+  const car = world.cars[i]!;
+  st.craftTicks = { ...st.craftTicks, [st.craft]: st.craftTicks[st.craft] + 1 };
+  if (st.craftHold > 0) st.craftHold--;
+  if (--st.craftEval <= 0) {
+    st.craftEval = Math.max(1, Math.round(cfg.evalSec / TICK_DT));
+    // Ahead: the nearest car in front in our lane band (path frame). Behind: projected on our heading.
+    let aheadM = Infinity, aheadClosing = false;
+    for (const o of others) if (o && o.ahead > 0 && Math.abs(o.side) < 3.5 && o.ahead < aheadM) { aheadM = o.ahead; aheadClosing = speed - o.along > 0.3; }
+    const fx = Math.sin(car.heading), fy = -Math.cos(car.heading);
+    let behindM = Infinity, behindClosing = false;
+    world.cars.forEach((c, j) => {
+      if (j === i) return;
+      const dx = c.x - car.x, dy = c.y - car.y, lon = dx * fx + dy * fy, lat = -dx * fy + dy * fx;
+      if (lon < 0 && lon > -80 && Math.abs(lat) < 4 && -lon < behindM) { behindM = -lon; behindClosing = c.vx * fx + c.vy * fy > speed + 0.3; }
+    });
+    const v = Math.max(5, speed);
+    const wear = car.wheels.reduce((a, w) => a + w.wear, 0) / 4;
+    const dmg = world.settings?.damage === 'realistic' ? Math.max(car.damage.frontWing, car.damage.rearWing, car.damage.left, car.damage.right) : 0;
+    const want = chooseMode({ aheadGapSec: aheadM / v, aheadClosing, inTow: car.tow > 0.05, behindGapSec: behindM / v, behindClosing, wear, damage: dmg }, cfg);
+    if (want !== st.craft && st.craftHold === 0) { st.craft = want; st.craftHold = Math.round(cfg.holdSec / TICK_DT); }
+  }
+  // The line the mode wants ~40 m ahead (so a change starts before the corner it's for).
+  const o = craftLines.get(line)?.offsets ?? racecraftLines(line, cfg, halfCarM).offsets;
+  const target = lineFor(st.craft, (best + 20) % line.n, o);
+  if (target !== st.lineTarget) { st.lineTarget = target; st.lineChanges++; }
+  const ti = LINE_IDS.indexOf(target), stepW = Math.min(1, cfg.blendPerM * speed * TICK_DT);
+  const w = st.lineW.map((x, l) => (l === ti ? Math.min(1, x + stepW) : Math.max(0, x - stepW))) as [number, number, number];
+  const sum = w[0] + w[1] + w[2] || 1;
+  st.lineW = [w[0] / sum, w[1] / sum, w[2] / sum];
+}
+
 /**
  * Reset to track for the AI: crawling or stuck for recovery.resetAfterSec (reversing out hasn't got it
  * going) -> hold reset, same as a player and with the same penalty. troubleTicks < 0 = holding it.

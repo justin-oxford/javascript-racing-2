@@ -71,6 +71,9 @@ export class TrackEditor {
 
   // ---- drawing ------------------------------------------------------------
 
+  /** AI racecraft lines to show over the racing line (EXIT, INSIDE), track pixels. Set by main. */
+  craftLines: (() => Array<{ name: string; color: string; points: Array<{ x: number; y: number }> }>) | undefined;
+
   draw(ctx: CanvasRenderingContext2D, lw: number): void {
     const j = this.json;
     // The seed (what the optimizer started from) faint underneath; the line itself coloured by its
@@ -98,6 +101,18 @@ export class TrackEditor {
       });
       ctx.restore();
     } else drawRacingLine(ctx, j.racingLine, lw);
+    // The AI's other racecraft lines (AI racecraft card), dashed, where they leave the racing line.
+    for (const l of this.craftLines?.() ?? []) {
+      ctx.save();
+      ctx.strokeStyle = l.color;
+      ctx.lineWidth = lw * 2;
+      ctx.setLineDash([6 * lw, 5 * lw]);
+      ctx.beginPath();
+      l.points.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
     ctx.save();
     j.racingLine.forEach((p, i) => {
       const sel = this.isSelected({ kind: 'racing', i });

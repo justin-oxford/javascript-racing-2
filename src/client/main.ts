@@ -1,4 +1,4 @@
-import { normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, driverSkill, skilledPreset, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, driverSkill, skilledPreset, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -488,6 +488,12 @@ async function main(): Promise<void> {
         return `Optimized: ${out.line.length} points, ${out.lengthM.toFixed(0)} m, tightest radius ${out.minRadiusM.toFixed(1)} m, kerb use ${Math.round(kerbUse * 100)}%.`;
       }, racingLineConfig.kerbUse)
     : undefined;
+  if (editor) editor.craftLines = () => {
+    if (!racingLine || !aiCfg.racecraft) return [];
+    const o = racecraftOffsets(racingLine, aiCfg.racecraft, ctx), ppm = json.pxPerMeter;
+    const px = (off: Float64Array) => { const p = offsetPath(racingLine!, off); return Array.from({ length: racingLine!.n }, (_, i) => ({ x: p.x[i]! * ppm, y: p.y[i]! * ppm })); };
+    return [{ name: 'inside', color: 'rgba(255, 120, 60, 0.9)', points: px(o.inside) }, ...(o.exit.some((v) => v !== 0) ? [{ name: 'exit', color: 'rgba(80, 160, 255, 0.9)', points: px(o.exit) }] : [])];
+  };
   // Tuning panel: always in dev; on the live site with ?tune=1 (no Save there: Copy all settings instead).
   const tuning = import.meta.env.DEV || new URLSearchParams(location.search).has('tune')
     ? new (await import('./tuning/panel')).TuningPanel({
