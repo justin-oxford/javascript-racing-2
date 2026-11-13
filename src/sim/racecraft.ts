@@ -157,10 +157,62 @@ export function keepGoodExits(line: LinePath, offsets: { exit: Float64Array; ins
   return { exit: out, inside: offsets.inside };
 }
 
-/** Which line a mode wants at line point q: ATTACK takes EXIT where there is one (onto a straight) else INSIDE. */
+/** AI overtaking card (config/ai.json "overtaking"). */
+export interface OvertakingConfig {
+  /** Overlapped = within this much lengthwise (centre to centre): front wheels past the other car's rear wheels. */
+  overlapM: number;
+  /** Pull out of a tow this many seconds before the braking point, plus aggression x pullOutAggrSec. */
+  pullOutSec: number;
+  pullOutAggrSec: number;
+  /** ATTACKING: the following headway (0.35 s) shrinks by aggression x this. */
+  attackCloseSec: number;
+  /** ...except within this many seconds of a braking point (the full headway into braking zones). */
+  closeUntilBrakeSec: number;
+  /** ATTACKING, following: plan braking at this fraction of its braking (0.8 when merely following). */
+  attackFollowBrake: number;
+  /** Pulled out and closing within commitM: the move is on (it keeps that side until past, or aborts if the car
+   *  gets more than commitM away, or it isn't alongside, within 1.5 car lengths, by the corner). */
+  commitM: number;
+  /** A defender with aggression below this lifts and lets an overlapped car on the inside go. */
+  concedeBelow: number;
+  /** BLUE FLAGS: a car this many laps or more ahead in the race always has the right of way, and once it's
+   *  pulled out and alongside (its nose within blueBehindM behind ours up to overlapM ahead) the lapped car lifts. */
+  blueLaps: number;
+  blueBehindM: number;
+  /** How much a lapped car lifts on the straight to let it by (fraction of its speed). */
+  blueLift: number;
+}
+
+/** Whether the OTHER car has the right of way (the one without it yields when there's no room for both).
+ *  The overlap rule: side by side within overlapM lengthwise (front wheels past the other car's rear wheels)
+ *  with a corner coming, the car on its INSIDE has it, so the car on the outside leaves it room rather than
+ *  turn in on it. Otherwise the car ahead has it; level, the lower car number. Exactly one of a pair has it.
+ *  ahead: other's distance ahead of us (m), side: its lateral offset (+ right), nextTurn: +1 right, -1 left, 0 none. */
+export function otherHasRightOfWay(ahead: number, side: number, nextTurn: number, otherIsLower: boolean, overlapM: number): boolean {
+  if (nextTurn !== 0 && Math.abs(ahead) <= overlapM && side !== 0) return Math.sign(side) === nextTurn;
+  return ahead > 0.5 || (Math.abs(ahead) <= 0.5 && otherIsLower);
+}
+
+/** Conceding: a low-aggression defender heading into a braking zone, with a car overlapped on the inside of
+ *  the corner (just behind or level), lifts and lets it go rather than turn in on it. */
+export function concedes(aggression: number, brakingSoon: boolean, ahead: number, side: number, nextTurn: number, widthM: number, cfg: OvertakingConfig): boolean {
+  return brakingSoon && aggression < cfg.concedeBelow && nextTurn !== 0 && ahead <= 0 && ahead >= -cfg.overlapM
+    && Math.sign(side) === nextTurn && Math.abs(side) >= widthM;
+}
+
+/** Blue flags: whether to lift for a car lapping us (raceLapsAhead laps further on) that has pulled out
+ *  (at least a car width across) and come alongside (ahead m: from blueBehindM behind to overlapM ahead). */
+export function blueFlag(raceLapsAhead: number, ahead: number, side: number, widthM: number, cfg: OvertakingConfig): boolean {
+  return raceLapsAhead >= cfg.blueLaps && ahead >= -cfg.blueBehindM && ahead <= cfg.overlapM && Math.abs(side) >= widthM;
+}
+
+/** Which line a mode wants at line point q: ATTACK takes EXIT where there is one (onto a straight), else the racing line. */
 export function lineFor(mode: CraftMode, q: number, offsets: { exit: Float64Array; inside: Float64Array }): LineId {
-  if (mode === 'attack') return offsets.exit[q] !== 0 ? 'exit' : 'inside';
-  if (mode === 'defend') return 'inside';
+  // ATTACK takes EXIT where there is one, else stays on the racing line: the INSIDE line is the slower way
+  // round, and taking it into every corner while attacking just dropped the attacker back (AI overtaking card).
+  if (mode === 'attack') return offsets.exit[q] !== 0 ? 'exit' : 'neutral';
+  // DEFEND holds the racing line too: on the slower INSIDE line, defenders got run into from behind (AI
+  // overtaking card measurements). The INSIDE line stays generated, for the editor and later use.
   return 'neutral';
 }
 

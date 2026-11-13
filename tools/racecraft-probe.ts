@@ -4,9 +4,10 @@
 //     How many corners get an INSIDE line.
 //  2. RACE: 10 AI, N laps, racecraft on vs off (same seed): overtakes, car contacts, invalid laps, stuck,
 //     time in each mode, line changes, determinism.
-// Usage: npm run racecraft-probe [-- --laps 20 --seed 1]
+// Usage: npm run racecraft-probe [-- --laps 20 --seed 1 --equal]   (--equal: identical cars, the drivers decide)
 import aiJson from '../config/ai.json' with { type: 'json' };
-import { aiInputSource, buildRacingLine, buildStats, cornersOf, createRaceWorld, keepGoodExits, lineOffsets, offsetPath, speedProfile, step, type AiConfig, type CarBuild, type WorldState } from '../src/sim/index.ts';
+import driversJson from '../config/drivers.json' with { type: 'json' };
+import { aiInputSource, assignDrivers, driverPreset, type DriverDef, buildRacingLine, buildStats, cornersOf, createRaceWorld, keepGoodExits, lineOffsets, offsetPath, speedProfile, step, type AiConfig, type CarBuild, type WorldState } from '../src/sim/index.ts';
 import { catalog, defaultTrackIdNode, loadTrackNode, simContextNode } from './load-track-node.ts';
 
 const args = process.argv.slice(2);
@@ -43,9 +44,12 @@ const rc = cfg.racecraft!;
 // 2. Race, racecraft on vs off.
 function race(on: boolean) {
   const c: AiConfig = { ...cfg, racecraft: { ...rc, enabled: on } };
-  const builds: CarBuild[] = Array.from({ length: 10 }, (_, i) => ({ ...ctx.physics.defaultCar, team: catalog.teams[i]!.id }));
+  const equal = args.includes('--equal');
+  const builds: CarBuild[] = Array.from({ length: 10 }, (_, i) => ({ ...ctx.physics.defaultCar, team: catalog.teams[i]!.id, ...(equal ? { equalise: ctx.race.equalise } : {}) }));
   let w: WorldState = createRaceWorld(ctx, builds, { laps, seed });
-  const ai = builds.map((_, i) => aiInputSource(i, () => ({ world: w, ctx, line }), () => cfg.presets[cfg.defaultPreset]!, () => c, seed * 1000 + i));
+  const lineup = assignDrivers((driversJson as { drivers: DriverDef[] }).drivers, 10, seed);
+  const presets = builds.map((_, i) => driverPreset(cfg.presets[cfg.defaultPreset]!, lineup[i], cfg.skill?.spread ?? 0));
+  const ai = builds.map((_, i) => aiInputSource(i, () => ({ world: w, ctx, line }), () => presets[i]!, () => c, seed * 1000 + i));
   let contacts = 0, invalid = 0, swaps = 0;
   let order = w.race!.order.join(',');
   for (let t = 0; t < 60 * 60 * 30 && w.race!.phase !== 'results'; t++) {

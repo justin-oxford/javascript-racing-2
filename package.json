@@ -30,7 +30,8 @@
     "ers-probe": "tsx tools/ers-probe.ts",
     "evolution-probe": "tsx tools/evolution-probe.ts",
     "setup-search": "tsx tools/setup-search.ts",
-    "racecraft-probe": "tsx tools/racecraft-probe.ts"
+    "racecraft-probe": "tsx tools/racecraft-probe.ts",
+    "pass-probe": "tsx tools/pass-probe.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
