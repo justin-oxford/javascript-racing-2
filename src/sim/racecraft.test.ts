@@ -139,10 +139,6 @@ describe('a race with racecraft', () => {
     expect(lead.manage / (lead.manage + lead.attack + lead.defend + lead.nurse)).toBeGreaterThan(0.7);
     // Modes change (lines now change only onto a kept EXIT line, AI overtaking card: rare in a 3-lap race).
     expect(a.ai.reduce((s, d) => s + d.state.craftTicks.attack + d.state.craftTicks.defend, 0)).toBeGreaterThan(0);
-    // At most two: under this frozen baseline physics (twitchier than the live tuning) one car spins alone at
-    // the same corner exit (line point ~212, on the neutral line) and the stuck recovery gets it going; with
-    // the stored EXIT line the timing puts it there twice. With the live config (npm run racecraft-probe,
-    // 20 laps, seeds 1-3 x both modes, 2026-11-14): 0 stuck in 6 races.
-    expect(a.ai.reduce((s, d) => s + d.state.stuckEvents, 0)).toBeLessThanOrEqual(2);
+    expect(a.ai.reduce((s, d) => s + d.state.stuckEvents, 0)).toBe(0);
   }, 60_000);
 });

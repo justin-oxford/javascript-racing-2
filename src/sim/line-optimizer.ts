@@ -255,7 +255,7 @@ export function speedProfile(x: ArrayLike<number>, y: ArrayLike<number>, physics
   const axleGrip = t.frontGrip * wf + t.rearGrip * (1 - wf);
   // Fuel weight (Race strategy card): load sensitivity at this fuel load.
   const mu = t.baseGrip * stats.grip * axleGrip * (t.loadSensitivity ? (c.dryMassKg / mass) ** t.loadSensitivity : 1);
-  const muLat = mu * t.lateralGrip;
+  const muLat = mu * t.lateralGrip * transferGripFactor(mu * t.lateralGrip, physics);
   const kAero = physics.aero.downforceCoef * stats.downforce;
   const vTop = (physics.engine.topSpeedKph / 3.6) * stats.topSpeed;
   const latMax = (v: number) => muLat * G * (1 + kAero * v * v);
@@ -321,4 +321,18 @@ export function computeExitLine(line: LinePath, physics: PhysicsConfig, stats: S
   const offsets = optimizeExitOffsets(line, (off, from, to) => { const p = offsetPath(line, off); return time(p.x, p.y, speed(p.x, p.y), from, to); }, cfg, physics.car.widthM / 2);
   const p = offsetPath(line, offsets);
   return { points: Array.from({ length: n }, (_, i) => ({ x: Math.round(p.x[i]! * ppm * 10) / 10, y: Math.round(p.y[i]! * ppm * 10) / 10 })), offsets, speed, time };
+}
+
+/**
+ * Cornering grip left after load transfer (tyres.transferSensitivity), for the speed plans: the outside
+ * tyre's extra load as a share of the pair's mean, r = cgHeight x mu_lat / trackWidth (independent of speed:
+ * downforce raises both the load and the grip; half the full-limit figure, since cars corner short of the
+ * limit most of the way: with the full figure the AI ran ~1 s a lap slow), at most 1; the pair then grips
+ * ((1 + r)^(1-k) + (1 - r)^(1-k)) / 2 of what it would without load sensitivity. 1 when k is 0.
+ */
+export function transferGripFactor(muLat: number, physics: Pick<PhysicsConfig, 'tyres' | 'car'>): number {
+  const k = physics.tyres.transferSensitivity ?? 0;
+  if (!k) return 1;
+  const r = Math.min(1, (physics.car.cgHeightM * muLat) / physics.car.trackWidthM);
+  return ((1 + r) ** (1 - k) + (1 - r) ** (1 - k)) / 2;
 }

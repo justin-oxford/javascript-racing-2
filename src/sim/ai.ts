@@ -6,7 +6,7 @@
 import { buildStats } from './car-config';
 import { damageGrip, isDamaged } from './damage';
 import { blueFlag, chooseMode, concedes, keepGoodExits, lineFor, LINE_IDS, lineOffsets, offsetPath, offsetsFromPoints, otherHasRightOfWay, type CraftMode, type LineId, type OvertakingConfig, type RacecraftConfig } from './racecraft';
-import { speedProfile } from './line-optimizer';
+import { speedProfile, transferGripFactor } from './line-optimizer';
 import { aiCompound, compoundGrip, consumableScale, FUEL_TO_END, fuelGrip, stopDone, type PitPlan } from './strategy';
 import type { SimTrack } from './track';
 import { surfaceAt } from './track';
@@ -59,7 +59,7 @@ export interface AiConfig {
 const G = 9.81;
 /** No "overtaking" config: the behaviour from before the AI overtaking card (pull out 3 s before braking, the car
  *  ahead always has the right of way, no closer following, no conceding, no blue flags). */
-const OVERTAKING_OFF: OvertakingConfig = { overlapM: -1, pullOutSec: 3, pullOutAggrSec: 0, attackCloseSec: 0, closeUntilBrakeSec: 0, attackFollowBrake: 0.8, commitM: 0, concedeBelow: 0, blueLaps: Infinity, blueBehindM: 0, blueLift: 0 };
+const OVERTAKING_OFF: OvertakingConfig = { overlapM: -1, pullOutSec: 3, pullOutAggrSec: 0, attackHeadwaySec: 0.35, closeUntilBrakeSec: Infinity, attackFollowBrake: 0.8, commitM: 0, concedeBelow: 0, blueLaps: Infinity, blueBehindM: 0, blueLift: 0 };
 const SPACING_M = 2;
 
 /** A path the AI follows (the racing line, or a pit path), resampled every 2 m, in metres. */
@@ -593,7 +593,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   const mu = phys.tyres.baseGrip * stats.grip * tyre;
   const kAero = phys.aero.downforceCoef * stats.downforce;
   const vTop = (phys.engine.topSpeedKph / 3.6) * stats.topSpeed;
-  const latMax = (v: number) => mu * phys.tyres.lateralGrip * G * (1 + kAero * v * v);
+  const muLatT = mu * phys.tyres.lateralGrip * transferGripFactor(mu * phys.tyres.lateralGrip, phys); // load transfer costs grip
+  const latMax = (v: number) => muLatT * G * (1 + kAero * v * v);
   /** Max cornering speed at curvature k: v^2 |k| = mu_lat g (1 + kAero v^2). */
   const cornerV = (k: number) => {
     const muLat = mu * phys.tyres.lateralGrip;
@@ -719,11 +720,12 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   let attack = false;
   // Following gap grows with speed (a time headway), so a queue through a slow hairpin can run close
   // instead of everyone braking to a stop to keep a fixed 12 m.
-  // ATTACKING (racecraft), until closeUntilBrakeSec before a braking point: follow closer through the corners (aggressive drivers
+  // ATTACKING (racecraft), until closeUntilBrakeSec before a braking point: close right up out of the corners (aggressive drivers
   // closer still), so it's on the car ahead's gearbox at the exit (AI overtaking card).
   const ov = cfg.overtaking ?? OVERTAKING_OFF;
-  const headway = cfg.racecraft?.enabled && st.craft === 'attack' && !pit && brakeInSec > ov.closeUntilBrakeSec ? Math.max(0.1, 0.35 - (preset.aggression ?? 0.5) * ov.attackCloseSec) : 0.35;
-  const gap = phys.car.lengthM + 1 + headway * speed;
+  // (Mirroring the car ahead at a 0.35 s headway out of every corner, it never got a run on it.)
+  const closeUp = cfg.racecraft?.enabled && st.craft === 'attack' && !pit && brakeInSec > ov.closeUntilBrakeSec;
+  const gap = closeUp ? phys.car.lengthM + 1.5 + ov.attackHeadwaySec * (1.5 - (preset.aggression ?? 0.5)) * speed : phys.car.lengthM + 1 + 0.35 * speed;
   // Only start (or keep) a pass where the next ~40 m is fairly straight, not side by side into a braking zone.
   let straightAhead = true;
   for (let q = 0; q < 10; q++) if (Math.abs(path.k[idx(best + q)]!) > 0.03) straightAhead = false;

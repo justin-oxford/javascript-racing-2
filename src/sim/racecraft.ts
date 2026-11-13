@@ -234,8 +234,8 @@ export interface OvertakingConfig {
   /** Pull out of a tow this many seconds before the braking point, plus aggression x pullOutAggrSec. */
   pullOutSec: number;
   pullOutAggrSec: number;
-  /** ATTACKING: the following headway (0.35 s) shrinks by aggression x this. */
-  attackCloseSec: number;
+  /** ATTACKING, out of braking zones: follow at a car length + 1.5 m + this x (1.5 - aggression) seconds. */
+  attackHeadwaySec: number;
   /** ...except within this many seconds of a braking point (the full headway into braking zones). */
   closeUntilBrakeSec: number;
   /** ATTACKING, following: plan braking at this fraction of its braking (0.8 when merely following). */

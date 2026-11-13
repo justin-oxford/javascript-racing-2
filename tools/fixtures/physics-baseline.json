@@ -1,10 +1,11 @@
 {
-  "_comment": "TEST FIXTURE: frozen copy of the original config/physics.json defaults, so arena tests don't break while Justin tunes. Car physics, absolute values in metres, seconds, newtons, kg. Team x spec x setup multipliers (teams.json, specs.json) scale engine/topSpeed/brakes/drag/downforce/grip. Tune live with the panel (T in dev), then Save.",
+  "_comment": "Car physics, absolute values in metres, seconds, newtons, kg. Team x spec x setup multipliers (teams.json, specs.json) scale engine/topSpeed/brakes/drag/downforce/grip. Tune live with the panel (T in dev), then Save.",
   "car": {
     "dryMassKg": 798,
     "lengthM": 5.6,
     "widthM": 2,
-    "wheelbaseM": 3.6, "frontAxleFromCentreM": 1.98,
+    "wheelbaseM": 3.55,
+    "frontAxleFromCentreM": 1.535,
     "trackWidthM": 1.6,
     "weightFront": 0.45,
     "cgHeightM": 0.3,
@@ -17,11 +18,29 @@
     "reverseForceN": 3500,
     "maxReverseKph": 25
   },
-  "brakes": { "maxForceN": 32000, "frontBias": 0.6 },
+  "brakes": { "maxForceN": 47000, "frontBias": 0.6 },
   "aero": { "dragCoef": 0.9, "downforceCoef": 0.0003 },
-  "tyres": { "baseGrip": 1.6, "lateralGrip": 1, "lateralStiffness": 0.6, "frontGrip": 1, "rearGrip": 1, "peakSlipDeg": 7, "falloff": 0.88, "falloffSlip": 3, "lowSpeedMps": 3 },
-  "steering": { "lockDeg": 20, "lockFalloffKph": 180, "assist": true, "assistPeakPct": 1, "assistFromKph": 36, "assistFullKph": 72 },
-  "traction": { "assist": false, "assistPeakPct": 0.95 },
+  "tyres": {
+    "baseGrip": 2.11,
+    "lateralGrip": 1.18,
+    "lateralStiffness": 0.6,
+    "frontGrip": 1.23,
+    "rearGrip": 1.27,
+    "peakSlipDeg": 7,
+    "falloff": 0.88,
+    "falloffSlip": 3,
+    "lowSpeedMps": 3,
+    "transferSensitivity": 0.2
+  },
+  "steering": {
+    "lockDeg": 24,
+    "lockFalloffKph": 135,
+    "assist": true,
+    "assistPeakPct": 1,
+    "assistFromKph": 36,
+    "assistFullKph": 72
+  },
+  "traction": { "assist": true, "assistPeakPct": 0.95 },
   "input": { "steerRate": 5, "steerReturnRate": 8, "throttleRate": 6, "brakeRate": 10 },
   "wear": {
     "throttlePerSec": 0.005,

@@ -28,6 +28,7 @@ import {
   createPhysicsCache,
   createSimTrack,
   createWorld,
+  bodyOffsetM,
   carGripMul,
   step,
   traceWalls,
@@ -203,7 +204,9 @@ describe('physics', () => {
       expect(w.events).toEqual([]);
     });
     expect(world.cars[0]!.wallContact).toBe(true);
-    expect(maxY).toBeLessThan(40 - 1 - 2.5); // centre stays a half-length clear of the wall face
+    // The rear of the body stays this side of the wall face (the car's position is its CG; the body centre
+    // sits bodyOffsetM ahead of it).
+    expect(maxY + ctx.physics.car.lengthM / 2 - bodyOffsetM(ctx.physics)).toBeLessThanOrEqual(40 - 1);
   });
 
   it('two wheels on the grass pull the car toward it but do not cap its speed', () => {
@@ -374,7 +377,7 @@ describe('ABS (config/assists.json)', () => {
 
   it('a straight-line stop from speed never locks the fronts, and stops no later than locked brakes', () => {
     const ctx = arena(30, 3000, { x: 15, y: 2995, heading: 0 });
-    const on = stop(withAbs(ctx), BRAKE, 60 * 10), off = stop(ctx, BRAKE, 60 * 10);
+    const on = stop(withAbs(ctx), BRAKE, 60 * 10), off = stop(withAbs(ctx, 0.5, false), BRAKE, 60 * 10); // the fixture has ABS on
     expect(on.from.kph).toBeGreaterThan(250);
     expect(off.worst).toBeGreaterThan(1); // raw: keyboard full brake locks them
     expect(on.worst).toBeLessThanOrEqual(1);
@@ -396,6 +399,6 @@ describe('ABS (config/assists.json)', () => {
       const w = drive(c, drive(c, createWorld(c), 60 * 3, FULL), 60 * 3, BRAKE);
       return 1 - w.cars[0]!.wheels[0].wear;
     };
-    expect(frontWear(ctx)).toBeGreaterThan(frontWear(withAbs(ctx)) * 1.5);
+    expect(frontWear(withAbs(ctx, 0.5, false))).toBeGreaterThan(frontWear(withAbs(ctx)) * 1.5); // off vs on (the fixture has ABS on)
   });
 });

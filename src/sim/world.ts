@@ -389,6 +389,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
   const delta = frontWheelAngle(controls.steer, car, cfg) + damagePull(dmg, ctx.damage);
 
   const gripBase = cfg.tyres.baseGrip * stats.grip * tyreMul; // downforce is already in the load
+  const kT = cfg.tyres.transferSensitivity ?? 0;
   const positions = wheelPositions(car, cfg);
   const out = [] as unknown as Wheels<WheelForces>;
 
@@ -406,7 +407,12 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
     const surf = ctx.track.surfaces[car.wheels[w]!.surface]!;
 
     // Balance knobs (03b): front/rear grip multipliers next to weight distribution and yaw inertia.
-    const cap = gripBase * (w < 2 ? cfg.tyres.frontGrip : cfg.tyres.rearGrip) * wearGrip(car.wheels[w]!.wear) * damageGrip(dmg, w, ctx.damage) * evolutionGrip(surface, p.x, p.y, ctx.evolution) * surf.grip * (surf.id === 'asphalt' ? 1 : setup.offTrackGrip) * load[w]!;
+    // Load sensitivity across the axle (tyres.transferSensitivity): the more loaded tyre of a pair grips a
+    // little less per newton, so cornering load transfer costs that axle grip. That is what the suspension
+    // balance (anti-roll bars) works through: more of the transfer at one end = less grip there.
+    const pairMean = (w < 2 ? load[0] + load[1] : load[2] + load[3]) / 2;
+    const transferMul = kT && pairMean > 0 && load[w]! > 0 ? (load[w]! / pairMean) ** -kT : 1;
+    const cap = transferMul * gripBase * (w < 2 ? cfg.tyres.frontGrip : cfg.tyres.rearGrip) * wearGrip(car.wheels[w]!.wear) * damageGrip(dmg, w, ctx.damage) * evolutionGrip(surface, p.x, p.y, ctx.evolution) * surf.grip * (surf.id === 'asphalt' ? 1 : setup.offTrackGrip) * load[w]!;
     const capLat = cap * cfg.tyres.lateralGrip;
     const stopCap = (Math.abs(vLong) * wheelMass) / dt; // never push a wheel past standstill
 

@@ -1,7 +1,9 @@
 {
   "_comment": "Car contact (card 06). carFriction / carRestitution: car against car, used as is (rub = survivable, punt = spin; check with npm run contact-probe). bodyFriction / bodyRestitution: the car body against walls, mixed with the wall's own values from physics.json (friction: geometric mean, restitution: the larger), kept at what walls were tuned with. Yaw inertia is physics car.inertiaScale. Car contact never invalidates a lap; only barriers and track limits do.",
-  "carFriction": 1.0,
+  "carFriction": 1,
   "carRestitution": 0.1,
   "bodyFriction": 0.3,
-  "bodyRestitution": 0.1
+  "bodyRestitution": 0.1,
+  "_comment_pits": "pitLaneGhosting: cars both in the pit lane pass through each other (no contact), so a car pulling into or out of its box can't tangle with one parked next door or driving by.",
+  "pitLaneGhosting": true
 }

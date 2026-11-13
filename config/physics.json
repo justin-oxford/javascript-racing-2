@@ -30,7 +30,8 @@
     "falloff": 0.88,
     "falloffSlip": 3,
     "lowSpeedMps": 3,
-    "loadSensitivity": 0.23
+    "loadSensitivity": 0.23,
+    "transferSensitivity": 0.2
   },
   "steering": {
     "lockDeg": 24,

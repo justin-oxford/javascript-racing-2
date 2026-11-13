@@ -21,6 +21,14 @@ import { wheelFx, type WheelFx } from './triggers';
 const PPM = 10;
 const idx = (id: string) => surfaces.findIndex((s) => s.id === id);
 
+/** The frozen physics with the driver aids off: these tests are about what raw wheelspin, lockups and slides
+ *  look and sound like, not about traction control or ABS (both on in the baseline). */
+const rawPhysics = (): PhysicsConfig => {
+  const p = structuredClone(physicsJson) as unknown as PhysicsConfig;
+  p.traction = { ...p.traction, assist: false };
+  return p;
+};
+
 function arena(wM: number, hM: number, spawn: { x: number; y: number; heading: number }, paint?: (x: number, y: number) => string | undefined): SimContext {
   const w = wM * PPM, h = hM * PPM;
   const data = new Uint8Array(w * h);
@@ -29,7 +37,7 @@ function arena(wM: number, hM: number, spawn: { x: number; y: number; heading: n
       data[y * w + x] = idx(x < PPM || y < PPM || x >= w - PPM || y >= h - PPM ? 'wall' : (paint?.(x / PPM, y / PPM) ?? 'asphalt'));
   const json: TrackJson = { id: 't', name: 't', pxPerMeter: PPM, files: { mask: 'm' }, timingLines: {}, racingLine: [], grid: [], spawn: { x: spawn.x * PPM, y: spawn.y * PPM, heading: spawn.heading } };
   const track = createSimTrack(json, { width: w, height: h, data }, surfaces);
-  return { track, walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing), physics: structuredClone(physicsJson) as unknown as PhysicsConfig, catalog, rules, contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, strategy: strategyJson as StrategyConfig, cache: createPhysicsCache() };
+  return { track, walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing), physics: rawPhysics(), catalog, rules, contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: { ...assistsJson, abs: { ...assistsJson.abs, enabled: false } }, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, strategy: strategyJson as StrategyConfig, cache: createPhysicsCache() };
 }
 
 /** Run inputs, collect each tick's per-wheel FX. */
@@ -47,7 +55,10 @@ const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 
 describe('tyre VFX triggers', () => {
   it('full throttle off the line spins the rears, not the fronts', () => {
-    const { fx } = run(arena(30, 400, { x: 15, y: 395, heading: 0 }), 60, () => ({ throttle: 1, brake: 0, steer: 0 }));
+    // A low-grip rear: with the baseline values the engine can't spin the rears in a straight line at all.
+    const base = arena(30, 400, { x: 15, y: 395, heading: 0 });
+    const ctx = { ...base, physics: { ...base.physics, tyres: { ...base.physics.tyres, rearGrip: base.physics.tyres.rearGrip * 0.6 } } };
+    const { fx } = run(ctx, 60, () => ({ throttle: 1, brake: 0, steer: 0 }));
     expect(sum(fx.map((f) => f[2]!.spin + f[3]!.spin))).toBeGreaterThan(1);
     expect(sum(fx.map((f) => f[0]!.mark + f[1]!.mark))).toBe(0);
   });
@@ -62,8 +73,10 @@ describe('tyre VFX triggers', () => {
 
   it('a hard turn at speed slides (curved marks), not lockup/wheelspin', () => {
     const ctx = arena(300, 300, { x: 150, y: 280, heading: 0 });
-    const fast = run(ctx, 60 * 4, () => ({ throttle: 1, brake: 0, steer: 0 })).world;
-    const { fx } = run(ctx, 60, () => ({ throttle: 0.3, brake: 0, steer: 1 }), fast);
+    // Full lock on full throttle from ~165 kph: past the limit (a part-throttle turn stays near usage 1.05 with
+    // these values, under the slide threshold).
+    const fast = run(ctx, 60 * 3, () => ({ throttle: 1, brake: 0, steer: 0 })).world;
+    const { fx } = run(ctx, 60, () => ({ throttle: 1, brake: 0, steer: 1 }), fast);
     expect(sum(fx.flatMap((f) => f.map((x) => x.slide)))).toBeGreaterThan(5);
     expect(sum(fx.flatMap((f) => f.map((x) => x.lockup)))).toBe(0);
   });
