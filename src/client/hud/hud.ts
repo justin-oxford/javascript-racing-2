@@ -16,6 +16,8 @@ export interface HudCallbacks {
   onRace(laps: number, grid: 'random' | 'pole' | 'back'): void;
   /** Leave a race for practice. */
   onPractice(): void;
+  /** Car performance: team stats, or equalised cars (Equal performance card). Restarts like the AI choice. */
+  onPerf(mode: 'team' | 'equal'): void;
   /** Start a race weekend (practice -> qualifying -> race) of the menu's race length. */
   onWeekend(laps: number): void;
   /** Car labels over the track: off / position / position + team code (also the L key). */
@@ -124,6 +126,9 @@ export class Hud {
         <div class="choices ai-count">${[0, 1, 3, 5, 9].map((n) => `<button data-ai-count="${n}">${n}</button>`).join('')}</div>
         <div class="choices ai-level">${this.aiPresets.map((p) => `<button data-ai-preset="${p}">${p}</button>`).join('')}</div>
         <div class="note">Changing AI restarts everyone from the grid.</div>
+        <div class="title">CAR PERFORMANCE</div>
+        <div class="choices perf"><button data-perf="team">Team stats</button><button data-perf="equal">Equal</button></div>
+        <div class="note">Equal: every team's car performs the same (spec and setup still count); AI drivers differ by skill instead.</div>
         <div class="title">RACE</div>
         <div class="choices race-laps">${[3, 5, 10, 15].map((n) => `<button data-race-laps="${n}">${n} laps</button>`).join('')}</div>
         <div class="choices race-grid">${(['random', 'pole', 'back'] as const).map((g) => `<button data-race-grid="${g}">${{ random: 'Random grid', pole: 'Pole', back: 'Back of grid' }[g]}</button>`).join('')}</div>
@@ -162,6 +167,7 @@ export class Hud {
     this.el.weekend!.addEventListener('click', () => { this.closeMenu(); this.cb.onWeekend(this.race.laps); });
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-count]').forEach((b) => b.addEventListener('click', () => this.cb.onAi(Number(b.dataset.aiCount), this.ai.preset)));
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-preset]').forEach((b) => b.addEventListener('click', () => this.cb.onAi(this.ai.count, b.dataset.aiPreset!)));
+    this.root.querySelectorAll<HTMLButtonElement>('[data-perf]').forEach((b) => b.addEventListener('click', () => this.cb.onPerf(b.dataset.perf as 'team' | 'equal')));
     this.root.querySelectorAll<HTMLButtonElement>('[data-labels]').forEach((b) => b.addEventListener('click', () => this.cb.onLabels(b.dataset.labels as 'off' | 'position' | 'name')));
     this.root.querySelectorAll<HTMLButtonElement>('[data-slot]').forEach((b) =>
       b.addEventListener('click', () => {
@@ -212,6 +218,11 @@ export class Hud {
     this.ai = { count, preset };
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-count]').forEach((b) => b.classList.toggle('active', Number(b.dataset.aiCount) === count));
     this.root.querySelectorAll<HTMLButtonElement>('[data-ai-preset]').forEach((b) => b.classList.toggle('active', b.dataset.aiPreset === preset));
+  }
+
+  /** Highlight the current car performance mode. */
+  setPerf(mode: string): void {
+    this.root.querySelectorAll<HTMLButtonElement>('[data-perf]').forEach((b) => b.classList.toggle('active', b.dataset.perf === mode));
   }
 
   /** Highlight the current car-label mode. */

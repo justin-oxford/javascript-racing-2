@@ -12,6 +12,8 @@ import wallTracing from '../../config/wall-tracing.json';
 import { catalog, surfaces } from '../../tools/load-track-node';
 import {
   buildStats,
+  driverSkill,
+  skilledPreset,
   createPhysicsCache,
   createSimTrack,
   createWorld,
@@ -71,6 +73,31 @@ describe('car stats (team x spec x setup)', () => {
 
   it('Foucault C1 Med is the baseline', () => {
     expect(buildStats(build('foucault'), catalog)).toEqual({ engine: 1, topSpeed: 1, brakes: 1, drag: 1, downforce: 1, grip: 1 });
+  });
+
+  it('Equal performance: equalise 1 gives every team, Motus included, the same stats; spec and setup still count', () => {
+    const ref = buildStats({ ...build('foucault', 'C2', { downforce: 'High', gearing: 'Short', brakes: 'Med' }), equalise: 1 }, catalog);
+    for (const t of catalog.teams) {
+      const st = buildStats({ ...build(t.id, 'C2', { downforce: 'High', gearing: 'Short', brakes: 'Med' }), equalise: 1 }, catalog);
+      for (const k of Object.keys(ref) as (keyof typeof ref)[]) expect(st[k]).toBeCloseTo(ref[k], 12);
+    }
+    expect(buildStats({ ...build('motus'), equalise: 0.5 }, catalog).engine).toBeCloseTo(0.875); // halfway to 1.0
+    expect(buildStats({ ...build('motus'), equalise: 0 }, catalog)).toEqual(buildStats(build('motus'), catalog)); // team stats unchanged
+  });
+
+  it('driver skill: seeded, within the spread, and it moves the preset the right way', () => {
+    const sk = Array.from({ length: 50 }, (_, i) => driverSkill(42, i, 0.02));
+    expect(sk).toEqual(Array.from({ length: 50 }, (_, i) => driverSkill(42, i, 0.02)));
+    expect(Math.max(...sk.map(Math.abs))).toBeLessThanOrEqual(0.02);
+    expect(new Set(sk).size).toBe(50);
+    expect(driverSkill(43, 1, 0.02)).not.toBe(driverSkill(42, 1, 0.02));
+    const p = { cornerMargin: 0.9, brakeMargin: 0.8, lookaheadBaseM: 7, lookaheadPerMps: 0.3, steerKp: 1, steerKd: 0, noise: 0.02, mistakesPerMin: 1, trafficConeM: 30, overtakeOffsetM: 3, throttleCap: 1 };
+    const fast = skilledPreset(p, 0.02), slow = skilledPreset(p, -0.02);
+    expect(fast.cornerMargin).toBeGreaterThan(p.cornerMargin);
+    expect(slow.cornerMargin).toBeLessThan(p.cornerMargin);
+    expect(fast.mistakesPerMin).toBeLessThan(slow.mistakesPerMin);
+    expect(skilledPreset({ ...p, cornerMargin: 0.99 }, 0.05).cornerMargin).toBe(1); // never past the tyre's limit
+    expect(skilledPreset(p, 0)).toBe(p);
   });
 
   it('carries v0.16 ratios: Motus is slow, C3 is slower than C1, short gearing trades top speed for accel', () => {

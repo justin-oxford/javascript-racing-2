@@ -24,6 +24,8 @@ export interface RaceConfig {
   qualiFuelKg: number;
   /** Sim speed-up once the player's qualifying session is over (client only). */
   qualiFastForward: number;
+  /** Equal performance mode: how far team multipliers move toward 1.0 (0-1). */
+  equalise: number;
   /** Points for P1, P2, ... in a race. */
   points: number[];
 }

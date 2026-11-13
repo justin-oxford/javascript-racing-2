@@ -44,6 +44,12 @@ export interface CarBuild {
   team: string;
   spec: string;
   setup: CarSetup;
+  /**
+   * Equal performance mode (a session setting from the race setup, carried on each car so whoever builds
+   * the cars builds the same ones): 0 / absent = team stats, 1 = every team's multipliers at 1.0.
+   * Spec and setup still apply on top.
+   */
+  equalise?: number;
 }
 
 export interface WheelState {

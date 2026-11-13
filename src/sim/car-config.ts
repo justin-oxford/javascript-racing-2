@@ -83,7 +83,9 @@ export function buildStats(build: CarBuild, catalog: CarCatalog): Stats {
   if (!spec || !ref) throw new Error(`unknown spec "${build.spec}"`);
   const out = {} as Stats;
   for (const s of STAT_NAMES) {
-    let v = team.stats[s] * (spec[s] / ref[s]);
+    // Equal performance: the team's multiplier blended toward 1.0 (Motus too: Team stats keeps it slow).
+    const eq = Math.max(0, Math.min(1, build.equalise ?? 0));
+    let v = (team.stats[s] + (1 - team.stats[s]) * eq) * (spec[s] / ref[s]);
     for (const [slot, choice] of Object.entries(build.setup)) v *= catalog.specs.setups[slot]?.[choice]?.[s] ?? 1;
     out[s] = v;
   }

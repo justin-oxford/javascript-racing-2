@@ -13,5 +13,7 @@
   "qualiReleaseGapSec": 4,
   "points": [25, 18, 15, 12, 10, 8, 6, 4, 2, 1],
   "qualiFastForward": 4,
-  "qualiFuelKg": 30
+  "qualiFuelKg": 30,
+  "_comment_equal": "equalise: in Equal performance mode (race setup), how far each team's six stat multipliers move toward 1.0 (1 = identical cars, Motus included). Spec and setup still apply on top. Team stats mode ignores it.",
+  "equalise": 1
 }

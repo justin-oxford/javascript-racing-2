@@ -1,4 +1,4 @@
-import { aiInputSource, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { aiInputSource, driverSkill, skilledPreset, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -69,6 +69,16 @@ async function main(): Promise<void> {
   let aiCount = Math.min(9, Math.max(0, Number(params.get('ai') ?? remembered.count ?? 0) || 0));
   let aiPreset = params.get('level') ?? remembered.preset ?? aiCfg.defaultPreset;
   if (!aiCfg.presets[aiPreset]) aiPreset = aiCfg.defaultPreset;
+  // Car performance (Equal performance card): team stats or equalised cars, remembered in this browser.
+  let perfMode: 'team' | 'equal' = (() => { try { return localStorage.getItem('jr2.perf') === 'equal' ? 'equal' : 'team'; } catch { return 'team'; } })();
+  /** A build with this session's performance mode on it (every car, the player's too). */
+  const withPerf = (b: CarBuild): CarBuild => {
+    const { equalise: _old, ...rest } = b;
+    return perfMode === 'equal' ? { ...rest, equalise: ctx.race.equalise } : rest;
+  };
+  // AI driver skill: seeded once per page load, so the same drivers carry through a whole race weekend.
+  const driverSeed = crypto.getRandomValues(new Uint32Array(1))[0]!;
+  const skillOn = (): boolean => (perfMode === 'equal' ? aiCfg.skill?.inEqual : aiCfg.skill?.inTeam) ?? false;
   const vfx = new Vfx(mask.track.mask.width, mask.track.mask.height, vfxConfig);
   const audio = new GameAudio(audioConfig);
   const timingLines = new TimingLines(hudConfig);
@@ -82,12 +92,15 @@ async function main(): Promise<void> {
   vfx.onInvalidate = () => renderer.invalidateStatic();
   let lineSig = timingLines.signature(ctx.track);
   const startBuild = curr0Build();
-  const session = new Session(browserStore(), json.id, startBuild.spec, startBuild.team);
+  /** PBs are kept per track + spec + performance mode: Equal-mode laps don't compare with team-stats laps. */
+  const pbSpec = (spec: string): string => (perfMode === 'equal' ? `${spec}-equal` : spec);
+  const session = new Session(browserStore(), json.id, pbSpec(startBuild.spec), startBuild.team);
   function curr0Build(): CarBuild {
     return physics.defaultCar;
   }
   /** Swap the player's car build and put it back in the pits (spec/team change). A race restarts. */
-  const rebuildCar = (build: CarBuild): void => {
+  const rebuildCar = (b: CarBuild): void => {
+    const build = withPerf(b);
     if (raceSetup) {
       curr = setCarBuild(curr, 0, build);
       return startRace(raceSetup.laps, raceSetup.grid, raceSetup.order);
@@ -103,10 +116,10 @@ async function main(): Promise<void> {
   /** Stopped in a box that services the player (any box in practice, its own in a race). */
   const stoppedInBox = (): boolean => !!curr.cars[0]?.servicing;
   const aiDrivers = (count: number): InputSource[] => Array.from({ length: count }, (_, k) =>
-    aiInputSource(k + 1, () => ({ world: curr, ctx, line: racingLine }), () => aiCfg.presets[aiPreset] ?? aiCfg.presets[aiCfg.defaultPreset]!, () => aiCfg, 1000 + k));
+    aiInputSource(k + 1, () => ({ world: curr, ctx, line: racingLine }), () => skilledPreset(aiCfg.presets[aiPreset] ?? aiCfg.presets[aiCfg.defaultPreset]!, skillOn() ? driverSkill(driverSeed, k + 1, aiCfg.skill?.spread ?? 0) : 0), () => aiCfg, 1000 + k));
   const aiBuilds = (me: CarBuild, count: number): CarBuild[] => {
     const teams = ctx.catalog.teams.filter((t) => t.id !== me.team);
-    return Array.from({ length: count }, (_, k) => ({ ...physics.defaultCar, spec: me.spec, team: teams[k % teams.length]!.id }));
+    return Array.from({ length: count }, (_, k) => withPerf({ ...physics.defaultCar, spec: me.spec, team: teams[k % teams.length]!.id }));
   };
   /** The race being run (for Restart), undefined in practice. */
   let raceSetup: { laps: number; grid: 'random' | 'pole' | 'back'; order?: number[] | undefined } | undefined;
@@ -116,7 +129,7 @@ async function main(): Promise<void> {
   const startPractice = (keepWeekend = false): void => {
     raceSetup = undefined;
     if (!keepWeekend) weekend = undefined;
-    const me = curr?.cars[0]?.build ?? startBuild;
+    const me = withPerf(curr?.cars[0]?.build ?? startBuild);
     if (!racingLine) aiCount = 0;
     const builds: CarBuild[] = [me, ...aiBuilds(me, aiCount)];
     if (aiCount === 0) for (let i = 1; i <= extra; i++) builds.push(physics.defaultCar);
@@ -134,7 +147,7 @@ async function main(): Promise<void> {
     }
     raceSetup = { laps, grid, order };
     if (!order) weekend = undefined; // a quick race leaves any weekend
-    const me = curr?.cars[0]?.build ?? startBuild;
+    const me = withPerf(curr?.cars[0]?.build ?? startBuild);
     const count = Math.max(1, aiCount);
     const builds: CarBuild[] = [me, ...aiBuilds(me, count)];
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!; // client-side: the sim itself stays seeded
@@ -157,7 +170,7 @@ async function main(): Promise<void> {
   /** Step 2: qualifying. Everyone queued at the pit exit; best lap sets the grid. */
   const startQuali = (): void => {
     if (!weekend) return;
-    const me = curr?.cars[0]?.build ?? startBuild;
+    const me = withPerf(curr?.cars[0]?.build ?? startBuild);
     const count = Math.max(1, aiCount);
     const builds: CarBuild[] = [me, ...aiBuilds(me, count)];
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
@@ -187,7 +200,7 @@ async function main(): Promise<void> {
       const b = curr.cars[0]!.build;
       if (b.spec === spec) return;
       rebuildCar({ ...b, spec });
-      session.changeSpec(spec); // spec change resets times
+      session.changeSpec(pbSpec(spec)); // spec change resets times
     },
     onTeam: (team) => {
       const b = curr.cars[0]!.build;
@@ -210,6 +223,14 @@ async function main(): Promise<void> {
       else if (!curr.quali && !raceSetup) startPractice(weekend?.stage === 'practice'); // mid-weekend: applies to the next session
     },
     onRace: (laps, grid) => startRace(laps, grid),
+    onPerf: (mode) => {
+      perfMode = mode;
+      session.changeSpec(pbSpec(curr.cars[0]!.build.spec)); // a different set of PBs
+      try { localStorage.setItem('jr2.perf', mode); } catch { /* not remembered */ }
+      hud.setPerf(mode);
+      if (raceSetup && !raceSetup.order) startRace(raceSetup.laps, raceSetup.grid);
+      else if (!curr.quali && !raceSetup) startPractice(weekend?.stage === 'practice');
+    },
     onPractice: () => startPractice(),
     onWeekend: (laps) => startWeekend(laps),
     onLabels: (m) => setLabels(m),
@@ -232,6 +253,7 @@ async function main(): Promise<void> {
     try { localStorage.setItem('jr2.labels', m); } catch { /* private window: not remembered */ }
   }
   hud.setLabels(labelMode);
+  hud.setPerf(perfMode);
 
   let prev: WorldState = createWorld(ctx, drivers.length);
   let curr: WorldState = prev;
@@ -294,11 +316,12 @@ async function main(): Promise<void> {
         slipstream,
         assists,
         volumes: { values: audio.volumes, set: (bus, v) => audio.setVolume(bus, v) },
-        onBuildChange: (build) => {
+        onBuildChange: (b) => {
+          const build = withPerf(b);
           const was = curr.cars[0]!.build;
           curr = setCarBuild(curr, 0, build);
           prev = setCarBuild(prev, 0, build);
-          if (build.spec !== was.spec) session.changeSpec(build.spec);
+          if (build.spec !== was.spec) session.changeSpec(pbSpec(build.spec));
           else if (build.team !== was.team) session.changeTeam(build.team);
         },
       })

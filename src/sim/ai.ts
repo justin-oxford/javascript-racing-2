@@ -24,8 +24,33 @@ export interface AiPreset {
   throttleCap: number;
 }
 
+/**
+ * A driver's skill (Equal performance card): seeded per driver, uniform in -1..1, then scaled by
+ * `spread` (a fraction of pace). Same seed and car = same driver.
+ */
+export function driverSkill(seed: number, car: number, spread: number): number {
+  let s = (seed ^ Math.imul(car + 1, 0x9e3779b1)) >>> 0;
+  for (let k = 0; k < 3; k++) [, s] = rand(s); // stir
+  const [r] = rand(s);
+  return (r * 2 - 1) * spread;
+}
+
+/** A difficulty preset adjusted by driver skill: faster corners, later braking, fewer mistakes when skill > 0. */
+export function skilledPreset(p: AiPreset, skill: number): AiPreset {
+  if (!skill) return p;
+  return {
+    ...p,
+    cornerMargin: Math.min(1, p.cornerMargin * (1 + skill)),
+    brakeMargin: Math.min(1, p.brakeMargin * (1 + skill)),
+    mistakesPerMin: Math.max(0, p.mistakesPerMin * (1 - skill * 10)),
+    noise: Math.max(0, p.noise * (1 - skill * 10)),
+  };
+}
+
 export interface AiConfig {
   defaultPreset: string;
+  /** Driver skill (Equal performance card): spread = +- fraction of pace between drivers; on in Equal mode by default (inEqual), off in Team stats (inTeam). */
+  skill?: { spread: number; inEqual: boolean; inTeam: boolean };
   presets: Record<string, AiPreset>;
   recovery: { stuckSec: number; reverseSec: number; backwardsDeg: number };
   /** fuelLaps: pit with this many laps of fuel left (races, practice); qualiFuelLaps: the same in qualifying (light runs). */
