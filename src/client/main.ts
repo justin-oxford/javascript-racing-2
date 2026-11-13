@@ -50,6 +50,7 @@ import { soundTargets, topSpeedKph } from './audio/targets';
 import { Vfx } from './vfx/vfx';
 import { EvolutionLayer } from './vfx/evolution-layer';
 import { WeatherLayer } from './vfx/weather-layer';
+import { Ghost, parseGhost } from './ghost';
 import nightJson from '../../config/night.json';
 import { drawRearLights, previewNight, shadeImage, type NightConfig } from './night';
 import './style.css';
@@ -146,6 +147,9 @@ async function main(): Promise<void> {
     return { getItem: (k: string) => kv.getItem(pre + k), setItem: (k: string, v: string) => kv.setItem(pre + k, v), keys: () => kv.keys().filter((k) => (pre ? k.startsWith(pre) : !k.startsWith('p.'))).map((k) => k.slice(pre.length)) };
   };
   let session = new Session(pbStore(profile), json.id, pbSpec(startBuild.spec), startBuild.team);
+  // Ghost car (Replays card): this profile's quickest lap on this track + spec, as a see-through car.
+  const ghost = new Ghost(pbStore(profile), json.id, pbSpec(startBuild.spec));
+  let ghostKey = `${profile.id}|${pbSpec(startBuild.spec)}`;
   /** The player's car from the profile: preferred team and spec on the default car. */
   /** This track's base setup (Car setup overhaul card): track.json baseSetup, else the default car's. */
   function trackBase(): CarSetup {
@@ -196,6 +200,15 @@ async function main(): Promise<void> {
   // state; the sessions of a weekend carry the surface over (marbles swept, a little rubber lost).
   /** After every sim tick (the loop and the dev bench alike): the balance readout and evolution redraws. */
   function afterTick(): void {
+    // Ghost: follow profile / spec changes; keep a valid new PB lap; record this lap's poses.
+    const me = curr.cars[0];
+    if (me) {
+      const gk = `${profile.id}|${pbSpec(me.build.spec)}`;
+      if (gk !== ghostKey) { ghostKey = gk; ghost.switchTo(pbStore(profile), json.id, pbSpec(me.build.spec)); }
+      let crossed = false;
+      for (const e of curr.events) if (e.type === 'lap' && e.car === 0) { crossed = true; if (!curr.race && !curr.quali) ghost.onLap(e.time, !!e.invalid, profile.name, TICK_HZ); }
+      ghost.tick(me.x, me.y, me.heading, me.timing.started, crossed);
+    }
     // Setup balance readout: in practice, which axle lets go first in each corner (player only).
     if (balance && !curr.race && !curr.quali && curr.cars[0]) {
       balance.update(curr.cars[0]);
@@ -443,6 +456,13 @@ async function main(): Promise<void> {
     profiles,
     volumes: () => (['master', 'engine', 'tyres', 'impacts', 'ui'] as const).filter((b) => b in audio.volumes).map((bus) => ({ bus, value: audio.volumes[bus] })),
     records,
+    ghost: {
+      info: () => ghost.ghost ? `${ghost.ghost.lapTime.toFixed(3)} s by ${ghost.ghost.driver} (${ghost.ghost.spec})` : 'No ghost yet for this track and spec: drive a valid lap in practice.',
+      download: () => ghost.download(),
+      load: (text) => { const g = parseGhost(text, json.id); if (typeof g === 'string') return g; ghost.use(g); return `ghost loaded: ${g.lapTime.toFixed(3)} s by ${g.driver}`; },
+      toggle: () => (ghost.visible = !ghost.visible),
+      visible: () => ghost.visible,
+    },
     onProfile: (p) => applyProfile(p),
     onStart: (kind) => {
       const s = profile.settings;
@@ -479,6 +499,7 @@ async function main(): Promise<void> {
     // held, in the sim; back to the pits is a menu button.)
     if ((curr.race || curr.quali) && a.type === 'gridSlot') return;
     if (a.type === 'pitBoard') pitBoardAt = performance.now();
+    else if (a.type === 'ghost') ghost.visible = !ghost.visible;
     else if (a.type === 'pause') {
       if (!menu.isOpen) menu.open('pause');
     } else if (a.type === 'toggleDebug') {
@@ -600,6 +621,7 @@ async function main(): Promise<void> {
           if (slot) { curr = resetCar(curr, 0, slot, ctx); prev = curr; }
         },
         /** Run n full frames (sim tick + VFX + draw) synchronously; returns ms per frame. */
+        ghost: () => ghost,
         benchFrame: (n = 300) => {
           const t0 = performance.now();
           for (let k = 0; k < n; k++) {
@@ -733,6 +755,21 @@ async function main(): Promise<void> {
           }
           timingLines.drawFlash(c, ctx.track, performance.now());
           weatherLayer.drawWater(c, curr.surface, json.pxPerMeter, performance.now()); // standing water: the dry line shows lighter
+          // The ghost (practice only): its pose this far into its lap, see-through, under the cars.
+          const meNow = curr.cars[0];
+          if (ghost.visible && !curr.race && !curr.quali && meNow?.timing.started) {
+            const p = ghost.poseAt((curr.tick + alpha) * TICK_DT - meNow.timing.lapStart);
+            if (p) {
+              const ppm = json.pxPerMeter, tf = c.getTransform(), devPerTrackPx = Math.hypot(tf.a, tf.b); // the scale, before rotating
+              c.save();
+              c.globalAlpha = 0.35;
+              c.translate(p.x * ppm, p.y * ppm);
+              c.rotate(p.heading);
+              c.translate(0, -bodyOffsetM(physics) * ppm);
+              liveries.draw(c, { steerAngle: 0 }, { primary: '#ffffff', helmet: '#ffffff' }, physics.car.lengthM * ppm, devPerTrackPx, physics);
+              c.restore();
+            }
+          }
           if (editor) drawMask(c, mask.canvas, editor.maskOpacity);
           else if (debug) drawMask(c, mask.canvas, 0.5);
         },

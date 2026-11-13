@@ -25,6 +25,8 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 
 /** Downscale in halves, then one high-quality final step: crisp, no shimmer. */
 function downscale(src: Canvas, w: number, h: number): Canvas {
+  // (Never 0, negative or NaN: the halving below would never stop.)
+  w = Math.max(1, Number.isFinite(w) ? w : 1); h = Math.max(1, Number.isFinite(h) ? h : 1);
   let cur = src;
   while (cur.width / 2 >= w * 1.0001 && cur.height / 2 >= h) {
     const half = canvas(cur.width / 2, cur.height / 2);

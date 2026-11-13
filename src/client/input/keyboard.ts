@@ -9,6 +9,7 @@ export type KeyboardAction =
   | { type: 'cycleLabels' }
   | { type: 'pause' }
   | { type: 'pitBoard' }
+  | { type: 'ghost' }
   | { type: 'gridSlot'; slot: number };
 
 /** Keys that would scroll the page if not stopped. */
@@ -97,6 +98,7 @@ export class KeyboardInput implements InputSource {
     else if (is('engineMode')) this.engineMode = nextEngineMode(this.engineMode);
     else if (this.pitKey(code)) action = { type: 'pitBoard' };
     else if (is('debug')) action = { type: 'toggleDebug' };
+    else if (is('ghost')) action = { type: 'ghost' };
     else if (is('vfx')) action = { type: 'cycleVfx' };
     else if (is('mute')) action = { type: 'mute' };
     else if (is('labels')) action = { type: 'cycleLabels' };

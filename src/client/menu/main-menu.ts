@@ -32,6 +32,8 @@ export interface MenuDeps {
   volumes(): Array<{ bus: string; value: number }>;
   /** Local PBs on this track for the active profile. */
   records(): RecordRow[];
+  /** Ghost car (Replays card): what's stored for this track + spec, download it, load a shared one. */
+  ghost?: { info(): string; download(): void; load(text: string): string; toggle(): boolean; visible(): boolean };
   /** The active profile changed (any field): apply it. */
   onProfile(p: Profile): void;
   onStart(kind: StartKind): void;
@@ -222,7 +224,10 @@ export class MainMenu {
     const team = (id: string) => this.d.catalog.teams.find((t) => t.id === id)?.name ?? id;
     return `<h2>Records: ${esc(this.d.trackName)}</h2>
       ${rows.length ? `<table class="rec"><tr><th>Spec</th><th>Cars</th><th>Team</th><th>Best lap</th></tr>${rows.map((r) => `<tr><td>${esc(r.spec)}</td><td>${r.equal ? 'Equal' : 'Team stats'}</td><td>${esc(team(r.team))}</td><td><b>${lapText(r.lap)}</b></td></tr>`).join('')}</table>` : '<p class="note">No laps yet on this track for this profile.</p>'}
-      <p class="note">Local personal bests (this browser, this profile). The online leaderboard replaces this with card 09.</p>`;
+      <p class="note">Local personal bests (this browser, this profile). The online leaderboard replaces this with card 09.</p>
+      ${this.d.ghost ? `<h2>Ghost car</h2><p class="note">${esc(this.d.ghost.info())}</p>
+      <div class="inline"><button data-act="ghostToggle">${this.d.ghost.visible() ? 'HIDE GHOST' : 'SHOW GHOST'}</button><button data-act="ghostDownload">DOWNLOAD</button><label class="file">LOAD A GHOST<input type="file" accept=".json,application/json" data-field="ghost" /></label></div>
+      <p class="note" data-id="ghostMsg">Your quickest valid lap in practice, replayed as a see-through car (G toggles it). Download it to share; load a friend's to race it.</p>` : ''}`;
   }
 
   // ---- events ----
@@ -240,6 +245,8 @@ export class MainMenu {
     if (ds.act === 'deleteProfile') { if (confirm(`Delete the profile "${p.name}" and its settings? (Its lap records stay in this browser.)`)) { this.d.onProfile(this.d.profiles.remove(p.id)); this.render(); } return; }
     if (ds.act === 'export') return this.exportProfile(p);
     if (ds.act === 'resetKeys') return this.save({ ...p, keybinds: completeKeybinds(DEFAULT_KEYBINDS) });
+    if (ds.act === 'ghostDownload') return this.d.ghost?.download();
+    if (ds.act === 'ghostToggle') { this.d.ghost?.toggle(); return this.render(); }
     if (ds.act === 'neutralSetup') { const setups = { ...p.setups }; delete setups[this.d.trackId]; return this.save({ ...p, setups }); }
     if (ds.bind) { this.capturing = ds.bind as BindAction; return this.render(); }
     if (ds.unbind) return this.save({ ...p, keybinds: unbindKey(p.keybinds, ds.unbind as BindAction, ds.key!) });
@@ -291,6 +298,10 @@ export class MainMenu {
     else if (f === 'team') this.save({ ...p, team: t.value });
     else if (f === 'active') { const q = this.d.profiles.setActive(t.value); if (q) { this.d.onProfile(q); this.render(); } }
     else if (f === 'import') void this.importProfile(t);
+    else if (f === 'ghost' && t.files?.[0] && this.d.ghost) {
+      const g = this.d.ghost;
+      void t.files[0].text().then((text) => { const msg = g.load(text); this.render(); const m = this.root.querySelector('[data-id="ghostMsg"]'); if (m) m.textContent = msg; });
+    }
     else if (t.dataset.setup) this.save({ ...p, setups: { ...p.setups, [this.d.trackId]: { ...this.d.trackBase(), ...(p.setups[this.d.trackId] ?? {}), [t.dataset.setup]: Number(t.value) } } });
     else if (t.dataset.volume) this.save({ ...p, settings: { ...p.settings, volumes: { ...p.settings.volumes, [t.dataset.volume]: Number(t.value) } } });
   }

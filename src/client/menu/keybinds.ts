@@ -5,7 +5,7 @@ export type BindAction =
   | 'throttle' | 'brake' | 'left' | 'right'
   | 'reset' | 'engineMode' | 'deploy'
   | 'pitSoft' | 'pitMedium' | 'pitHard' | 'pitInter' | 'pitWet' | 'pitFuelDown' | 'pitFuelUp' | 'pitTyres' | 'pitRepair'
-  | 'labels' | 'vfx' | 'mute' | 'debug';
+  | 'labels' | 'vfx' | 'mute' | 'debug' | 'ghost';
 
 export type Keybinds = Record<BindAction, string[]>;
 
@@ -30,6 +30,7 @@ export const BIND_ACTIONS: ReadonlyArray<{ id: BindAction; label: string }> = [
   { id: 'vfx', label: 'Effects quality' },
   { id: 'mute', label: 'Mute' },
   { id: 'debug', label: 'Debug view' },
+  { id: 'ghost', label: 'Ghost car on/off' },
 ];
 
 export const DEFAULT_KEYBINDS: Readonly<Keybinds> = Object.freeze({
@@ -53,6 +54,7 @@ export const DEFAULT_KEYBINDS: Readonly<Keybinds> = Object.freeze({
   vfx: ['KeyV'],
   mute: ['KeyM'],
   debug: ['KeyK'],
+  ghost: ['KeyG'],
 });
 
 /** Keys nobody can bind (they run the menus). */
