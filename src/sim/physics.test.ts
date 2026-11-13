@@ -171,6 +171,21 @@ describe('physics', () => {
     expect(left[3].wear).toBeLessThan(left[2].wear);
   });
 
+  it('throttle wears the rears by how hard they are driven: a launch a lot, flat out at speed little', () => {
+    const ctx = arena(30, 3000, { x: 15, y: 2995, heading: 0 });
+    const rearLoss = (a: WorldState, b: WorldState) => (a.cars[0]!.wheels[2].wear - b.cars[0]!.wheels[2].wear) / 2; // per second, over 2 s
+    const w0 = createWorld(ctx);
+    const launched = drive(ctx, w0, 60 * 2, FULL);
+    const fast = drive(ctx, launched, 60 * 16, FULL);
+    const faster = drive(ctx, fast, 60 * 2, FULL);
+    expect(faster.cars[0]!.speed * 3.6).toBeGreaterThan(200);
+    const launch = rearLoss(w0, launched), atSpeed = rearLoss(fast, faster);
+    expect(launch).toBeGreaterThan(0);
+    expect(atSpeed).toBeLessThan(launch * 0.1);
+    // Fronts: no throttle wear at all (no braking, no cornering here).
+    expect(faster.cars[0]!.wheels[0].wear).toBe(1);
+  });
+
   it('grip vs wear keeps the v0.16 log10 cliff', () => {
     expect(wearGrip(1)).toBeCloseTo(1);
     expect(wearGrip(0.4)).toBeCloseTo(0.602, 3);

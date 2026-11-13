@@ -267,6 +267,8 @@ interface WheelForces {
   slipDeg: number;
   gripN: number;
   loadN: number;
+  /** Driven wheel: drive force delivered as a fraction of its grip (1 = at the limit, more = spinning). */
+  driveUse: number;
 }
 
 /** Work out and apply this tick's forces for one car. Returns per-wheel numbers for wear/telemetry. */
@@ -380,6 +382,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
       slipDeg: Math.abs(vLong) + Math.abs(vLat) > 0.5 ? (Math.atan2(vLat, Math.abs(vLong)) * 180) / Math.PI : 0,
       gripN: cap,
       loadN: load[w]!,
+      driveUse: w >= 2 && long > 0 && cap > 0 ? Math.min(long / cap, 2) : w >= 2 && long > 0 ? 2 : 0,
     };
   }
 
@@ -409,7 +412,10 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
 
   const wheels = car.wheels.map((wheel, w) => {
     let dw = cfg.wear.cornerPerSec * v4 * (Math.abs(forces[w]!.lat) / quarterWeight); // by actual lateral load
-    if (w >= 2) dw += cfg.wear.throttlePerSec * throttle / (1 + kph / cfg.wear.throttleLowSpeedKph); // wheelspin
+    // Throttle wears the rears by how hard they're driven against their grip (squared: a smooth squeeze
+    // costs little, spinning them up out of a slow corner a lot), more at low speed. Not by pedal alone:
+    // cruising flat out down a straight barely loads the rears longitudinally.
+    if (w >= 2) dw += (cfg.wear.throttlePerSec * forces[w]!.driveUse ** 2) / (1 + kph / cfg.wear.throttleLowSpeedKph);
     else dw += cfg.wear.brakePerSec * brake * v4;
     return {
       ...wheel,

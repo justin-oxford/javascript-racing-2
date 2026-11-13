@@ -23,7 +23,8 @@
     "tow-probe": "tsx tools/tow-probe.ts",
     "start-probe": "tsx tools/start-probe.ts",
     "quali-probe": "tsx tools/quali-probe.ts",
-    "pit-probe": "tsx tools/pit-probe.ts"
+    "pit-probe": "tsx tools/pit-probe.ts",
+    "wear-probe": "tsx tools/wear-probe.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
