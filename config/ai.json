@@ -43,7 +43,7 @@
     }
   },
   "recovery": { "stuckSec": 2, "reverseSec": 1.4, "backwardsDeg": 120, "resetAfterSec": 8 },
-  "pits": { "fuelLaps": 2.2, "qualiFuelLaps": 1.3, "minWear": 0.45, "pitSpeedMarginKph": 4, "repairDamage": 0.3 },
+  "pits": { "fuelLaps": 2.2, "qualiFuelLaps": 1.3, "minWear": 0.45, "pitSpeedMarginKph": 4, "repairDamage": 0.3, "entryCornerMargin": 0.85 },
   "start": { "reactionMinSec": 0.15, "reactionMaxSec": 0.4 },
   "aids": { "tcSlip": 0.9, "tcRange": 0.35, "trailSteer": 0.25, "trailOverspeedMps": 4, "trailMaxPedal": 0.6 },
   "traffic": { "sideGapM": 1.2, "crawlMps": 3 },

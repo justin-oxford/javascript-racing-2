@@ -1,5 +1,7 @@
 // Race-start probe: 10 AI cars, several seeds, lap one only. Live config, default track.
-// Usage: npm run start-probe [-- --seeds 5]
+// Usage: npm run start-probe [-- --seeds 5 --parked]
+// --parked: car 0 is a player who never touches the keys (the "side-by-side car brushes a parked player" bug):
+// counts contacts on it in the first 90 s, and runs that long instead of stopping when the pack is clear.
 // Reports per seed: how long the field takes to get the whole pack past turn 1 (all cars 300 m round),
 // car-seconds spent nearly stopped (< 15 kph after the first 3 s), car-to-car contact ticks, off-tracks.
 import aiJson from '../config/ai.json' with { type: 'json' };
@@ -18,12 +20,15 @@ for (let seed = 1; seed <= seeds; seed++) {
   const builds: CarBuild[] = Array.from({ length: 10 }, (_, i) => ({ ...ctx.physics.defaultCar, team: catalog.teams[i]!.id }));
   let w: WorldState = createRaceWorld(ctx, builds, { laps: 2, seed });
   const ai = builds.map((_, i) => aiInputSource(i, () => ({ world: w, ctx, line }), () => cfg.presets[cfg.defaultPreset]!, () => cfg, 1000 + i));
+  const parked = args.includes('--parked');
+  let parkedHits = 0, parkedFirst = -1, wasHit = false;
   let slow = 0, contact = 0, off = 0, clear = -1;
   const offAt: string[] = [];
   const wasOff = w.cars.map(() => false);
-  for (let t = 0; t < 60 * 60; t++) {
-    w = step(w, ai.map((d) => d.read(w.tick)), ctx);
+  for (let t = 0; t < 60 * 120; t++) {
+    w = step(w, ai.map((d, i) => (parked && i === 0 ? { throttle: 0, brake: 0, steer: 0 } : d.read(w.tick))), ctx);
     const r = w.race!;
+    if (parked && r.phase === 'racing') { const hit = w.cars[0]!.carContact; if (hit && !wasHit) { parkedHits++; if (parkedFirst < 0) parkedFirst = w.tick / 60 - r.startTime; if (args.includes('--why')) { const p0 = w.cars[0]!, fx = Math.sin(p0.heading), fy = -Math.cos(p0.heading); w.cars.forEach((o, k) => { const d = Math.hypot(o.x - p0.x, o.y - p0.y); if (k && d < 7) { const st = ai[k]!.state; console.log(`  t=${(w.tick / 60 - r.startTime).toFixed(2)} car ${k} lon ${((o.x - p0.x) * fx + (o.y - p0.y) * fy).toFixed(1)} lat ${(-(o.x - p0.x) * fy + (o.y - p0.y) * fx).toFixed(1)} v ${Math.hypot(o.vx, o.vy).toFixed(1)} offset ${st.offset.toFixed(2)} stuck ${st.stuckEvents} recov ${st.recoverTicks}`); } }); } } wasHit = hit; if (w.tick / 60 - r.startTime > 90) break; continue; }
     if (r.phase !== 'racing') continue;
     const since = w.tick / 60 - r.startTime;
     w.cars.forEach((c, i) => {
@@ -35,6 +40,7 @@ for (let seed = 1; seed <= seeds; seed++) {
     // The whole pack 300 m round (progress in laps x line length).
     if (clear < 0 && r.cars.every((c) => c.progress * line.length > 300)) { clear = since; break; }
   }
+  if (parked) { console.log(`seed ${seed}: parked player hit ${parkedHits} times in 90 s${parkedFirst >= 0 ? `, first at ${parkedFirst.toFixed(1)} s` : ''}`); continue; }
   console.log(`seed ${seed}: pack past turn 1 in ${clear < 0 ? '>60' : clear.toFixed(1)} s; car-seconds under 15 kph ${slow.toFixed(1)}; contact ticks ${contact}; off-tracks ${off} ${offAt.join(' ')}`);
   tot = { clear: tot.clear + (clear < 0 ? 60 : clear), slow: tot.slow + slow, contact: tot.contact + contact, off: tot.off + off };
 }

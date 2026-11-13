@@ -1,14 +1,17 @@
 // Pit-lane probe: where the boxes sit relative to the AI's pit path, then a race / practice with the
 // whole field, counting cars queueing in the lane (slow, not being serviced) and contact there.
-// Usage: npm run pit-probe [-- --mode race|practice --laps 12 --ai 10 --seed 1 --fuel 20 --sec 600 --dump --stuck --overlap]
+// Usage: npm run pit-probe [-- --mode race|practice --laps 12 --ai 10 --seed 1 --fuel 20 --sec 600 --dump --stuck --overlap --physics file.json]
+import { readFileSync } from 'node:fs';
 import aiJson from '../config/ai.json' with { type: 'json' };
-import { aiInputSource, buildRacingLine, createRaceWorld, createWorld, step, type AiConfig, type CarBuild, type WorldState } from '../src/sim/index.ts';
+import { aiInputSource, buildRacingLine, createRaceWorld, createWorld, step, type AiConfig, type CarBuild, type PhysicsConfig, type WorldState } from '../src/sim/index.ts';
 import { catalog, defaultTrackIdNode, loadTrackNode, simContextNode } from './load-track-node.ts';
 
 const args = process.argv.slice(2);
 const opt = (n: string, d: string) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1]! : d; };
 const loaded = loadTrackNode(defaultTrackIdNode());
-const ctx = simContextNode(loaded);
+// --physics file.json: another physics config (the frozen-physics pit-entry bug: tools/fixtures/physics-baseline.json).
+const physPath = args.includes('--physics') ? opt('physics', '') : '';
+const ctx = physPath ? simContextNode(loaded, JSON.parse(readFileSync(physPath, 'utf8')) as PhysicsConfig) : simContextNode(loaded);
 const line = buildRacingLine(loaded.track)!;
 const pit = line.pit!;
 const cfg = aiJson as unknown as AiConfig;

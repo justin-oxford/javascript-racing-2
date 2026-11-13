@@ -38,7 +38,7 @@ export interface AiConfig {
   /** resetAfterSec: still in trouble (crawling, reversing out, stuck) this long -> reset to track, same as a player (race.json reset). */
   recovery: { stuckSec: number; reverseSec: number; backwardsDeg: number; resetAfterSec?: number };
   /** fuelLaps: pit with this many laps of fuel left (races, practice); qualiFuelLaps: the same in qualifying (light runs). */
-  pits?: { fuelLaps: number; qualiFuelLaps?: number; minWear: number; pitSpeedMarginKph: number; repairDamage?: number };
+  pits?: { fuelLaps: number; qualiFuelLaps?: number; minWear: number; pitSpeedMarginKph: number; repairDamage?: number; entryCornerMargin?: number };
   /** Pit lane driving: fastLaneM = offset from the pit path away from the boxes when driving through; boxApproachM = distance before its box to pull across into it; laneGapM = sideways clearance (beyond a car width) under which a car ahead is "in our lane"; releaseGapM = how far back up the lane a car must be clear before pulling out of the box; latRateMps = how fast it moves across in the lane. */
   pitLane?: { fastLaneM: number; boxApproachM: number; laneGapM: number; releaseGapM: number; latRateMps: number; creepMps?: number };
   /** Lift and coast: coast (no throttle, no brake) for drops up to coastMaxDropMps; lift liftBeforeBrakeSec before braking. */
@@ -619,7 +619,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   const pitV = (ctx.rules.pitSpeedLimitKph - pits.pitSpeedMarginKph) / 3.6;
   /** Speed limit at a path point: corner speed, the pit limiter in the lane, a stop at the box. */
   const pointV = (q: number) => {
-    let v = cornerV(path.k[q]!) * preset.cornerMargin * st.trust;
+    // The pit path's corners (the entry curve) get an extra margin: tighter than anything on the racing line,
+    // and a car on full lock there can't hold a planned limit speed (it understeered into the wall).
+    let v = cornerV(path.k[q]!) * preset.cornerMargin * st.trust * (pit ? pits.entryCornerMargin ?? 1 : 1);
     if (pit && q >= pit.laneFrom - 3 && q <= pit.laneTo) v = Math.min(v, pitV);
     if (pit && !st.serviced && q >= stopQ) v = 0; // stop at its box
     return v;
@@ -839,7 +841,11 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     // (racing into the back of the car ahead there was most of the AI's car contact in races).
     const hold = tucked ? phys.car.lengthM + 1 : passSide === undefined ? gap : Math.abs(side) < 2.2 ? (brakingSoon ? gap : phys.car.lengthM + 1.5) : -Infinity;
     // Pulling out from behind a slow or stopped car: creep (it can't steer out of line standing still).
-    const creep = passSide !== undefined && ahead > phys.car.lengthM + 0.05 ? clamp(2 + (ahead - phys.car.lengthM - 0.5) * 2, 2, 4) : 0;
+    // Still in line with it (not yet a car's width across): creep only as fast as the gap left allows, down to
+    // nothing at a hand's width (a fixed 2 m/s creep nudged a stopped car on the grid, Bugs card).
+    const inLine = Math.abs(side) < phys.car.widthM * 0.9;
+    const creep = passSide === undefined || ahead <= phys.car.lengthM + 0.05 ? 0
+      : inLine ? clamp((ahead - phys.car.lengthM - 0.15) * 3, 0, 4) : clamp(2 + (ahead - phys.car.lengthM - 0.5) * 2, 2, 4);
     // Too close: ease off toward the car ahead's speed, but don't stop dead just for being a bit close.
     const floor = ahead > phys.car.lengthM + 0.5 ? Math.max(0, otherFwd) * 0.7 : 0;
     allowed = Math.min(allowed, Math.max(creep, floor, otherFwd + (ahead - hold) * 0.8));
