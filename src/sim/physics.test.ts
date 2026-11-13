@@ -1,5 +1,6 @@
 // @vitest-environment node
 // Car physics on small synthetic arenas (built here, not real tracks), so each behaviour is isolated.
+import assistsJson from '../../tools/fixtures/assists-baseline.json';
 import slipstreamJson from '../../tools/fixtures/slipstream-baseline.json';
 import contactJson from '../../tools/fixtures/contact-baseline.json';
 import raceJson from '../../config/race.json';
@@ -16,6 +17,7 @@ import {
   createWorld,
   step,
   traceWalls,
+  tyreLife,
   wearGrip,
   type CarBuild,
   type CarInput,
@@ -49,7 +51,7 @@ function arena(wM: number, hM: number, spawnM: Pose, paint?: (xM: number, yM: nu
     physics: structuredClone(physicsJson) as PhysicsConfig,
     catalog,
     rules,
-    contact: contactJson, race: raceJson, slipstream: slipstreamJson, cache: createPhysicsCache(),
+    contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, cache: createPhysicsCache(),
   };
 }
 
@@ -186,6 +188,10 @@ describe('physics', () => {
     expect(faster.cars[0]!.wheels[0].wear).toBe(1);
   });
 
+  it('tyre life as shown: 100% new, 0% where grip runs out (raw wear 10%)', () => {
+    [[1, 1], [0.55, 0.5], [0.1, 0], [0.05, 0]].forEach(([wear, life]) => expect(tyreLife(wear!)).toBeCloseTo(life!, 9));
+  });
+
   it('grip vs wear keeps the v0.16 log10 cliff', () => {
     expect(wearGrip(1)).toBeCloseTo(1);
     expect(wearGrip(0.4)).toBeCloseTo(0.602, 3);
@@ -231,5 +237,48 @@ describe('physics', () => {
     a = drive(ctx, a, 60, FULL);
     const slower = drive(ctxB, b, 60, FULL);
     expect(slower.cars[0]!.speed).toBeLessThan(a.cars[0]!.speed - 3);
+  });
+});
+
+describe('ABS (config/assists.json)', () => {
+  const withAbs = (ctx: SimContext, cornerShare = 0.5, enabled = true): SimContext => ({ ...ctx, assists: { abs: { enabled, peakPct: 0.95, cornerShare } } });
+  /** Up to speed in a straight line, then `input` until stopped (or `ticks`); the worst front usage while braking and the distance. */
+  const stop = (ctx: SimContext, input: CarInput, upTicks: number, ticks = 60 * 8) => {
+    let w = drive(ctx, createWorld(ctx), upTicks, FULL);
+    const from = { x: w.cars[0]!.x, y: w.cars[0]!.y, kph: kph(w.cars[0]!.speed) };
+    let worst = 0;
+    w = drive(ctx, w, ticks, input, (s) => {
+      const c = s.cars[0]!;
+      if (c.controls.brake > 0.99 && Math.abs(c.speed) > 3) worst = Math.max(worst, c.wheels[0].usage, c.wheels[1].usage);
+    });
+    return { worst, from, dist: Math.hypot(w.cars[0]!.x - from.x, w.cars[0]!.y - from.y) };
+  };
+  const BRAKE: CarInput = { throttle: 0, brake: 1, steer: 0 };
+
+  it('a straight-line stop from speed never locks the fronts, and stops no later than locked brakes', () => {
+    const ctx = arena(30, 3000, { x: 15, y: 2995, heading: 0 });
+    const on = stop(withAbs(ctx), BRAKE, 60 * 10), off = stop(ctx, BRAKE, 60 * 10);
+    expect(on.from.kph).toBeGreaterThan(250);
+    expect(off.worst).toBeGreaterThan(1); // raw: keyboard full brake locks them
+    expect(on.worst).toBeLessThanOrEqual(1);
+    expect(on.dist).toBeLessThan(off.dist * 1.02);
+  });
+
+  it('braking hard while turning can still overload a front; with the full cornering allowance it does not', () => {
+    // Half steering at ~135 kph: alone it's within grip. (Full keyboard lock at that speed slides the
+    // fronts sideways whatever the brakes do: understeer, not ABS's business.)
+    const ctx = arena(300, 300, { x: 150, y: 290, heading: 0 });
+    const turnBrake: CarInput = { throttle: 0, brake: 1, steer: 0.5 };
+    expect(stop(withAbs(ctx, 0.5), turnBrake, 60 * 3, 60).worst).toBeGreaterThan(1);
+    expect(stop(withAbs(ctx, 1), turnBrake, 60 * 3, 60).worst).toBeLessThanOrEqual(1);
+  });
+
+  it('a lockup wears the fronts far more than ABS braking', () => {
+    const ctx = arena(30, 3000, { x: 15, y: 2995, heading: 0 });
+    const frontWear = (c: SimContext) => {
+      const w = drive(c, drive(c, createWorld(c), 60 * 3, FULL), 60 * 3, BRAKE);
+      return 1 - w.cars[0]!.wheels[0].wear;
+    };
+    expect(frontWear(ctx)).toBeGreaterThan(frontWear(withAbs(ctx)) * 1.5);
   });
 });

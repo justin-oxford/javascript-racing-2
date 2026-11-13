@@ -2,7 +2,7 @@
 // tick, so changes apply to the running car immediately. Save writes them back to /config.
 // Tuning is Justin's job; this file's job is to be a good instrument.
 import GUI, { type Controller } from 'lil-gui';
-import type { AiConfig, CarBuild, ContactConfig, PhysicsConfig, RaceConfig, Rules, SlipstreamConfig, SurfaceDef, WorldState } from '../../sim';
+import type { AiConfig, AssistsConfig, CarBuild, ContactConfig, PhysicsConfig, RaceConfig, Rules, SlipstreamConfig, SurfaceDef, WorldState } from '../../sim';
 import type { VfxConfig } from '../vfx/triggers';
 import type { VfxQuality } from '../vfx/vfx';
 import type { AudioConfig } from '../audio/targets';
@@ -83,6 +83,8 @@ const RANGES: Record<string, [number, number, number]> = {
   'ai.recovery.backwardsDeg': [60, 180, 5],
   'contact.carFriction': [0, 1.5, 0.01],
   'contact.carRestitution': [0, 1, 0.01],
+  'assists.abs.peakPct': [0.5, 1.2, 0.01],
+  'assists.abs.cornerShare': [0, 1, 0.01],
   'race.defaultLaps': [1, 30, 1],
   'race.gridSec': [0, 10, 0.5],
   'race.lightIntervalSec': [0.2, 2, 0.1],
@@ -139,11 +141,13 @@ export interface TuningTargets {
   race: RaceConfig;
   /** config/slipstream.json, live: tow, dirty air, AI eagerness, wind + wake feedback. */
   slipstream: SlipstreamConfig & Record<string, unknown>;
+  /** config/assists.json, live: ABS. */
+  assists: AssistsConfig;
   /** Called when the team/spec/setup changes, to rebuild the player's car. */
   onBuildChange(build: CarBuild): void;
 }
 
-async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai' | 'contact' | 'race' | 'slipstream', value: unknown): Promise<string> {
+async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai' | 'contact' | 'race' | 'slipstream' | 'assists', value: unknown): Promise<string> {
   const res = await fetch(`/__tuning/save/${name}`, { method: 'POST', headers: { 'x-tuning-panel': '1' }, body: formatTrackJson(value) });
   return res.ok ? `config/${name}.json` : `${name}: ${await res.text()}`;
 }
@@ -249,6 +253,12 @@ export class TuningPanel {
     con.add(this.t.contact, 'pitLaneGhosting').name('pit lane ghosting');
     con.close();
 
+    const as = gui.addFolder('Assists: ABS (lockups only when braking hard while turning hard)');
+    as.add(this.t.assists.abs, 'enabled').name('ABS on');
+    this.slider(as, this.t.assists.abs, 'peakPct', 'assists.abs.peakPct', 'brake up to (x tyre peak)');
+    this.slider(as, this.t.assists.abs, 'cornerShare', 'assists.abs.cornerShare', 'allows for cornering (0 none - 1 full)');
+    as.close();
+
     const race = gui.addFolder('Race (next race)');
     for (const key of Object.keys(this.t.race)) if (typeof (this.t.race as unknown as Record<string, unknown>)[key] === 'number') this.slider(race, this.t.race, key, `race.${key}`);
     race.close();
@@ -283,10 +293,13 @@ export class TuningPanel {
       status.msg = m;
       statusCtl.updateDisplay();
     };
+    const all = () => ({ physics, surfaces: this.t.surfacesConfig, rules, vfx: this.t.vfx, audio: this.t.audio, ai: this.t.ai, contact: this.t.contact, race: this.t.race, slipstream: this.t.slipstream, assists: this.t.assists });
     io.add({
-      save: async () => show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai), saveConfig('contact', this.t.contact), saveConfig('race', this.t.race), saveConfig('slipstream', this.t.slipstream)])).join(', ')),
+      save: async () => !import.meta.env.DEV ? show('Save only works on the local dev server: use Copy all settings') : show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai), saveConfig('contact', this.t.contact), saveConfig('race', this.t.race), saveConfig('slipstream', this.t.slipstream), saveConfig('assists', this.t.assists)])).join(', ')),
     }, 'save').name('Save to /config');
     io.add({ copy: () => void navigator.clipboard.writeText(formatTrackJson(physics)).then(() => show('physics.json copied')) }, 'copy').name('Copy physics JSON');
+    // Every config file the panel edits, keyed by file name: paste it to Claude to write them to /config.
+    io.add({ copyAll: () => void navigator.clipboard.writeText(formatTrackJson(all())).then(() => show('all settings copied')) }, 'copyAll').name('Copy all settings JSON');
     io.add({ revert: () => this.revert() && show('Reverted to last saved values') }, 'revert').name('Revert unsaved changes');
     const statusCtl = io.add(status, 'msg').name('status').disable();
   }

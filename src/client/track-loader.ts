@@ -6,6 +6,7 @@ import contactJson from '../../config/contact.json';
 import physicsJson from '../../config/physics.json';
 import raceJson from '../../config/race.json';
 import slipstreamJson from '../../config/slipstream.json';
+import assistsJson from '../../config/assists.json';
 import rules from '../../config/rules.json';
 import specsJson from '../../config/specs.json';
 import surfacesConfig from '../../config/surfaces.json';
@@ -47,6 +48,8 @@ export const contact: ContactConfig = contactJson;
 export const raceConfig: RaceConfig = raceJson;
 /** config/slipstream.json, live (tuning panel): the sim's tow/dirty air plus client wind + wake. */
 export const slipstream = slipstreamJson;
+/** config/assists.json, live (tuning panel): ABS. */
+export const assists = assistsJson;
 export const catalog: CarCatalog = { teams: teamsJson.teams as TeamDef[], specs: specsJson as unknown as SpecsConfig };
 export { rules };
 const defaults = trackDefaults as TrackDefaults;
@@ -181,5 +184,5 @@ export async function loadOverhead(json: TrackJson): Promise<HTMLImageElement | 
 }
 
 export function simContext(mask: MaskState): SimContext {
-  return { track: mask.track, walls: mask.walls, physics, catalog, rules, contact, race: raceConfig, slipstream, cache: createPhysicsCache() };
+  return { track: mask.track, walls: mask.walls, physics, catalog, rules, contact, race: raceConfig, slipstream, assists, cache: createPhysicsCache() };
 }

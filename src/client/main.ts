@@ -9,6 +9,7 @@ import {
   contact,
   raceConfig,
   slipstream,
+  assists,
   getTrackJsonStub,
   loadBackground,
   loadMask,
@@ -278,7 +279,8 @@ async function main(): Promise<void> {
         return `Optimized: ${out.line.length} points, ${out.lengthM.toFixed(0)} m, tightest radius ${out.minRadiusM.toFixed(1)} m, kerb use ${Math.round(kerbUse * 100)}%.`;
       }, racingLineConfig.kerbUse)
     : undefined;
-  const tuning = import.meta.env.DEV
+  // Tuning panel: always in dev; on the live site with ?tune=1 (no Save there: Copy all settings instead).
+  const tuning = import.meta.env.DEV || new URLSearchParams(location.search).has('tune')
     ? new (await import('./tuning/panel')).TuningPanel({
         physics,
         surfacesConfig,
@@ -290,6 +292,7 @@ async function main(): Promise<void> {
         contact,
         race: raceConfig,
         slipstream,
+        assists,
         volumes: { values: audio.volumes, set: (bus, v) => audio.setVolume(bus, v) },
         onBuildChange: (build) => {
           const was = curr.cars[0]!.build;

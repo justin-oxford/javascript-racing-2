@@ -31,7 +31,15 @@ export interface SimContext {
   race: RaceConfig;
   /** config/slipstream.json: tow + dirty air (live-tunable). */
   slipstream: SlipstreamConfig;
+  /** config/assists.json: ABS (live-tunable). */
+  assists: AssistsConfig;
   cache: PhysicsCache;
+}
+
+/** config/assists.json. */
+export interface AssistsConfig {
+  /** Anti-lock brakes: brake force held to peakPct of the tyre's grip, allowing for cornerShare of its cornering load. */
+  abs: { enabled: boolean; peakPct: number; cornerShare: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +104,13 @@ export function tyreCurve(s: number, falloff: number, falloffSlip: number): numb
 /** Tyre grip vs wear: gentle down to ~40%, then a cliff, nothing left at 10% (v0.16 curve). */
 export function wearGrip(wear: number): number {
   return Math.max(0, Math.log10(10 * wear));
+}
+
+/** Wear where that curve reaches zero grip: log10(10 x 0.1) = 0. Below it the tyre is done. */
+const WEAR_NO_GRIP = 0.1;
+/** Tyre life as the player sees it: 100% new, 0% = no grip left (raw wear 10%), not raw wear 0. */
+export function tyreLife(wear: number): number {
+  return Math.max(0, Math.min(1, (wear - WEAR_NO_GRIP) / (1 - WEAR_NO_GRIP)));
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +284,8 @@ interface WheelForces {
   loadN: number;
   /** Driven wheel: drive force delivered as a fraction of its grip (1 = at the limit, more = spinning). */
   driveUse: number;
+  /** Brake force asked of this wheel (after ABS) as a fraction of its grip (1 = at the limit, more = locking). */
+  brakeUse: number;
 }
 
 /** Work out and apply this tick's forces for one car. Returns per-wheel numbers for wear/telemetry. */
@@ -348,10 +365,6 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
     // Drive goes to the rears by load (limited-slip diff): a lifted inside rear doesn't get half the power.
     const rearLoad = load[2] + load[3];
     let long = w >= 2 ? (rearLoad > 0 ? (drive * load[w]!) / rearLoad : drive / 2) : 0;
-    // Rolling resistance on static weight: unchanged by downforce, so tuned surface drag keeps its feel.
-    const resist = Math.min(brakeTotal * brakeShare[w]! + surf.rollingDrag * mass * G * share[w]!, stopCap);
-    long -= Math.sign(vLong) * resist;
-
     // TYRE CURVE (card 03b). Lateral: slip angle as a fraction of the peak slip angle. Longitudinal:
     // the braking/drive demand as a fraction of grip (no wheel-spin model: a demand past grip IS a
     // locked or spinning wheel). Combined slip s = their hypot (friction ellipse); the force available at
@@ -359,6 +372,16 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
     const t = cfg.tyres;
     const alpha = Math.atan2(Math.abs(vLat), Math.max(Math.abs(vLong), t.lowSpeedMps));
     const sLat = alpha / ((t.peakSlipDeg * Math.PI) / 180);
+    // ABS (config/assists.json, keyboard brakes are all or nothing): a wheel gets no more brake than keeps
+    // its combined slip at peakPct of the peak, allowing for only cornerShare of how hard it's cornering.
+    // Straight-line braking never locks; braking hard while turning hard still can (the inside front).
+    let brakeW = brakeTotal * brakeShare[w]!;
+    const abs = ctx.assists.abs;
+    if (abs.enabled && brakeW > 0 && cap > 0) brakeW = Math.min(brakeW, cap * Math.sqrt(Math.max(0, abs.peakPct ** 2 - (abs.cornerShare * sLat) ** 2)));
+    // Rolling resistance on static weight: unchanged by downforce, so tuned surface drag keeps its feel.
+    const resist = Math.min(brakeW + surf.rollingDrag * mass * G * share[w]!, stopCap);
+    long -= Math.sign(vLong) * resist;
+    const brakeUse = brakeW > 0 ? (cap > 0 ? Math.min(Math.min(brakeW, stopCap) / cap, 2) : 2) : 0;
     // TRACTION ASSIST (keyboard throttle is all or nothing): a driven wheel gets no more drive than keeps
     // its combined slip at assistPeakPct of the peak, given how hard it's already cornering. Like the
     // steering assist, it can be switched off (a gamepad later).
@@ -383,6 +406,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
       gripN: cap,
       loadN: load[w]!,
       driveUse: w >= 2 && long > 0 && cap > 0 ? Math.min(long / cap, 2) : w >= 2 && long > 0 ? 2 : 0,
+      brakeUse,
     };
   }
 
@@ -406,7 +430,7 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
   const v4 = (kph / cfg.wear.refSpeedKph) ** 4;
   const mass = cfg.car.dryMassKg + Math.max(0, car.fuelKg);
   const quarterWeight = (mass * G) / 4;
-  const { throttle, brake } = car.controls;
+  const { throttle } = car.controls;
   // Practice (ownBox -1): any box. Race: only the car's own box; someone else's does nothing.
   const service = car.inPitBox && kph < cfg.fuel.pitServiceMaxKph && (ownBox < 0 || car.pitBox === ownBox);
 
@@ -416,7 +440,13 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
     // costs little, spinning them up out of a slow corner a lot), more at low speed. Not by pedal alone:
     // cruising flat out down a straight barely loads the rears longitudinally.
     if (w >= 2) dw += (cfg.wear.throttlePerSec * forces[w]!.driveUse ** 2) / (1 + kph / cfg.wear.throttleLowSpeedKph);
-    else dw += cfg.wear.brakePerSec * brake * v4;
+    // Braking wears the fronts: up to the grip limit by how hard they're braked (squared, like throttle),
+    // more at high speed (v^4); PAST it (a lockup) also by how far past, times speed: lockups happen at low
+    // speed, where v^4 alone would make them free. The two match at refSpeedKph.
+    else {
+      const use = forces[w]!.brakeUse;
+      dw += cfg.wear.brakePerSec * (Math.min(use, 1) ** 2 * v4 + Math.max(0, use - 1) * (kph / cfg.wear.refSpeedKph));
+    }
     return {
       ...wheel,
       wear: service ? 1 : Math.max(0, wheel.wear - dw * dt),

@@ -1,0 +1,4 @@
+{
+  "_comment": "Driver assists for keyboard play. abs: each wheel's brake force is held to peakPct of what its tyre can give, so braking in a straight line never locks. It only allows for cornerShare of the tyre's cornering load (0 = ignores cornering, 1 = full ABS), so braking hard while turning hard can still overload the fronts and lock the inside one: trail braking too deep is a lockup, braking in a straight line is safe. enabled: false = no ABS at all.",
+  "abs": { "enabled": true, "peakPct": 0.95, "cornerShare": 0.5 }
+}

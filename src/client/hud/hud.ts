@@ -1,5 +1,6 @@
 // The v0.16 HUD, rebuilt: top timing bar, timing dropdown, spec/team menu, vehicle + setup panel.
 // It reads sim state and the session; it never writes sim state. Choices go out through callbacks.
+import { tyreLife, wearGrip } from '../../sim';
 import type { CarSetup, CarState, CatalogLike } from './hud-types';
 import type { Session, Tile } from './session';
 import type { HudConfig } from './timing-lines';
@@ -274,11 +275,12 @@ export class Hud {
     this.el.laps!.textContent = String(session.completedLaps);
     this.el.noLines!.textContent = hasLines ? '' : 'This track has no start/finish line yet: place timing lines in the editor (?edit=1).';
 
-    // Vehicle: tyres green -> red by wear, fuel gauge.
+    // Vehicle: tyre LIFE (100% new, 0% = no grip left), coloured by the grip left (green -> amber as it
+    // nears the cliff -> red), fuel gauge.
     car.wheels.forEach((w, i) => {
-      const hue = Math.round(120 * Math.max(0, Math.min(1, w.wear)));
+      const hue = Math.round(120 * wearGrip(w.wear));
       this.el[`tyre${i}`]!.style.background = `hsla(${hue}, 70%, 38%, 0.85)`;
-      this.el[`tyrePct${i}`]!.textContent = `${Math.round(w.wear * 100)}%`;
+      this.el[`tyrePct${i}`]!.textContent = `${Math.round(tyreLife(w.wear) * 100)}%`;
     });
     const fuel = Math.max(0, Math.min(1, car.fuelKg / this.fuelTankKg));
     this.el.fuelLevel!.style.height = `${fuel * 100}%`;

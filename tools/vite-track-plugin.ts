@@ -14,7 +14,7 @@ import { listTracks, TRACK_ID_RE } from './track-list.ts';
 const VIRTUAL_ID = 'virtual:tracks';
 const RESOLVED_VIRTUAL_ID = '\0' + VIRTUAL_ID;
 /** Config files the tuning panel may overwrite. */
-const TUNING_FILES = new Set(['physics', 'surfaces', 'rules', 'vfx', 'audio', 'ai', 'contact', 'race', 'slipstream']);
+const TUNING_FILES = new Set(['physics', 'surfaces', 'rules', 'vfx', 'audio', 'ai', 'contact', 'race', 'slipstream', 'assists']);
 
 /**
  * Read a POST body from the dev UI. The custom header makes the request non-simple, so other

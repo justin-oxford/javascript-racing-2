@@ -3,6 +3,7 @@
 import contactJson from '../config/contact.json' with { type: 'json' };
 import raceJson from '../config/race.json' with { type: 'json' };
 import slipstreamJson from '../config/slipstream.json' with { type: 'json' };
+import assistsJson from '../config/assists.json' with { type: 'json' };
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -73,5 +74,5 @@ export function loadTrackNode(id: string): LoadedTrack {
 
 /** A fresh sim context. Each one owns its own Planck cache, so contexts never share hidden state. */
 export function simContextNode(loaded: LoadedTrack, physics: PhysicsConfig = structuredClone(physicsJson as PhysicsConfig)): SimContext {
-  return { track: loaded.track, walls: loaded.walls, physics, catalog, rules, contact: contactJson, race: raceJson, slipstream: slipstreamJson, cache: createPhysicsCache() };
+  return { track: loaded.track, walls: loaded.walls, physics, catalog, rules, contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, cache: createPhysicsCache() };
 }

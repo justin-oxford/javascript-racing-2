@@ -1,0 +1,4 @@
+{
+  "_comment": "Frozen assists for tests that check the raw tyre model (lockups, wheelspin): ABS off, as before config/assists.json existed.",
+  "abs": { "enabled": false, "peakPct": 0.95, "cornerShare": 0.5 }
+}
