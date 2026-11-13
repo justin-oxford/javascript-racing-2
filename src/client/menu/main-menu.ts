@@ -157,12 +157,15 @@ export class MainMenu {
         <label>AI difficulty</label>${this.choice('aiPreset', preset, this.d.aiPresets.map((x) => [x, x] as const))}
         <label>Race laps</label>${this.choice('laps', s.race.laps, [3, 5, 10, 15, 20].map((n) => [n, String(n)] as const))}
         <label>Grid</label>${this.choice('grid', s.race.grid, [['random', 'Random'], ['pole', 'Pole'], ['back', 'Back']] as const)}
+        <label>Start tyres</label>${this.choice('compound', s.race.compound, [['soft', 'Soft'], ['medium', 'Medium'], ['hard', 'Hard']] as const)}
+        <label>Start fuel</label>${this.choice('fuel', s.race.fuel, [[1, 'Full'], [0.75, '3/4'], [0.5, '1/2'], [0.25, '1/4']] as const)}
+        <label>Fuel + tyre use</label>${this.choice('length', s.race.length, [['off', 'Normal'], ['matched', 'Matched to race length']] as const)}
         <label>Car performance</label>${this.choice('perf', s.perf, [['team', 'Team stats'], ['equal', 'Equal']] as const)}
         <label>Damage</label>${this.choice('damage', s.damage, [['off', 'Off'], ['visual', 'Visual only'], ['realistic', 'Realistic']] as const)}
         ${this.d.evolution ? `<label>Track</label>${this.choice('trackStart', s.trackStart, [['green', 'Green'], ['medium', 'Medium'], ['rubbered', 'Rubbered']] as const)}` : ''}
         ${this.d.nightAvailable ? `<label>Time of day</label>${this.choice('night', s.night ? 'night' : 'day', [['day', 'Day'], ['night', 'Night']] as const)}` : ''}
       </div>
-      <p class="note">Races use at least one AI. Equal: every team performs the same, AI drivers differ by skill. Realistic damage costs grip; the pits repair it.</p>`;
+      <p class="note">Races use at least one AI. Equal: every team performs the same, AI drivers differ by skill. Realistic damage costs grip; the pits repair it. Tyres: soft is quickest and wears fastest, hard the reverse; set the next stop while driving with 1 / 2 / 3 (tyres), 4 / 5 (fuel), 6 (change tyres), 7 (repair). Matched: fuel and tyres go faster in a short race, so it still needs a stop.</p>`;
   }
 
   private garageBody(p: Profile): string {
@@ -247,6 +250,9 @@ export class MainMenu {
     else if (key === 'aiPreset') next.ai = { ...s.ai, preset: val };
     else if (key === 'laps') next.race = { ...s.race, laps: num };
     else if (key === 'grid') next.race = { ...s.race, grid: val as typeof s.race.grid };
+    else if (key === 'compound') next.race = { ...s.race, compound: val as typeof s.race.compound };
+    else if (key === 'fuel') next.race = { ...s.race, fuel: num };
+    else if (key === 'length') next.race = { ...s.race, length: val as typeof s.race.length };
     else if (key === 'perf') next.perf = val as typeof s.perf;
     else if (key === 'damage') next.damage = val as typeof s.damage;
     else if (key === 'vfx') next.vfx = val as typeof s.vfx;

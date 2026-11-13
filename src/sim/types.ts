@@ -2,6 +2,7 @@ import type { SurfaceGrid } from './evolution';
 import type { EngineMode, ErsState } from './ers';
 import type { DamageMode, DamageState } from './damage';
 import type { RejoinState } from './rejoin';
+import type { Compound, PitPlan, RaceLengthMode, StopState } from './strategy';
 // All sim state is plain, JSON-serializable data. No classes, no hidden state.
 import type { QualiState } from './quali';
 import type { RaceState } from './race';
@@ -23,6 +24,8 @@ export interface CarInput {
   engineMode?: EngineMode | undefined;
   /** Battery deploy held (push-to-pass). */
   deploy?: boolean | undefined;
+  /** The pit board (Race strategy card): what the next stop does. Absent = keep the car's current plan. */
+  pitPlan?: PitPlan | undefined;
 }
 
 /**
@@ -73,6 +76,10 @@ export interface CarBuild {
    * Spec and setup still apply on top.
    */
   equalise?: number;
+  /** Race strategy: the compound it starts on (absent = strategy.json defaultCompound). */
+  compound?: Compound | undefined;
+  /** Race strategy: start fuel, kg (absent = physics fuel.startKg). */
+  startFuelKg?: number | undefined;
 }
 
 export interface WheelState {
@@ -134,6 +141,12 @@ export interface CarState extends Pose {
   damage: DamageState;
   /** Engine mode and battery (ers.ts). */
   ers: ErsState;
+  /** Race strategy (strategy.ts): the tyres on the car, the pit board, a stop in progress (null = none). */
+  compound: Compound;
+  pitPlan: PitPlan;
+  stop: StopState | null;
+  /** Fuel burned so far, kg (for "fuel to the end": burn per lap). */
+  fuelUsedKg: number;
 }
 
 /** Things that happened this tick, for the client to react to (log, sound, HUD). */
@@ -158,6 +171,8 @@ export interface WorldState {
 export interface SessionSettings {
   /** Car damage: off (default), visual only, or realistic. */
   damage?: DamageMode;
+  /** Race strategy: scale fuel burn and tyre wear to the race length ('matched'), or not ('off', default). */
+  raceLength?: RaceLengthMode;
 }
 
 export interface Rules {

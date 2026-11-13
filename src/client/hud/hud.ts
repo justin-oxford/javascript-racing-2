@@ -99,6 +99,7 @@ export class Hud {
     const specs = Object.entries(this.catalog.specs.specs);
     return `
       <div class="reset-note" data-id="resetNote"></div>
+      <div class="pit-board" data-id="pitBoard"></div>
       <div class="damage-mini" data-id="damageMini" title="Damage: front wing, rear wing, left and right suspension">
         <svg viewBox="0 0 40 70" width="100%" height="100%">
           <rect x="4" y="2" width="32" height="7" rx="1.5" data-zone="frontWing" />
@@ -114,6 +115,7 @@ export class Hud {
         <div class="current">Time:<b data-id="time">---</b></div>
         <div class="tow" data-id="tow" title="Slipstream: less drag behind another car">TOW</div>
         <div class="ers" title="Engine mode (E) and battery: hold Shift or / to deploy">
+          <span class="compound" data-id="compound" title="Tyre compound (pit board: 1 / 2 / 3)">M</span>
           <span class="mode" data-id="ersMode">STD</span>
           <span class="batt"><span data-id="battFill"></span></span>
           <span class="fuel-delta" data-id="fuelDelta" title="Laps of fuel left minus laps to go"></span>
@@ -314,7 +316,15 @@ export class Hud {
   }
 
   /** `race`: race laps and the car's own box (1-based) while racing; undefined in practice. */
-  update(car: CarState, simTime: number, session: Session, hasLines: boolean, inBoxStopped: boolean, race?: { laps: number; box: number }, reset?: { holdFrac: number; penaltySec: number }, power?: { batteryFrac: number; fuelMargin?: number | undefined }): void {
+  update(car: CarState, simTime: number, session: Session, hasLines: boolean, inBoxStopped: boolean, race?: { laps: number; box: number }, reset?: { holdFrac: number; penaltySec: number }, power?: { batteryFrac: number; fuelMargin?: number | undefined }, pit?: { letter: string; color: string; board?: string | undefined }): void {
+    // Race strategy: the compound on the car, and the pit board when it's up.
+    if (pit) {
+      this.el.compound!.textContent = pit.letter;
+      this.el.compound!.style.setProperty('--c', pit.color);
+    }
+    const board = this.el.pitBoard!;
+    board.style.display = pit?.board ? 'block' : 'none';
+    if (pit?.board && board.dataset.html !== pit.board) { board.innerHTML = pit.board; board.dataset.html = pit.board; }
     // Engine mode, battery (glows while deploying), fuel margin in a race (green = enough, red = save or stop).
     this.el.ersMode!.textContent = { save: 'SAVE', standard: 'STD', push: 'PUSH' }[car.ers.mode];
     this.el.ersMode!.className = `mode ${car.ers.mode}`;

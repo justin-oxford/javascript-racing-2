@@ -1,4 +1,4 @@
-import { offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { aiStartCompound, consumableScale, defaultPitPlan, offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -32,6 +32,7 @@ import driversJson from '../../config/drivers.json';
 import audioConfig from '../../config/audio.json';
 import hudConfig from '../../config/hud.json';
 import { Hud, SETUP_LABELS } from './hud/hud';
+import { pitBoardHtml } from './hud/pit-board';
 import { BalanceTracker } from './hud/balance';
 import { RaceHud } from './hud/race-hud';
 import { drawCarLabels, LABEL_MODES, nextLabelMode, type LabelMode } from './hud/car-labels';
@@ -101,7 +102,17 @@ async function main(): Promise<void> {
   };
   // Car damage setting (Car damage card), remembered in this browser. Off by default (Justin).
   let damageMode: DamageMode = profile.settings.damage;
-  const settings = (): SessionSettings => ({ damage: damageMode });
+  const settings = (): SessionSettings => ({ damage: damageMode, raceLength: profile.settings.race.length });
+  /** Race strategy card: the player's starting compound and fuel (main menu), and a fresh pit board to match. */
+  const withStrategy = (b: CarBuild): CarBuild => {
+    const compound = profile.settings.race.compound;
+    keyboard.pitPlan = defaultPitPlan(ctx.strategy, compound);
+    return { ...b, compound, startFuelKg: physics.fuel.tankKg * profile.settings.race.fuel };
+  };
+  keyboard.fuelStepKg = ctx.strategy.pitBoard.fuelStepKg;
+  keyboard.tankKg = physics.fuel.tankKg;
+  /** When the pit board was last touched (it shows for a few seconds after a pit key). */
+  let pitBoardAt = -Infinity;
   // AI drivers (AI driver roster card): the roster seeded once per page load, so the same drivers carry
   // through a whole race weekend. Car k + 1 is driven by roster[k].
   const driverSeed = crypto.getRandomValues(new Uint32Array(1))[0]!;
@@ -197,7 +208,7 @@ async function main(): Promise<void> {
   const startPractice = (keepWeekend = false): void => {
     raceSetup = undefined;
     if (!keepWeekend) weekend = undefined;
-    const me = withPerf(curr?.cars[0]?.build ?? startBuild);
+    const me = withStrategy(withPerf(curr?.cars[0]?.build ?? startBuild));
     if (!racingLine) aiCount = 0;
     const builds: CarBuild[] = [me, ...aiBuilds(me, aiCount)];
     if (aiCount === 0) for (let i = 1; i <= extra; i++) builds.push(physics.defaultCar);
@@ -220,10 +231,12 @@ async function main(): Promise<void> {
     raceSetup = { laps, grid, order };
     const carried = curr?.surface;
     if (!order) weekend = undefined; // a quick race leaves any weekend
-    const me = withPerf(curr?.cars[0]?.build ?? startBuild);
+    const me = withStrategy(withPerf(curr?.cars[0]?.build ?? startBuild));
     const count = Math.max(1, aiCount);
-    const builds: CarBuild[] = [me, ...aiBuilds(me, count)];
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!; // client-side: the sim itself stays seeded
+    // The AI's starting tyres (Race strategy card): seeded, from the race length.
+    const scale = consumableScale(profile.settings.race.length, laps, ctx.strategy);
+    const builds: CarBuild[] = [me, ...aiBuilds(me, count).map((b, k) => ({ ...b, compound: aiStartCompound(laps, scale, ctx.strategy, (((seed ^ ((k + 1) * 2654435761)) >>> 0) % 1000) / 1000) }))];
     curr = createRaceWorld(ctx, builds, { laps, seed, playerSlot: grid === 'pole' ? 0 : grid === 'back' ? count : undefined, grid: order, settings: settings() });
     // The race of a weekend: the track as qualifying left it, swept. A quick race: the starting state.
     curr = withSurface(curr, order && carried ? nextSession(carried, ctx.evolution) : freshSurface());
@@ -454,7 +467,8 @@ async function main(): Promise<void> {
     // In a race, 0-9 (grid slots) are off: they'd teleport you round the lap. (R is reset to track now:
     // held, in the sim; back to the pits is a menu button.)
     if ((curr.race || curr.quali) && a.type === 'gridSlot') return;
-    if (a.type === 'pause') {
+    if (a.type === 'pitBoard') pitBoardAt = performance.now();
+    else if (a.type === 'pause') {
       if (!menu.isOpen) menu.open('pause');
     } else if (a.type === 'toggleDebug') {
       debug = !debug;
@@ -515,6 +529,7 @@ async function main(): Promise<void> {
         damage,
         ers,
         evolution,
+        strategy: ctx.strategy,
         volumes: { values: audio.volumes, set: (bus, v) => audio.setVolume(bus, v) },
         onBuildChange: (b) => {
           const build = withPerf(b);
@@ -733,7 +748,12 @@ async function main(): Promise<void> {
           fuelLap.laps = me.timing.laps; fuelLap.kg = me.fuelKg;
         }
         const fuelMargin = race && fuelLap.perLap > 0 ? me.fuelKg / fuelLap.perLap - Math.max(0, race.laps - me.timing.laps) : undefined;
-        hud.update(me, (curr.tick + alpha) * TICK_DT, session, !!json.timingLines.startFinish, stoppedInBox(), race ? { laps: race.laps, box: (race.cars[0]?.box ?? -1) + 1 } : undefined, { holdFrac: me.rejoin.holdTicks / Math.max(1, ctx.race.reset.holdSec * TICK_HZ), penaltySec: me.rejoin.penaltyTicks / TICK_HZ }, { batteryFrac: me.ers.batteryKJ / Math.max(1, ctx.ers.battery.capacityKJ), fuelMargin });
+        hud.update(me, (curr.tick + alpha) * TICK_DT, session, !!json.timingLines.startFinish, stoppedInBox(), race ? { laps: race.laps, box: (race.cars[0]?.box ?? -1) + 1 } : undefined, { holdFrac: me.rejoin.holdTicks / Math.max(1, ctx.race.reset.holdSec * TICK_HZ), penaltySec: me.rejoin.penaltyTicks / TICK_HZ }, { batteryFrac: me.ers.batteryKJ / Math.max(1, ctx.ers.battery.capacityKJ), fuelMargin }, {
+          letter: ctx.strategy.compounds[me.compound].letter,
+          color: ctx.strategy.compounds[me.compound].color,
+          // The pit board: up for 3 s after a pit key, and all the time in the pit lane.
+          board: me.inPitLane || performance.now() - pitBoardAt < 3000 ? pitBoardHtml(me.pitPlan, ctx.strategy, profile.keybinds, me, damageMode === 'realistic') : undefined,
+        });
         raceHud.weekend = weekend;
         raceHud.update(curr, race?.sharedBoxes ? `${ctx.track.boxes.length} pit boxes for ${curr.cars.length} cars: shared` : '');
       }

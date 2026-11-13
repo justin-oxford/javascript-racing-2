@@ -1,0 +1,13 @@
+{
+  "_comment": "Race strategy card. compounds: grip x and wear x per compound (the log10 wear cliff stays; softs reach it sooner); lifeLaps = about how many Oxford laps a set lasts to the AI's pit threshold at wear x 1 (the AI's estimate when picking; npm run strategy-probe measures it). defaultCompound: what a car starts on unless its build says otherwise. pitBoard: fuelStepKg = one press of fuel - / + on the pit board. service: tyreChangeSec = a tyre change (all four, alongside refuelling: the stop takes the longest of tyres, fuel and repair). fuelEndMarginLaps: 'fuel to the end' adds this much spare. raceLength 'matched': fuel burn and tyre wear x refLaps / race laps (never below 1), so a short race still needs a stop or saving; 'off' = normal rates. ai: the AI starts on a compound whose life covers raceLaps x startStintShare (seeded pick between the best two), and at a stop takes the grippiest compound that lasts the laps left.",
+  "compounds": {
+    "soft": { "grip": 1.03, "wear": 1.8, "lifeLaps": 16, "color": "#e8413b", "letter": "S" },
+    "medium": { "grip": 1.0, "wear": 1.0, "lifeLaps": 29, "color": "#f2c230", "letter": "M" },
+    "hard": { "grip": 0.97, "wear": 0.6, "lifeLaps": 52, "color": "#e9e9e9", "letter": "H" }
+  },
+  "defaultCompound": "medium",
+  "pitBoard": { "fuelStepKg": 5 },
+  "service": { "tyreChangeSec": 3, "fuelEndMarginLaps": 0.5 },
+  "raceLength": { "refLaps": 25 },
+  "ai": { "startStintShare": 0.6 }
+}

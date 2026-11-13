@@ -10,6 +10,7 @@ import assistsJson from '../../config/assists.json';
 import damageJson from '../../config/damage.json';
 import ersJson from '../../config/ers.json';
 import evolutionJson from '../../config/evolution.json';
+import strategyJson from '../../config/strategy.json';
 import rules from '../../config/rules.json';
 import specsJson from '../../config/specs.json';
 import surfacesConfig from '../../config/surfaces.json';
@@ -17,7 +18,7 @@ import teamsJson from '../../config/teams.json';
 import trackDefaults from '../../config/track-defaults.json';
 import wallTracing from '../../config/wall-tracing.json';
 import {
-  type ErsConfig,
+  type ErsConfig, type StrategyConfig,
   type EvolutionConfig,
   type ContactConfig,
   type RaceConfig,
@@ -61,6 +62,8 @@ export const damage = damageJson;
 export const ers = ersJson as ErsConfig;
 /** config/evolution.json, live (tuning panel): rubber and marbles. */
 export const evolution: EvolutionConfig = evolutionJson;
+/** config/strategy.json, live (tuning panel): compounds, stops, race-length scaling. */
+export const strategy: StrategyConfig = strategyJson as StrategyConfig;
 export const catalog: CarCatalog = { teams: teamsJson.teams as TeamDef[], specs: specsJson as unknown as SpecsConfig };
 export { rules };
 const defaults = trackDefaults as TrackDefaults;
@@ -205,5 +208,5 @@ export async function loadOverhead(json: TrackJson): Promise<HTMLImageElement | 
 }
 
 export function simContext(mask: MaskState): SimContext {
-  return { track: mask.track, walls: mask.walls, physics, catalog, rules, contact, race: raceConfig, slipstream, assists, damage, ers, evolution, cache: createPhysicsCache() };
+  return { track: mask.track, walls: mask.walls, physics, catalog, rules, contact, race: raceConfig, slipstream, assists, damage, ers, evolution, strategy, cache: createPhysicsCache() };
 }

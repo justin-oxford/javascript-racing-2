@@ -1,6 +1,7 @@
 // @vitest-environment node
 // Car physics on small synthetic arenas (built here, not real tracks), so each behaviour is isolated.
 import evolutionJson from '../../config/evolution.json';
+import strategyJson from '../../config/strategy.json';
 import ersJson from '../../config/ers.json';
 import driversJson from '../../config/drivers.json';
 import damageJson from '../../config/damage.json';
@@ -26,13 +27,14 @@ import {
   createPhysicsCache,
   createSimTrack,
   createWorld,
+  carGripMul,
   step,
   traceWalls,
   tyreLife,
   wearGrip,
   type CarBuild,
   type CarInput,
-  type ErsConfig, type PhysicsConfig,
+  type ErsConfig, type StrategyConfig, type PhysicsConfig,
   type Pose,
   type SimContext,
   type TrackJson,
@@ -62,7 +64,7 @@ function arena(wM: number, hM: number, spawnM: Pose, paint?: (xM: number, yM: nu
     physics: structuredClone(physicsJson) as unknown as PhysicsConfig,
     catalog,
     rules,
-    contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, cache: createPhysicsCache(),
+    contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, strategy: strategyJson as StrategyConfig, cache: createPhysicsCache(),
   };
 }
 
@@ -282,16 +284,47 @@ describe('physics', () => {
     expect(burnt).toBeLessThanOrEqual(5 * ctx.physics.fuel.burnKgPerSec + 1e-9);
   });
 
-  it('stopped in the pit box: fresh tyres and gradual refuel', () => {
+  it('stopped in the pit box: gradual refuel, fresh tyres after the tyre change time', () => {
     const ctx = arena(30, 30, { x: 15, y: 15, heading: 0 }, (x, y) => (Math.abs(x - 15) < 4 && Math.abs(y - 15) < 6 ? 'pitBox' : undefined));
     let world = createWorld(ctx);
     const worn = world.cars[0]!.wheels.map((w) => ({ ...w, wear: 0.3 })) as typeof world.cars[0]['wheels'];
     world = { ...world, cars: [{ ...world.cars[0]!, wheels: worn, fuelKg: 10 }] };
     world = drive(ctx, world, 60, { throttle: 0, brake: 0, steer: 0 });
     const c = world.cars[0]!;
-    expect(c.wheels.every((w) => w.wear === 1)).toBe(true);
+    expect(c.wheels.every((w) => w.wear === 0.3)).toBe(true); // still changing (strategy.json tyreChangeSec)
     expect(c.fuelKg).toBeGreaterThan(10 + 0.9 * ctx.physics.fuel.refuelKgPerSec);
     expect(c.fuelKg).toBeLessThan(10 + 1.1 * ctx.physics.fuel.refuelKgPerSec);
+    world = drive(ctx, world, Math.ceil(60 * ctx.strategy.service.tyreChangeSec), { throttle: 0, brake: 0, steer: 0 });
+    expect(world.cars[0]!.wheels.every((w) => w.wear === 1)).toBe(true);
+  });
+
+  it('pit board: the stop fits the planned compound, adds the planned fuel, and keeps worn tyres if told to', () => {
+    const ctx = arena(30, 30, { x: 15, y: 15, heading: 0 }, (x, y) => (Math.abs(x - 15) < 4 && Math.abs(y - 15) < 6 ? 'pitBox' : undefined));
+    const still = (plan: CarInput['pitPlan']) => ({ throttle: 0, brake: 0, steer: 0, pitPlan: plan });
+    let world = createWorld(ctx);
+    const worn = world.cars[0]!.wheels.map((w) => ({ ...w, wear: 0.4 })) as typeof world.cars[0]['wheels'];
+    world = { ...world, cars: [{ ...world.cars[0]!, wheels: worn, fuelKg: 20 }] };
+    const soft = { compound: 'soft' as const, fuelKg: 15, tyres: true, repair: true };
+    world = drive(ctx, world, Math.ceil(60 * (ctx.strategy.service.tyreChangeSec + 2)), still(soft));
+    const c = world.cars[0]!;
+    expect(c.compound).toBe('soft');
+    expect(c.wheels.every((w) => w.wear === 1)).toBe(true);
+    expect(c.fuelKg).toBeCloseTo(35, 0);
+    // Tyres off: same wear, same compound, fuel only.
+    let w2 = createWorld(ctx);
+    w2 = { ...w2, cars: [{ ...w2.cars[0]!, wheels: worn, fuelKg: 20 }] };
+    w2 = drive(ctx, w2, 60 * 5, still({ ...soft, tyres: false }));
+    expect(w2.cars[0]!.compound).toBe(ctx.strategy.defaultCompound);
+    expect(w2.cars[0]!.wheels.every((w) => w.wear === 0.4)).toBe(true);
+    expect(w2.cars[0]!.fuelKg).toBeCloseTo(35, 0);
+  });
+
+  it('compounds and fuel weight change grip: a soft car corners harder than a hard one; a heavy tank less', () => {
+    const ctx = arena(30, 30, { x: 15, y: 15, heading: 0 });
+    ctx.physics.tyres.loadSensitivity = 0.23;
+    const cap = (c: Partial<WorldState['cars'][number]>) => carGripMul({ compound: 'medium', fuelKg: 50, ...c }, ctx);
+    expect(cap({ compound: 'soft' })).toBeGreaterThan(cap({ compound: 'hard' }));
+    expect(cap({ fuelKg: 110 })).toBeLessThan(cap({ fuelKg: 5 }));
   });
 
   it('parking speed: a gentle steer + throttle from rest turns the car without sticking', () => {

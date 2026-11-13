@@ -34,7 +34,7 @@ export interface PhysicsConfig {
    * falloffSlip x peak slip. lateralStiffness: at most this fraction of a wheel's sideways velocity is removed
    * per tick (60 Hz stability at low speed). lowSpeedMps: slip angles are measured against at least this speed.
    */
-  tyres: { baseGrip: number; lateralGrip: number; lateralStiffness: number; frontGrip: number; rearGrip: number; peakSlipDeg: number; falloff: number; falloffSlip: number; lowSpeedMps: number };
+  tyres: { baseGrip: number; lateralGrip: number; lateralStiffness: number; frontGrip: number; rearGrip: number; peakSlipDeg: number; falloff: number; falloffSlip: number; lowSpeedMps: number; /** Fuel weight (Race strategy card): grip x (dry mass / mass)^loadSensitivity. Absent = 0. */ loadSensitivity?: number };
   /**
    * Mechanical lock shrinks with speed (lockFalloffKph). assist: full lock = peak slip (x assistPeakPct)
    * relative to the front axle's travel, blending in between assistFromKph and assistFullKph.

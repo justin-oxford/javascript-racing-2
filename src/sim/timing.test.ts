@@ -1,5 +1,6 @@
 // @vitest-environment node
 import evolutionJson from '../../config/evolution.json';
+import strategyJson from '../../config/strategy.json';
 import ersJson from '../../config/ers.json';
 import damageJson from '../../config/damage.json';
 import assistsJson from '../../tools/fixtures/assists-baseline.json';
@@ -22,7 +23,7 @@ import {
   traceWalls,
   updateTiming,
   type LapTiming,
-  type ErsConfig, type PhysicsConfig,
+  type ErsConfig, type StrategyConfig, type PhysicsConfig,
   type SimContext,
   type TimingEvent,
   type TrackJson,
@@ -126,7 +127,7 @@ describe('timing in the real sim', () => {
     const l = (y: number) => ({ a: { x: 280, y }, b: { x: 20, y } });
     const tj: TrackJson = { id: 't', name: 't', pxPerMeter: PPM, files: { mask: 'm' }, racingLine: [], grid: [], spawn: { x: 150, y: 3950, heading: 0 }, timingLines: { startFinish: l(3800), s1: l(2800), s2: l(1800) } };
     const track = createSimTrack(tj, { width: w, height: h, data }, surfaces);
-    const ctx: SimContext = { track, walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing), physics: structuredClone(physicsJson) as unknown as PhysicsConfig, catalog, rules, contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, cache: createPhysicsCache() };
+    const ctx: SimContext = { track, walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing), physics: structuredClone(physicsJson) as unknown as PhysicsConfig, catalog, rules, contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, strategy: strategyJson as StrategyConfig, cache: createPhysicsCache() };
     let world: WorldState = createWorld(ctx);
     const events: string[] = [];
     for (let i = 0; i < 60 * 12; i++) {

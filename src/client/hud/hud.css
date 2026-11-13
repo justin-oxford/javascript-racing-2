@@ -160,6 +160,22 @@
 .reset-note .fill { display: inline-block; vertical-align: middle; width: calc(var(--u) * 60); height: calc(var(--u) * 6); margin-left: calc(var(--u) * 8); background: rgba(255,255,255,0.2); }
 .reset-note .fill span { display: block; height: 100%; background: #ffcc33; }
 
+/* Race strategy: the compound badge in the bar, and the pit board (right side, below the bar). */
+.hud-bar .ers .compound { width: calc(var(--u) * 16); height: calc(var(--u) * 16); line-height: calc(var(--u) * 13); text-align: center; border-radius: 50%;
+  border: calc(var(--u) * 2.5) solid var(--c, #f2c230); color: var(--c, #f2c230); box-sizing: border-box; font-size: calc(var(--u) * 9); }
+.pit-board { display: none; position: absolute; right: calc(var(--u) * 10); top: calc(var(--u) * 70); z-index: 2; pointer-events: none;
+  background: rgba(10, 10, 14, 0.85); color: #fff; padding: calc(var(--u) * 6) calc(var(--u) * 10); border-radius: calc(var(--u) * 4);
+  font-family: "Formula1 Bold", system-ui, sans-serif; font-size: calc(var(--u) * 9); letter-spacing: 0.05em; min-width: calc(var(--u) * 150); }
+.pit-board .title { color: #ffcc33; margin-bottom: calc(var(--u) * 4); }
+.pit-board .row { display: flex; align-items: center; gap: calc(var(--u) * 6); margin: calc(var(--u) * 3) 0; }
+.pit-board .k { width: calc(var(--u) * 44); opacity: 0.7; }
+.pit-board i { font-style: normal; opacity: 0.5; font-size: calc(var(--u) * 7); margin-left: calc(var(--u) * 3); }
+.pit-board .cmp { display: inline-block; padding: 0 calc(var(--u) * 4); border-radius: calc(var(--u) * 3); border: 1px solid var(--c); color: var(--c); opacity: 0.45; }
+.pit-board .cmp.on { opacity: 1; background: rgba(255, 255, 255, 0.12); }
+.pit-board .tog { opacity: 0.6; }
+.pit-board .tog.on { opacity: 1; color: #6fdc7a; }
+.pit-board .stop { color: #9cd2ff; }
+
 /* Damage diagram (Car damage card): bottom left, only when damage is on. */
 .damage-mini { display: none; position: absolute; left: calc(var(--u) * 10); bottom: calc(var(--u) * 10); width: calc(var(--u) * 34); height: calc(var(--u) * 60);
   background: rgba(10, 10, 14, 0.6); border-radius: calc(var(--u) * 4); padding: calc(var(--u) * 4); pointer-events: none; z-index: 1; }

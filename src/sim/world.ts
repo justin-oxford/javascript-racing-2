@@ -2,6 +2,7 @@ import { evolutionGrip, newSurfaceGrid, updateSurface, type EvolutionConfig, typ
 import { deployPowerW, newErs, updateErs, type EngineMode, type ErsConfig } from './ers';
 import { applyHits, damageDrag, damageGrip, damagePull, isDamaged, NO_DAMAGE, repairStep, type DamageConfig } from './damage';
 import { applyResets, newRejoin, trackRejoin } from './rejoin';
+import { compoundGrip, compoundWear, consumableScale, defaultPitPlan, fuelGrip, startStop, stopFuelTarget, validPitPlan, type StrategyConfig } from './strategy';
 import { bodyOffsetM, buildStats, setupEffects, type CarCatalog, type PhysicsConfig } from './car-config';
 import { applyCarForce, prepareCache, readStateFromWorld, setCarMass, stepWorld, type PhysicsCache } from './planck-cache';
 import type { SimTrack, WallChain } from './track';
@@ -43,6 +44,8 @@ export interface SimContext {
   ers: ErsConfig;
   /** config/evolution.json: rubbering in and marbles (live-tunable). */
   evolution: EvolutionConfig;
+  /** config/strategy.json: compounds, pit board, stops, race-length scaling (Race strategy card). */
+  strategy: StrategyConfig;
   cache: PhysicsCache;
 }
 
@@ -167,7 +170,7 @@ export function createCar(posePx: Pose, build: CarBuild, ctx: SimContext): CarSt
     speed: 0,
     controls: { ...NEUTRAL_INPUT },
     steerAngle: 0,
-    fuelKg: ctx.physics.fuel.startKg,
+    fuelKg: Math.min(ctx.physics.fuel.tankKg, build.startFuelKg ?? ctx.physics.fuel.startKg),
     wheels: surfaces.map(newWheel) as Wheels<WheelState>,
     ...surfaceFlags(surfaces, ctx),
     pitBox: pitBoxUnder(pose, ctx),
@@ -181,7 +184,16 @@ export function createCar(posePx: Pose, build: CarBuild, ctx: SimContext): CarSt
     rejoin: newRejoin(),
     damage: { ...NO_DAMAGE },
     ers: newErs(ctx.ers),
+    compound: build.compound ?? ctx.strategy.defaultCompound,
+    pitPlan: defaultPitPlan(ctx.strategy, build.compound ?? ctx.strategy.defaultCompound),
+    stop: null,
+    fuelUsedKg: 0,
   };
+}
+
+/** Grip from the car's tyres and load beyond wear: the compound, and fuel weight (Race strategy card). */
+export function carGripMul(car: Pick<CarState, 'compound' | 'fuelKg'>, ctx: Pick<SimContext, 'physics' | 'strategy'>): number {
+  return compoundGrip(car.compound, ctx.strategy) * fuelGrip(ctx.physics.car.dryMassKg, car.fuelKg, ctx.physics.tyres.loadSensitivity);
 }
 
 /**
@@ -367,7 +379,8 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
   // throttle loads the rears. dFz = m * a_long * cgHeight / wheelbase, with a_long from this tick's
   // drive, brakes and drag, no more than the tyres can deliver.
   const dragF = cfg.aero.dragCoef * stats.drag * damageDrag(dmg, ctx.damage) * (1 - wake.tow) * v2;
-  const aLongMax = cfg.tyres.baseGrip * stats.grip * vertical / mass;
+  const tyreMul = carGripMul(car, ctx); // compound + fuel weight
+  const aLongMax = cfg.tyres.baseGrip * stats.grip * tyreMul * vertical / mass;
   const aLong = clamp((drive - Math.sign(vFwd || 1) * (brakeTotal + dragF)) / mass, -aLongMax, aLongMax);
   const dFz = (mass * aLong * cfg.car.cgHeightM) / cfg.car.wheelbaseM;
   for (let w = 0; w < 4; w++) load[w] = Math.max(0, load[w]! + (w < 2 ? -dFz : dFz) / 2);
@@ -375,7 +388,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
   const totalLoad = load[0] + load[1] + load[2] + load[3] || 1;
   const delta = frontWheelAngle(controls.steer, car, cfg) + damagePull(dmg, ctx.damage);
 
-  const gripBase = cfg.tyres.baseGrip * stats.grip; // downforce is already in the load
+  const gripBase = cfg.tyres.baseGrip * stats.grip * tyreMul; // downforce is already in the load
   const positions = wheelPositions(car, cfg);
   const out = [] as unknown as Wheels<WheelForces>;
 
@@ -459,7 +472,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
 }
 
 /** Tyre wear + fuel for one tick (SYS - Car model rules), and pit service. */
-function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimContext, dt: number, ownBox: number, fillToKg = ctx.physics.fuel.tankKg, power: { mode: EngineMode; deployW: number } = { mode: car.ers.mode, deployW: 0 }): Pick<CarState, 'fuelKg' | 'wheels' | 'servicing' | 'damage' | 'ers'> {
+function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimContext, dt: number, ownBox: number, fillToKg: number | undefined, power: { mode: EngineMode; deployW: number }, scale: number, lapsToGo: number | undefined, progressLaps: number | undefined): Pick<CarState, 'fuelKg' | 'wheels' | 'servicing' | 'damage' | 'ers' | 'compound' | 'stop' | 'fuelUsedKg'> {
   const cfg = ctx.physics;
   const kph = Math.abs(car.speed) / KPH;
   const v4 = (kph / cfg.wear.refSpeedKph) ** 4;
@@ -468,7 +481,8 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
   const { throttle } = car.controls;
   // Practice (ownBox -1): any box. Race: only the car's own box; someone else's does nothing.
   const service = car.inPitBox && kph < cfg.fuel.pitServiceMaxKph && (ownBox < 0 || car.pitBox === ownBox);
-  const wearMul = setupEffects(car.build.setup, ctx.catalog).wear; // tyre pressure
+  // Tyre pressure (setup), the compound, and race-length scaling.
+  const wearMul = setupEffects(car.build.setup, ctx.catalog).wear * compoundWear(car.compound, ctx.strategy) * scale;
 
   const wheels = car.wheels.map((wheel, w) => {
     let dw = cfg.wear.cornerPerSec * v4 * (Math.abs(forces[w]!.lat) / quarterWeight); // by actual lateral load
@@ -485,7 +499,7 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
     }
     return {
       ...wheel,
-      wear: service ? 1 : Math.max(0, wheel.wear - dw * wearMul * dt),
+      wear: Math.max(0, wheel.wear - (service ? 0 : dw * wearMul * dt)),
       slipDeg: forces[w]!.slipDeg,
       usage: forces[w]!.usage,
       gripN: forces[w]!.gripN,
@@ -493,14 +507,37 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
     };
   }) as Wheels<WheelState>;
 
-  let fuelKg = Math.max(0, car.fuelKg - throttle * cfg.fuel.burnKgPerSec * ctx.ers.modes[power.mode].fuel * dt);
+  const burn = Math.min(car.fuelKg, throttle * cfg.fuel.burnKgPerSec * ctx.ers.modes[power.mode].fuel * scale * dt);
+  let fuelKg = car.fuelKg - burn;
+  const fuelUsedKg = car.fuelUsedKg + burn;
   // Battery: spend what was deployed, harvest a share of the braking power (each wheel's brake force x speed).
   const brakePowerW = forces.reduce((a, f) => a + Math.min(f.brakeUse, 1) * f.gripN, 0) * Math.abs(car.speed);
   const ers = updateErs(car.ers, power.mode, power.deployW, brakePowerW, car.timing.laps, dt, ctx.ers);
-  if (service) fuelKg = Math.max(fuelKg, Math.min(fillToKg, cfg.fuel.tankKg, fuelKg + cfg.fuel.refuelKgPerSec * dt));
-  // Repairs while stopped in the box (no pit board yet: always; it makes the stop longer).
-  const damage = service && isDamaged(car.damage, 0) ? repairStep(car.damage, dt, ctx.damage) : car.damage;
-  return { fuelKg, wheels, servicing: service, damage, ers };
+  // THE STOP (Race strategy card): on the first tick stopped in the box, the pit board becomes the stop's
+  // work list; the box then does it: tyres (tyreChangeSec, all four), fuel (at refuelKgPerSec, alongside)
+  // and repair if asked. Driving off ends it, done or not.
+  let stop = service ? car.stop : null;
+  let compound = car.compound;
+  let damage = car.damage;
+  let fitted = wheels;
+  if (service) {
+    if (!stop) {
+      // Qualifying fills to its own light load whatever the board says.
+      const target = fillToKg ?? stopFuelTarget(car.pitPlan, fuelKg, cfg.fuel.tankKg, lapsToGo, progressLaps && progressLaps > 0.5 ? fuelUsedKg / progressLaps : undefined, ctx.strategy);
+      stop = startStop(car.pitPlan, Math.min(cfg.fuel.tankKg, target), isDamaged(car.damage, 0), ctx.strategy);
+    }
+    if (stop.fitting !== null) {
+      const left = stop.tyreLeftSec - dt;
+      if (left <= 0) {
+        compound = stop.fitting;
+        fitted = wheels.map((wh) => ({ ...wh, wear: 1 })) as Wheels<WheelState>;
+        stop = { ...stop, tyreLeftSec: 0, fitting: null };
+      } else stop = { ...stop, tyreLeftSec: left };
+    }
+    if (fuelKg < stop.fuelToKg) fuelKg = Math.min(stop.fuelToKg, fuelKg + cfg.fuel.refuelKgPerSec * dt);
+    if (stop.repair && isDamaged(car.damage, 0)) damage = repairStep(car.damage, dt, ctx.damage);
+  }
+  return { fuelKg, wheels: fitted, servicing: service, damage, ers, compound, stop, fuelUsedKg };
 }
 
 /** One car's wheels for track evolution this tick: where, how loaded and slipping, how much tyre it shed, outward. */
@@ -541,6 +578,8 @@ export function step(world0: WorldState, inputs: readonly CarInput[], ctx: SimCo
   const controls = world.cars.map((car, i) => rampControls(car.controls, raceHeld || resets.held[i] || qualiHolds(world.quali, i, world.tick) ? NEUTRAL_INPUT : (inputs[i] ?? NEUTRAL_INPUT), ctx.physics, dt));
   const wake = wakeEffects(world.cars, ctx.physics.car.widthM, ctx.slipstream);
   const damageMode = world.settings?.damage ?? 'off';
+  // Race length (Race strategy card): fuel burn and tyre wear scaled up for a short race, if set.
+  const scale = consumableScale(world.settings?.raceLength, world.race?.laps, ctx.strategy);
   // Engine mode (kept until the driver asks for another) and battery deploy, per car.
   const power = world.cars.map((car, i) => {
     const held = raceHeld || resets.held[i] || qualiHolds(world.quali, i, world.tick);
@@ -584,7 +623,10 @@ export function step(world0: WorldState, inputs: readonly CarInput[], ctx: SimCo
       const hits = ctx.cache.hits.filter((h) => h.car === i);
       if (hits.length) moved.damage = applyHits(car.damage, b, hits, ctx.physics.car.lengthM, bodyOffsetM(ctx.physics), ctx.damage);
     }
-    const next = { ...moved, ...updateConsumables(moved, forces[i]!, ctx, dt, world.race?.cars[i]?.box ?? -1, world.quali ? qualiFuelKg(ctx) : undefined, power[i]), timing };
+    // The pit board: the driver's latest plan (kept until it sends another).
+    const plan = inputs[i]?.pitPlan ? validPitPlan(inputs[i]!.pitPlan, moved.pitPlan, ctx.physics.fuel.tankKg) : moved.pitPlan;
+    const rc = world.race?.cars[i];
+    const next = { ...moved, pitPlan: plan, ...updateConsumables({ ...moved, pitPlan: plan }, forces[i]!, ctx, dt, rc?.box ?? -1, world.quali ? qualiFuelKg(ctx) : undefined, power[i]!, scale, world.race && rc ? world.race.laps - rc.progress : undefined, rc?.progress), timing };
     // Out of bounds should be unreachable behind walls. If a wheel gets there, the mask has a gap.
     if (surfaces.includes(ctx.track.index.outOfBounds)) {
       const ppm = ctx.track.json.pxPerMeter;

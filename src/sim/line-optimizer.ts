@@ -252,7 +252,8 @@ export function speedProfile(x: ArrayLike<number>, y: ArrayLike<number>, physics
   const t = physics.tyres, c = physics.car, wf = c.weightFront;
   const mass = c.dryMassKg + opt.fuelKg;
   const axleGrip = t.frontGrip * wf + t.rearGrip * (1 - wf);
-  const mu = t.baseGrip * stats.grip * axleGrip;
+  // Fuel weight (Race strategy card): load sensitivity at this fuel load.
+  const mu = t.baseGrip * stats.grip * axleGrip * (t.loadSensitivity ? (c.dryMassKg / mass) ** t.loadSensitivity : 1);
   const muLat = mu * t.lateralGrip;
   const kAero = physics.aero.downforceCoef * stats.downforce;
   const vTop = (physics.engine.topSpeedKph / 3.6) * stats.topSpeed;

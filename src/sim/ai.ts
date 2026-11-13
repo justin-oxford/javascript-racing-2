@@ -7,6 +7,7 @@ import { buildStats } from './car-config';
 import { damageGrip, isDamaged } from './damage';
 import { blueFlag, chooseMode, concedes, keepGoodExits, lineFor, LINE_IDS, lineOffsets, offsetPath, otherHasRightOfWay, type CraftMode, type LineId, type OvertakingConfig, type RacecraftConfig } from './racecraft';
 import { speedProfile } from './line-optimizer';
+import { aiCompound, compoundGrip, consumableScale, FUEL_TO_END, fuelGrip, stopDone, type PitPlan } from './strategy';
 import type { SimTrack } from './track';
 import { surfaceAt } from './track';
 import type { CarInput, CarState, InputSource, WorldState } from './types';
@@ -489,7 +490,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     // as if in STANDARD (what it measured, undone by the mode it ran); if it's a little short, SAVE (ers.ts)
     // can make up the difference instead of a stop.
     if (race && st.fuelPerLap > 0) {
-      const lapsLeft = race.laps - car.timing.laps;
+      // Laps left from the race's own progress (fractional): completed laps lag it, and just after a stop
+      // (the box is before the line) that read a lap more than was left, so a "to the end" fill looked short.
+      const lapsLeft = race.laps - (race.cars[i]?.progress ?? car.timing.laps);
       const perLapStd = st.fuelPerLap / (ctx.ers.modes[car.ers.mode]?.fuel ?? 1);
       const needStd = perLapStd * (lapsLeft + 0.3), needSave = needStd * ctx.ers.modes.save.fuel;
       if (car.fuelKg < needStd && car.fuelKg >= needSave) st.saving = true;
@@ -574,7 +577,10 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   const mass = phys.car.dryMassKg + Math.max(0, car.fuelKg);
   // Grip it has to work with: tyre wear, and (Realistic) damage, both on its own car.
   const dmgGrip = world.settings?.damage === 'realistic' ? [0, 1, 2, 3].reduce((a, w) => a + damageGrip(car.damage, w, ctx.damage), 0) / 4 : 1;
-  const tyre = (car.wheels.reduce((a, w) => a + wearGrip(w.wear), 0) / 4) * dmgGrip;
+  // ...and the compound and fuel weight (its speed profile assumes a medium-grip tyre at half a tank).
+  const loadK = phys.tyres.loadSensitivity;
+  const tyre = (car.wheels.reduce((a, w) => a + wearGrip(w.wear), 0) / 4) * dmgGrip * compoundGrip(car.compound, ctx.strategy)
+    * (fuelGrip(phys.car.dryMassKg, car.fuelKg, loadK) / fuelGrip(phys.car.dryMassKg, phys.fuel.startKg / 2, loadK));
   const mu = phys.tyres.baseGrip * stats.grip * tyre;
   const kAero = phys.aero.downforceCoef * stats.downforce;
   const vTop = (phys.engine.topSpeedKph / 3.6) * stats.topSpeed;
@@ -678,9 +684,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   let holdInBox = false;
   // "Stopped" = slow enough for the sim to service (fuel.pitServiceMaxKph), not some other threshold.
   if (pit && !st.serviced && best >= stopQ - 3 && speed * 3.6 < phys.fuel.pitServiceMaxKph * 0.8) {
-    // Done when filled to what the pits give: a full tank, or in qualifying the qualifying load.
-    const fillTo = world.quali ? Math.min(phys.fuel.tankKg, ctx.race.qualiFuelKg ?? phys.fuel.tankKg) : phys.fuel.tankKg;
-    const full = car.fuelKg >= fillTo - 0.5 && car.wheels.every((wh) => wh.wear > 0.99) && !isDamaged(car.damage);
+    // Done when the box has done what its pit board asked (Race strategy card: tyres, fuel, repair).
+    const full = stopDone(car.stop, car.fuelKg, isDamaged(car.damage));
     if (!car.servicing) st.serviced = true; // stopped short of / past its box: drive on, try again next lap
     else if (full) {
       st.serviced = true;
@@ -986,7 +991,16 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   const engineMode = st.saving ? 'save' : deploy ? 'push' : 'standard';
   st.modeTicks = { ...st.modeTicks, [engineMode]: st.modeTicks[engineMode] + 1 };
   if (deploy && car.ers.deploying) st.deployTicks++;
-  return { input: { throttle, brake, steer, engineMode, deploy }, state: st };
+  // THE PIT BOARD (Race strategy card): going in, it asks for fuel to the end, a repair if damaged, and the
+  // grippiest compound that lasts the laps left (or, in practice, the same again).
+  let pitPlan: PitPlan | undefined;
+  if (st.pitWanted || st.mode === 'pit') {
+    const scale = consumableScale(world.settings?.raceLength, race?.laps, ctx.strategy);
+    const lapsToGo = race ? Math.max(0, race.laps - (race.cars[i]?.progress ?? car.timing.laps)) : 0;
+    const compound = race ? aiCompound(lapsToGo, scale, ctx.strategy) : car.compound;
+    pitPlan = { compound, fuelKg: FUEL_TO_END, tyres: true, repair: isDamaged(car.damage) };
+  }
+  return { input: { throttle, brake, steer, engineMode, deploy, ...(pitPlan ? { pitPlan } : {}) }, state: st };
 }
 
 /** Wrap aiDrive as an InputSource for car `i` (keyboard-compatible). */
