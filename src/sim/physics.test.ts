@@ -1,5 +1,6 @@
 // @vitest-environment node
 // Car physics on small synthetic arenas (built here, not real tracks), so each behaviour is isolated.
+import ersJson from '../../config/ers.json';
 import damageJson from '../../config/damage.json';
 import assistsJson from '../../tools/fixtures/assists-baseline.json';
 import slipstreamJson from '../../tools/fixtures/slipstream-baseline.json';
@@ -24,7 +25,7 @@ import {
   wearGrip,
   type CarBuild,
   type CarInput,
-  type PhysicsConfig,
+  type ErsConfig, type PhysicsConfig,
   type Pose,
   type SimContext,
   type TrackJson,
@@ -54,7 +55,7 @@ function arena(wM: number, hM: number, spawnM: Pose, paint?: (xM: number, yM: nu
     physics: structuredClone(physicsJson) as PhysicsConfig,
     catalog,
     rules,
-    contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, cache: createPhysicsCache(),
+    contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, cache: createPhysicsCache(),
   };
 }
 

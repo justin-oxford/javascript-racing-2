@@ -1,4 +1,4 @@
-import type { CarInput, InputSource } from '../../sim';
+import { nextEngineMode, type CarInput, type EngineMode, type InputSource } from '../../sim';
 
 /** Discrete, non-driving actions from the v0.16 bindings. */
 export type KeyboardAction =
@@ -20,6 +20,9 @@ const DEBUG = 'KeyK';
 const VFX = 'KeyV';
 const MUTE = 'KeyM';
 const LABELS = 'KeyL';
+/** Engine modes card: E cycles the engine mode; hold either Shift or / (arrow-key drivers) to deploy. */
+const MODE = 'KeyE';
+const DEPLOY = ['ShiftLeft', 'ShiftRight', 'Slash'];
 
 const DRIVING_KEYS = new Set([...THROTTLE, ...BRAKE, ...LEFT, ...RIGHT]);
 
@@ -27,6 +30,8 @@ const DRIVING_KEYS = new Set([...THROTTLE, ...BRAKE, ...LEFT, ...RIGHT]);
 export class KeyboardInput implements InputSource {
   private readonly down = new Set<string>();
   private readonly listeners: Array<(a: KeyboardAction) => void> = [];
+  /** The engine mode this driver has picked (sent every tick; the sim keeps the car's). */
+  engineMode: EngineMode = 'standard';
 
   constructor(target: Window = window) {
     target.addEventListener('keydown', (e) => {
@@ -50,12 +55,15 @@ export class KeyboardInput implements InputSource {
       brake: any(BRAKE) ? 1 : 0,
       steer: (any(RIGHT) ? 1 : 0) - (any(LEFT) ? 1 : 0),
       reset: this.down.has(RESET),
+      engineMode: this.engineMode,
+      deploy: any(DEPLOY),
     };
   }
 
   private handleAction(code: string): void {
     let action: KeyboardAction | undefined;
-    if (code === DEBUG) action = { type: 'toggleDebug' };
+    if (code === MODE) this.engineMode = nextEngineMode(this.engineMode);
+    else if (code === DEBUG) action = { type: 'toggleDebug' };
     else if (code === VFX) action = { type: 'cycleVfx' };
     else if (code === MUTE) action = { type: 'mute' };
     else if (code === LABELS) action = { type: 'cycleLabels' };

@@ -1,0 +1,9 @@
+{
+  "_comment": "Engine modes + battery deploy (POLISH card). modes: each scales engine power and fuel burn (save trades pace for fuel, push the reverse). battery: charges from braking only (harvestShare of the braking power), never from the engine; holding deploy with throttle adds deployKW of power while there's charge, at most maxDeployPerLapKJ per lap (resets at the line). startPct = charge at the start of a session. Keys: E cycles the mode, hold Shift (either) or / to deploy.",
+  "modes": {
+    "save": { "power": 0.96, "fuel": 0.85 },
+    "standard": { "power": 1, "fuel": 1 },
+    "push": { "power": 1.03, "fuel": 1.12 }
+  },
+  "battery": { "capacityKJ": 400, "harvestShare": 0.08, "deployKW": 60, "maxDeployPerLapKJ": 300, "startPct": 1 }
+}

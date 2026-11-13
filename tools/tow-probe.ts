@@ -2,8 +2,8 @@
 // Usage: npm run tow-probe [-- --tow 0.45 --dirty 0.1 --eager 1]
 //  1. TOW: two identical cars flat out down the main straight, the follower 12 m back, vs the same
 //     car alone: the follower's speed gain from the tow (and how the gap closes).
-//  2. PASS: two identical AI cars from a rolling start at the start of the main straight, follower 6-10 m back:
-//     is it past by the end of the turn after the straight? With the tow vs without.
+//  2. PASS: two identical AI cars from a rolling start at the start of the main straight, follower 7-11 m back:
+//     is it past by the end of the turn after the straight? Tow + battery deploy, tow only, neither.
 //  3. AI USE: a 10-car race, share of racing time AI cars spend in a tow, overtakes, tow on vs off.
 import aiJson from '../config/ai.json' with { type: 'json' };
 import { aiInputSource, buildRacingLine, createRaceWorld, createWorld, step, type AiConfig, type CarBuild, type SimContext, type WorldState } from '../src/sim/index.ts';
@@ -35,11 +35,11 @@ function rolling(ctx: SimContext, gap: number, v: number, lead = 0): WorldState 
   return { ...w, cars: [place(w.cars[0]!, lead), place(w.cars[1]!, lead + gap)] };
 }
 
-// 1. Speed gain.
-for (const [name, ctx] of [['tow on ', base], ['tow off', noTow(base)]] as const) {
+// 1. Speed gain. (+ deploy: the follower also holds battery deploy, Engine modes card.)
+for (const [name, ctx, dep] of [['tow on ', base, false], ['tow off', noTow(base), false], ['tow + deploy', base, true]] as const) {
   let w = rolling(ctx, 12, 30, 50);
   let maxTow = 0;
-  for (let t = 0; t < 60 * 2; t++) { w = step(w, [{ throttle: 1, brake: 0, steer: 0 }, { throttle: 1, brake: 0, steer: 0 }], ctx); maxTow = Math.max(maxTow, w.cars[1]!.tow); }
+  for (let t = 0; t < 60 * 2; t++) { w = step(w, [{ throttle: 1, brake: 0, steer: 0 }, { throttle: 1, brake: 0, steer: 0, deploy: dep }], ctx); maxTow = Math.max(maxTow, w.cars[1]!.tow); }
   const [a, b] = w.cars as [WorldState['cars'][number], WorldState['cars'][number]];
   const gap = (a.x - b.x) * f.x + (a.y - b.y) * f.y;
   console.log(`TOW  ${name}: after 2 s flat out, leader ${(a.speed * 3.6).toFixed(1)} kph, follower ${(b.speed * 3.6).toFixed(1)} kph (+${((b.speed - a.speed) * 3.6).toFixed(1)}), gap 12.0 -> ${gap.toFixed(1)} m, peak tow ${(maxTow * 100).toFixed(0)}% less drag`);
@@ -54,13 +54,19 @@ const t1End = (() => {
   for (let k = 0; k < line.n && turned < Math.PI / 2; k++, q = (q + 1) % line.n) turned += Math.abs(line.k[q]!) * 2;
   return { x: line.x[q]!, y: line.y[q]! };
 })();
-for (const [name, ctx] of [['tow on ', base], ['tow off', noTow(base)]] as const) {
+// Battery deploy (Engine modes card) on top of the tow, vs the tow alone (no deploy power).
+const noDeploy = (ctx: SimContext): SimContext => ({ ...ctx, ers: { ...ctx.ers, battery: { ...ctx.ers.battery, deployKW: 0 } } });
+const kw = Number(process.argv[process.argv.indexOf('--deploy') + 1]) || base.ers.battery.deployKW; // --deploy 120: try another deploy power
+const withKw = (ctx: SimContext): SimContext => ({ ...ctx, ers: { ...ctx.ers, battery: { ...ctx.ers.battery, deployKW: kw } } });
+for (const [name, ctx, force] of [['tow + AI deploy    ', withKw(base), false], [`tow + flat-out ${String(kw).padStart(3)} kW`, withKw(base), true], ['tow only           ', noDeploy(base), false], ['neither            ', noDeploy(noTow(base)), false]] as const) {
   let passes = 0, runs = 0;
   for (const gap of [7, 9, 11]) for (const v of [28, 33]) {
     let w = rolling(ctx, gap, v, 70); // out of the previous corner: the whole straight ahead
     const ai = [0, 1].map((i) => aiInputSource(i, () => ({ world: w, ctx, line }), () => ({ ...preset, mistakesPerMin: 0 }), () => cfg, 7 + i));
     for (let t = 0; t < 60 * 12; t++) {
-      w = step(w, ai.map((d) => d.read(w.tick)), ctx);
+      const inputs = ai.map((d) => d.read(w.tick));
+      if (force) inputs[1] = { ...inputs[1]!, deploy: true }; // the follower deploys the whole way (lap budget allowing)
+      w = step(w, inputs, ctx);
       const dist = (c: WorldState['cars'][number]) => Math.hypot(c.x - t1End.x, c.y - t1End.y);
       if (dist(w.cars[0]!) < 6 || dist(w.cars[1]!) < 6) { if (dist(w.cars[1]!) < dist(w.cars[0]!)) passes++; break; }
     }

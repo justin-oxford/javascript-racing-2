@@ -1,3 +1,4 @@
+import { deployPowerW, newErs, updateErs, type EngineMode, type ErsConfig } from './ers';
 import { applyHits, damageDrag, damageGrip, damagePull, isDamaged, NO_DAMAGE, repairStep, type DamageConfig } from './damage';
 import { applyResets, newRejoin, trackRejoin } from './rejoin';
 import { bodyOffsetM, buildStats, type CarCatalog, type PhysicsConfig } from './car-config';
@@ -37,6 +38,8 @@ export interface SimContext {
   assists: AssistsConfig;
   /** config/damage.json: car damage, used when the session's Damage setting is on (live-tunable). */
   damage: DamageConfig;
+  /** config/ers.json: engine modes and battery deploy (live-tunable). */
+  ers: ErsConfig;
   cache: PhysicsCache;
 }
 
@@ -174,6 +177,7 @@ export function createCar(posePx: Pose, build: CarBuild, ctx: SimContext): CarSt
     timing: newTiming(),
     rejoin: newRejoin(),
     damage: { ...NO_DAMAGE },
+    ers: newErs(ctx.ers),
   };
 }
 
@@ -297,7 +301,7 @@ interface WheelForces {
 }
 
 /** Work out and apply this tick's forces for one car. Returns per-wheel numbers for wear/telemetry. */
-function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimContext, dt: number, wake: { tow: number; dirtyAir: number }, realisticDamage: boolean): Wheels<WheelForces> {
+function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimContext, dt: number, wake: { tow: number; dirtyAir: number }, realisticDamage: boolean, power: { mode: EngineMode; deployW: number }): Wheels<WheelForces> {
   const cfg = ctx.physics;
   // Damage effects (Realistic only): grip per wheel, steering pull, drag.
   const dmg = realisticDamage ? car.damage : NO_DAMAGE;
@@ -328,9 +332,15 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
   const reversing = controls.brake > 0 && controls.throttle === 0 && vFwd < 0.5;
   let drive = 0;
   if (car.fuelKg > 0 && controls.throttle > 0) {
-    const powerN = (cfg.engine.powerKW * 1000 * stats.engine) / Math.max(Math.abs(vFwd), 1);
+    // Engine mode scales the engine's power (ers.ts).
+    const mode = ctx.ers.modes[power.mode].power;
+    const powerN = (cfg.engine.powerKW * 1000 * stats.engine * mode) / Math.max(Math.abs(vFwd), 1);
     const fade = clamp((vLimit - vFwd) / (0.02 * vLimit + 0.5), 0, 1); // soft limiter at top speed / pit limit
-    drive = controls.throttle * Math.min(cfg.engine.maxDriveForceN * stats.engine, powerN) * fade;
+    // Battery deploy is a second motor: its drive adds on top of the engine's, not under the engine's
+    // force cap (where it'd be lost at anything below ~190 kph). Wheelspin is still the tyre's problem
+    // (traction assist below). Already scaled by throttle (deployPowerW).
+    const deployN = power.deployW / Math.max(Math.abs(vFwd), 5);
+    drive = (controls.throttle * Math.min(cfg.engine.maxDriveForceN * stats.engine * mode, powerN) + deployN) * fade;
   } else if (reversing && car.fuelKg > 0) {
     const vRev = cfg.engine.maxReverseKph * KPH;
     drive = -controls.brake * cfg.engine.reverseForceN * clamp((vRev + vFwd) / 0.5, 0, 1);
@@ -434,7 +444,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
 }
 
 /** Tyre wear + fuel for one tick (SYS - Car model rules), and pit service. */
-function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimContext, dt: number, ownBox: number, fillToKg = ctx.physics.fuel.tankKg): Pick<CarState, 'fuelKg' | 'wheels' | 'servicing' | 'damage'> {
+function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimContext, dt: number, ownBox: number, fillToKg = ctx.physics.fuel.tankKg, power: { mode: EngineMode; deployW: number } = { mode: car.ers.mode, deployW: 0 }): Pick<CarState, 'fuelKg' | 'wheels' | 'servicing' | 'damage' | 'ers'> {
   const cfg = ctx.physics;
   const kph = Math.abs(car.speed) / KPH;
   const v4 = (kph / cfg.wear.refSpeedKph) ** 4;
@@ -467,11 +477,14 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
     };
   }) as Wheels<WheelState>;
 
-  let fuelKg = Math.max(0, car.fuelKg - throttle * cfg.fuel.burnKgPerSec * dt);
+  let fuelKg = Math.max(0, car.fuelKg - throttle * cfg.fuel.burnKgPerSec * ctx.ers.modes[power.mode].fuel * dt);
+  // Battery: spend what was deployed, harvest a share of the braking power (each wheel's brake force x speed).
+  const brakePowerW = forces.reduce((a, f) => a + Math.min(f.brakeUse, 1) * f.gripN, 0) * Math.abs(car.speed);
+  const ers = updateErs(car.ers, power.mode, power.deployW, brakePowerW, car.timing.laps, dt, ctx.ers);
   if (service) fuelKg = Math.max(fuelKg, Math.min(fillToKg, cfg.fuel.tankKg, fuelKg + cfg.fuel.refuelKgPerSec * dt));
   // Repairs while stopped in the box (no pit board yet: always; it makes the stop longer).
   const damage = service && isDamaged(car.damage, 0) ? repairStep(car.damage, dt, ctx.damage) : car.damage;
-  return { fuelKg, wheels, servicing: service, damage };
+  return { fuelKg, wheels, servicing: service, damage, ers };
 }
 
 /**
@@ -493,7 +506,14 @@ export function step(world0: WorldState, inputs: readonly CarInput[], ctx: SimCo
   const controls = world.cars.map((car, i) => rampControls(car.controls, raceHeld || resets.held[i] || qualiHolds(world.quali, i, world.tick) ? NEUTRAL_INPUT : (inputs[i] ?? NEUTRAL_INPUT), ctx.physics, dt));
   const wake = wakeEffects(world.cars, ctx.physics.car.widthM, ctx.slipstream);
   const damageMode = world.settings?.damage ?? 'off';
-  const forces = world.cars.map((car, i) => applyCarForces(i, car, controls[i]!, ctx, dt, { tow: wake.tow[i]!, dirtyAir: wake.dirtyAir[i]! }, damageMode === 'realistic'));
+  // Engine mode (kept until the driver asks for another) and battery deploy, per car.
+  const power = world.cars.map((car, i) => {
+    const held = raceHeld || resets.held[i] || qualiHolds(world.quali, i, world.tick);
+    const req = held ? undefined : inputs[i];
+    const mode = req?.engineMode && ctx.ers.modes[req.engineMode] ? req.engineMode : car.ers.mode;
+    return { mode, deployW: car.fuelKg > 0 && !car.inPitLane ? deployPowerW(car.ers, !!req?.deploy, controls[i]!.throttle, ctx.ers) : 0 };
+  });
+  const forces = world.cars.map((car, i) => applyCarForces(i, car, controls[i]!, ctx, dt, { tow: wake.tow[i]!, dirtyAir: wake.dirtyAir[i]! }, damageMode === 'realistic', power[i]!));
   stepWorld(ctx.cache, dt, ctx.physics);
   const bodies = readStateFromWorld(ctx.cache);
 
@@ -529,7 +549,7 @@ export function step(world0: WorldState, inputs: readonly CarInput[], ctx: SimCo
       const hits = ctx.cache.hits.filter((h) => h.car === i);
       if (hits.length) moved.damage = applyHits(car.damage, b, hits, ctx.physics.car.lengthM, bodyOffsetM(ctx.physics), ctx.damage);
     }
-    const next = { ...moved, ...updateConsumables(moved, forces[i]!, ctx, dt, world.race?.cars[i]?.box ?? -1, world.quali ? qualiFuelKg(ctx) : undefined), timing };
+    const next = { ...moved, ...updateConsumables(moved, forces[i]!, ctx, dt, world.race?.cars[i]?.box ?? -1, world.quali ? qualiFuelKg(ctx) : undefined, power[i]), timing };
     // Out of bounds should be unreachable behind walls. If a wheel gets there, the mask has a gap.
     if (surfaces.includes(ctx.track.index.outOfBounds)) {
       const ppm = ctx.track.json.pxPerMeter;

@@ -11,6 +11,7 @@ import {
   slipstream,
   assists,
   damage,
+  ers,
   getTrackJsonStub,
   loadBackground,
   loadMask,
@@ -125,6 +126,8 @@ async function main(): Promise<void> {
     const teams = ctx.catalog.teams.filter((t) => t.id !== me.team);
     return Array.from({ length: count }, (_, k) => withPerf({ ...physics.defaultCar, spec: me.spec, team: teams[k % teams.length]!.id }));
   };
+  /** Player's fuel use per lap (HUD fuel margin): fuel and lap count at the last line crossing. */
+  const fuelLap = { laps: -1, kg: 0, perLap: 0 };
   /** The race being run (for Restart), undefined in practice. */
   let raceSetup: { laps: number; grid: 'random' | 'pole' | 'back'; order?: number[] | undefined } | undefined;
   /** The race weekend in progress (practice -> qualifying -> race), undefined otherwise. */
@@ -331,6 +334,7 @@ async function main(): Promise<void> {
         slipstream,
         assists,
         damage,
+        ers,
         volumes: { values: audio.volumes, set: (bus, v) => audio.setVolume(bus, v) },
         onBuildChange: (b) => {
           const build = withPerf(b);
@@ -538,7 +542,13 @@ async function main(): Promise<void> {
       if (me) {
         hud.fuelTankKg = physics.fuel.tankKg;
         const race = curr.race;
-        hud.update(me, (curr.tick + alpha) * TICK_DT, session, !!json.timingLines.startFinish, stoppedInBox(), race ? { laps: race.laps, box: (race.cars[0]?.box ?? -1) + 1 } : undefined, { holdFrac: me.rejoin.holdTicks / Math.max(1, ctx.race.reset.holdSec * TICK_HZ), penaltySec: me.rejoin.penaltyTicks / TICK_HZ });
+        // Fuel per lap, measured on the player's own laps (a refuel in between doesn't count).
+        if (me.timing.laps !== fuelLap.laps) {
+          if (fuelLap.kg > me.fuelKg && me.timing.laps === fuelLap.laps + 1) fuelLap.perLap = fuelLap.kg - me.fuelKg;
+          fuelLap.laps = me.timing.laps; fuelLap.kg = me.fuelKg;
+        }
+        const fuelMargin = race && fuelLap.perLap > 0 ? me.fuelKg / fuelLap.perLap - Math.max(0, race.laps - me.timing.laps) : undefined;
+        hud.update(me, (curr.tick + alpha) * TICK_DT, session, !!json.timingLines.startFinish, stoppedInBox(), race ? { laps: race.laps, box: (race.cars[0]?.box ?? -1) + 1 } : undefined, { holdFrac: me.rejoin.holdTicks / Math.max(1, ctx.race.reset.holdSec * TICK_HZ), penaltySec: me.rejoin.penaltyTicks / TICK_HZ }, { batteryFrac: me.ers.batteryKJ / Math.max(1, ctx.ers.battery.capacityKJ), fuelMargin });
         raceHud.weekend = weekend;
         raceHud.update(curr, race?.sharedBoxes ? `${ctx.track.boxes.length} pit boxes for ${curr.cars.length} cars: shared` : '');
       }

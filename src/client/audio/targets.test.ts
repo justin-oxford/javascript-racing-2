@@ -1,4 +1,5 @@
 // @vitest-environment node
+import ersJson from '../../../config/ers.json';
 import damageJson from '../../../config/damage.json';
 import assistsJson from '../../../tools/fixtures/assists-baseline.json';
 import slipstreamJson from '../../../tools/fixtures/slipstream-baseline.json';
@@ -12,7 +13,7 @@ import rules from '../../../config/rules.json';
 import vfx from '../../../tools/fixtures/vfx-baseline.json';
 import wallTracing from '../../../config/wall-tracing.json';
 import { catalog, surfaces } from '../../../tools/load-track-node';
-import { buildStats, createPhysicsCache, createSimTrack, createWorld, step, traceWalls, type CarInput, type PhysicsConfig, type SimContext, type TrackJson, type WorldState } from '../../sim';
+import { buildStats, createPhysicsCache, createSimTrack, createWorld, step, traceWalls, type CarInput, type ErsConfig, type PhysicsConfig, type SimContext, type TrackJson, type WorldState } from '../../sim';
 import { soundTargets, topSpeedKph, virtualRpm, type SoundTargets } from './targets';
 
 const PPM = 10;
@@ -25,7 +26,7 @@ function arena(wM: number, hM: number, spawn: { x: number; y: number; heading: n
       data[y * w + x] = idx(x < PPM || y < PPM || x >= w - PPM || y >= h - PPM ? 'wall' : (paint?.(x / PPM, y / PPM) ?? 'asphalt'));
   const json: TrackJson = { id: 't', name: 't', pxPerMeter: PPM, files: { mask: 'm' }, timingLines: {}, racingLine: [], grid: [], spawn: { x: spawn.x * PPM, y: spawn.y * PPM, heading: spawn.heading } };
   const track = createSimTrack(json, { width: w, height: h, data }, surfaces);
-  return { track, walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing), physics: structuredClone(physicsJson) as PhysicsConfig, catalog, rules, contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, cache: createPhysicsCache() };
+  return { track, walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing), physics: structuredClone(physicsJson) as PhysicsConfig, catalog, rules, contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, cache: createPhysicsCache() };
 }
 function run(ctx: SimContext, ticks: number, input: (w: WorldState) => CarInput, start = createWorld(ctx)) {
   let world = start;

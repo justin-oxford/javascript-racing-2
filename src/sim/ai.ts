@@ -316,6 +316,11 @@ export interface AiState {
   /** Reset fallback: ticks spent crawling or stuck (reverse-outs not working); resets it has done. */
   troubleTicks: number;
   resets: number;
+  /** Engine modes + deploy (ers.ts): saving fuel to reach the flag without a stop (sticky for the race);
+   *  ticks spent in each mode and deploying (ai-run reports them). */
+  saving: boolean;
+  modeTicks: { save: number; standard: number; push: number };
+  deployTicks: number;
   /** Current sideways offset from the line, metres (+ = right). */
   offset: number;
   /** A mistake in progress: kind and ticks left. */
@@ -344,7 +349,7 @@ export interface AiState {
 export function newAiState(seed: number): AiState {
   return {
     mode: 'race', near: -1, lastErr: 0, stuckTicks: 0, recoverTicks: 0, offset: 0, mistake: undefined, rng: seed >>> 0 || 1,
-    troubleTicks: 0, resets: 0,
+    troubleTicks: 0, resets: 0, saving: false, modeTicks: { save: 0, standard: 0, push: 0 }, deployTicks: 0,
     pitWanted: false, serviced: false, fuelAtLap: -1, fuelPerLap: 0, stuckEvents: 0, mistakes: 0, pitStops: 0, attack: false, launchTick: -1, trust: 1, lastAllowed: 0,
   };
 }
@@ -451,10 +456,16 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     // Damage (Realistic): pit for repair once any zone is past pits.repairDamage.
     const broken = world.settings?.damage === 'realistic' && Math.max(car.damage.frontWing, car.damage.rearWing, car.damage.left, car.damage.right) > (pits.repairDamage ?? 0.3);
     let want = car.fuelKg < need || car.wheels.some((wh) => wh.wear < pits.minWear) || broken;
-    // Racing: no stop it doesn't need to reach the flag (enough fuel, tyres not near the cliff).
-    if (want && race && st.fuelPerLap > 0) {
+    // Racing: no stop it doesn't need to reach the flag (enough fuel, tyres not near the cliff). Fuel per lap
+    // as if in STANDARD (what it measured, undone by the mode it ran); if it's a little short, SAVE (ers.ts)
+    // can make up the difference instead of a stop.
+    if (race && st.fuelPerLap > 0) {
       const lapsLeft = race.laps - car.timing.laps;
-      if (!broken && car.fuelKg > st.fuelPerLap * (lapsLeft + 0.3) && car.wheels.every((wh) => wh.wear > 0.3)) want = false;
+      const perLapStd = st.fuelPerLap / (ctx.ers.modes[car.ers.mode]?.fuel ?? 1);
+      const needStd = perLapStd * (lapsLeft + 0.3), needSave = needStd * ctx.ers.modes.save.fuel;
+      if (car.fuelKg < needStd && car.fuelKg >= needSave) st.saving = true;
+      const enough = car.fuelKg > (st.saving ? needSave : needStd);
+      if (want && !broken && enough && car.wheels.every((wh) => wh.wear > 0.3)) want = false;
     }
     // Qualifying after the flag: no point stopping, the session is over at the line.
     if (world.quali && world.quali.phase !== 'running') want = false;
@@ -850,7 +861,19 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     }
 
   }
-  return { input: { throttle, brake, steer }, state: st };
+  // ENGINE MODE + DEPLOY (ers.ts; the full racecraft card will refine this): SAVE when it's saving fuel to
+  // reach the flag; PUSH and deploy down a straight while going for a pass on the car ahead.
+  const racing = !race || race.phase === 'racing';
+  // Deploy only where it helps a pass and doesn't just run it into the gearbox: closing from 12 m up to the
+  // tow range. (Deploying once alongside too raised ai-run contacts ~20% over 4 seeds; closing-only ~5%.)
+  const deployTarget = others.some((o) => !!o && ((o.ahead >= 12 && o.ahead <= towCfg.tow.maxRangeM && Math.abs(o.side) < 3.5)));
+  const deploy = racing && !pit && deployTarget && straightAhead && !brakingSoon && throttle > 0.9; // not into a braking zone
+  // PUSH only while going for it (deploying): pushing all the time it's close behind just runs it into
+  // the car ahead (ai-run: contacts 42 -> 57).
+  const engineMode = st.saving ? 'save' : deploy ? 'push' : 'standard';
+  st.modeTicks = { ...st.modeTicks, [engineMode]: st.modeTicks[engineMode] + 1 };
+  if (deploy && car.ers.deploying) st.deployTicks++;
+  return { input: { throttle, brake, steer, engineMode, deploy }, state: st };
 }
 
 /** Wrap aiDrive as an InputSource for car `i` (keyboard-compatible). */

@@ -1,3 +1,4 @@
+import type { EngineMode, ErsState } from './ers';
 import type { DamageMode, DamageState } from './damage';
 import type { RejoinState } from './rejoin';
 // All sim state is plain, JSON-serializable data. No classes, no hidden state.
@@ -17,6 +18,10 @@ export interface CarInput {
   steer: number;
   /** Reset to track (POLISH card): held ~1 s puts the car back on the racing line. Absent = not pressed. */
   reset?: boolean;
+  /** Engine mode the driver wants (absent = keep the current one). */
+  engineMode?: EngineMode;
+  /** Battery deploy held (push-to-pass). */
+  deploy?: boolean;
 }
 
 /**
@@ -113,6 +118,8 @@ export interface CarState extends Pose {
   rejoin: RejoinState;
   /** Damage by zone (damage.ts); stays zero with the Damage setting off. */
   damage: DamageState;
+  /** Engine mode and battery (ers.ts). */
+  ers: ErsState;
 }
 
 /** Things that happened this tick, for the client to react to (log, sound, HUD). */

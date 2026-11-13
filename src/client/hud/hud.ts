@@ -107,6 +107,11 @@ export class Hud {
         <div class="lap-speed">Lap:<b data-id="lap">0</b>Speed:<b data-id="speed">--</b>kph</div>
         <div class="current">Time:<b data-id="time">---</b></div>
         <div class="tow" data-id="tow" title="Slipstream: less drag behind another car">TOW</div>
+        <div class="ers" title="Engine mode (E) and battery: hold Shift or / to deploy">
+          <span class="mode" data-id="ersMode">STD</span>
+          <span class="batt"><span data-id="battFill"></span></span>
+          <span class="fuel-delta" data-id="fuelDelta" title="Laps of fuel left minus laps to go"></span>
+        </div>
         <table class="sectors">
           <tr class="idents">${tiles.map((t) => `<td>${t}</td>`).join('')}</tr>
           <tr>${tiles.map((_, i) => `<td><div class="tile${i === 3 ? ' lap' : ''}" data-id="tile${i}">---</div></td>`).join('')}</tr>
@@ -288,7 +293,15 @@ export class Hud {
   }
 
   /** `race`: race laps and the car's own box (1-based) while racing; undefined in practice. */
-  update(car: CarState, simTime: number, session: Session, hasLines: boolean, inBoxStopped: boolean, race?: { laps: number; box: number }, reset?: { holdFrac: number; penaltySec: number }): void {
+  update(car: CarState, simTime: number, session: Session, hasLines: boolean, inBoxStopped: boolean, race?: { laps: number; box: number }, reset?: { holdFrac: number; penaltySec: number }, power?: { batteryFrac: number; fuelMargin?: number | undefined }): void {
+    // Engine mode, battery (glows while deploying), fuel margin in a race (green = enough, red = save or stop).
+    this.el.ersMode!.textContent = { save: 'SAVE', standard: 'STD', push: 'PUSH' }[car.ers.mode];
+    this.el.ersMode!.className = `mode ${car.ers.mode}`;
+    this.el.battFill!.style.width = `${Math.round(Math.max(0, Math.min(1, power?.batteryFrac ?? 0)) * 100)}%`;
+    this.el.battFill!.parentElement!.classList.toggle('on', car.ers.deploying);
+    const fm = power?.fuelMargin, fd = this.el.fuelDelta!;
+    fd.textContent = fm === undefined ? '' : `FUEL ${fm >= 0 ? '+' : ''}${fm.toFixed(1)}`;
+    fd.className = `fuel-delta ${fm === undefined ? '' : fm >= 0 ? 'ok' : 'short'}`;
     // Damage diagram: each zone green -> amber -> red.
     for (const z of this.el.damageMini!.querySelectorAll<SVGRectElement>('[data-zone]')) {
       const d = Math.max(0, Math.min(1, car.damage[z.dataset.zone as keyof CarState['damage']]));

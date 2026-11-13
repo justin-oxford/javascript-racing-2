@@ -164,3 +164,14 @@
 .damage-mini { display: none; position: absolute; left: calc(var(--u) * 10); bottom: calc(var(--u) * 10); width: calc(var(--u) * 34); height: calc(var(--u) * 60);
   background: rgba(10, 10, 14, 0.6); border-radius: calc(var(--u) * 4); padding: calc(var(--u) * 4); pointer-events: none; z-index: 1; }
 .damage-mini .body { fill: rgba(255, 255, 255, 0.15); }
+
+/* Engine mode + battery (Engine modes card), in the top bar after TOW. */
+.hud-bar .ers { flex: none; display: flex; align-items: center; gap: calc(var(--u) * 5); font-family: "Formula1 Bold", system-ui, sans-serif; font-size: calc(var(--u) * 9); }
+.hud-bar .ers .mode { padding: calc(var(--u) * 2) calc(var(--u) * 5); border-radius: calc(var(--u) * 3); background: rgba(255, 255, 255, 0.15); min-width: calc(var(--u) * 28); text-align: center; }
+.hud-bar .ers .mode.save { background: rgba(70, 180, 90, 0.85); }
+.hud-bar .ers .mode.push { background: rgba(230, 90, 40, 0.9); }
+.hud-bar .ers .batt { width: calc(var(--u) * 36); height: calc(var(--u) * 7); background: rgba(255, 255, 255, 0.15); border-radius: calc(var(--u) * 2); overflow: hidden; }
+.hud-bar .ers .batt span { display: block; height: 100%; background: #e8d23a; }
+.hud-bar .ers .batt.on span { background: #fff36b; box-shadow: 0 0 calc(var(--u) * 6) #fff36b; }
+.hud-bar .ers .fuel-delta.ok { color: #6fdc7c; }
+.hud-bar .ers .fuel-delta.short { color: #ff6a5c; }

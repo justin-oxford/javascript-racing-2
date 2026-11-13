@@ -2,7 +2,7 @@
 // tick, so changes apply to the running car immediately. Save writes them back to /config.
 // Tuning is Justin's job; this file's job is to be a good instrument.
 import GUI, { type Controller } from 'lil-gui';
-import type { AiConfig, AssistsConfig, CarBuild, DamageConfig, ContactConfig, PhysicsConfig, RaceConfig, Rules, SlipstreamConfig, SurfaceDef, WorldState } from '../../sim';
+import type { AiConfig, AssistsConfig, CarBuild, DamageConfig, ErsConfig, ContactConfig, PhysicsConfig, RaceConfig, Rules, SlipstreamConfig, SurfaceDef, WorldState } from '../../sim';
 import type { VfxConfig } from '../vfx/triggers';
 import type { VfxQuality } from '../vfx/vfx';
 import type { AudioConfig } from '../audio/targets';
@@ -83,6 +83,13 @@ const RANGES: Record<string, [number, number, number]> = {
   'ai.recovery.backwardsDeg': [60, 180, 5],
   'contact.carFriction': [0, 1.5, 0.01],
   'contact.carRestitution': [0, 1, 0.01],
+  'ers.mode.power': [0.8, 1.2, 0.005],
+  'ers.mode.fuel': [0.5, 1.5, 0.01],
+  'ers.battery.capacityKJ': [0, 2000, 10],
+  'ers.battery.harvestShare': [0, 0.5, 0.005],
+  'ers.battery.deployKW': [0, 300, 5],
+  'ers.battery.maxDeployPerLapKJ': [0, 2000, 10],
+  'ers.battery.startPct': [0, 1, 0.05],
   'damage.thresholdMps': [0, 30, 0.5],
   'damage.perMps': [0, 0.3, 0.005],
   'damage.strength': [0, 3, 0.05],
@@ -159,11 +166,13 @@ export interface TuningTargets {
   assists: AssistsConfig;
   /** config/damage.json, live: car damage. */
   damage: DamageConfig;
+  /** config/ers.json, live: engine modes and battery deploy. */
+  ers: ErsConfig;
   /** Called when the team/spec/setup changes, to rebuild the player's car. */
   onBuildChange(build: CarBuild): void;
 }
 
-async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai' | 'contact' | 'race' | 'slipstream' | 'assists' | 'damage', value: unknown): Promise<string> {
+async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai' | 'contact' | 'race' | 'slipstream' | 'assists' | 'damage' | 'ers', value: unknown): Promise<string> {
   const res = await fetch(`/__tuning/save/${name}`, { method: 'POST', headers: { 'x-tuning-panel': '1' }, body: formatTrackJson(value) });
   return res.ok ? `config/${name}.json` : `${name}: ${await res.text()}`;
 }
@@ -275,6 +284,16 @@ export class TuningPanel {
     this.slider(as, this.t.assists.abs, 'cornerShare', 'assists.abs.cornerShare', 'allows for cornering (0 none - 1 full)');
     as.close();
 
+    const ersF = gui.addFolder('Engine modes + battery (E, hold Shift)');
+    for (const m of ['save', 'standard', 'push'] as const) {
+      const sub = ersF.addFolder(`mode ${m}`);
+      this.slider(sub, this.t.ers.modes[m], 'power', 'ers.mode.power', 'power x');
+      this.slider(sub, this.t.ers.modes[m], 'fuel', 'ers.mode.fuel', 'fuel burn x');
+      sub.close();
+    }
+    for (const key of Object.keys(this.t.ers.battery)) this.slider(ersF, this.t.ers.battery as unknown as Record<string, number>, key, `ers.battery.${key}`);
+    ersF.close();
+
     const dmg = gui.addFolder('Car damage (when the menu setting is on)');
     for (const key of ['thresholdMps', 'perMps', 'strength', 'wallMult', 'barrierMult', 'carMult', 'endZone'] as const) this.slider(dmg, this.t.damage, key, `damage.${key}`);
     for (const section of ['effects', 'repair'] as const) {
@@ -318,9 +337,9 @@ export class TuningPanel {
       status.msg = m;
       statusCtl.updateDisplay();
     };
-    const all = () => ({ physics, surfaces: this.t.surfacesConfig, rules, vfx: this.t.vfx, audio: this.t.audio, ai: this.t.ai, contact: this.t.contact, race: this.t.race, slipstream: this.t.slipstream, assists: this.t.assists, damage: this.t.damage });
+    const all = () => ({ physics, surfaces: this.t.surfacesConfig, rules, vfx: this.t.vfx, audio: this.t.audio, ai: this.t.ai, contact: this.t.contact, race: this.t.race, slipstream: this.t.slipstream, assists: this.t.assists, damage: this.t.damage, ers: this.t.ers });
     io.add({
-      save: async () => !import.meta.env.DEV ? show('Save only works on the local dev server: use Copy all settings') : show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai), saveConfig('contact', this.t.contact), saveConfig('race', this.t.race), saveConfig('slipstream', this.t.slipstream), saveConfig('assists', this.t.assists), saveConfig('damage', this.t.damage)])).join(', ')),
+      save: async () => !import.meta.env.DEV ? show('Save only works on the local dev server: use Copy all settings') : show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai), saveConfig('contact', this.t.contact), saveConfig('race', this.t.race), saveConfig('slipstream', this.t.slipstream), saveConfig('assists', this.t.assists), saveConfig('damage', this.t.damage), saveConfig('ers', this.t.ers)])).join(', ')),
     }, 'save').name('Save to /config');
     io.add({ copy: () => void navigator.clipboard.writeText(formatTrackJson(physics)).then(() => show('physics.json copied')) }, 'copy').name('Copy physics JSON');
     // Every config file the panel edits, keyed by file name: paste it to Claude to write them to /config.
