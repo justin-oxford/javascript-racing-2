@@ -16,3 +16,4 @@ export * from './damage';
 export * from './ers';
 export * from './evolution';
 export * from './racecraft';
+export * from './drivers';

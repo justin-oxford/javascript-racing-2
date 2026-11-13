@@ -1,4 +1,4 @@
-import { offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, driverSkill, skilledPreset, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -28,13 +28,14 @@ import {
 } from './track-loader';
 import aiJson from '../../config/ai.json';
 import aiSetups from '../../config/ai-setups.json';
+import driversJson from '../../config/drivers.json';
 import audioConfig from '../../config/audio.json';
 import hudConfig from '../../config/hud.json';
 import { Hud, SETUP_LABELS } from './hud/hud';
 import { BalanceTracker } from './hud/balance';
 import { RaceHud } from './hud/race-hud';
 import { drawCarLabels, LABEL_MODES, nextLabelMode, type LabelMode } from './hud/car-labels';
-import { player, sessionOrder, setPlayerIdentity, teamCode } from './hud/running-order';
+import { carIdentity, sessionOrder, setCarDrivers, setPlayerIdentity } from './hud/running-order';
 import { MainMenu, type RecordRow } from './menu/main-menu';
 import { DEFAULT_SETTINGS, nameCode, pbPrefix, ProfileStore, type Profile, type ProfileSettings } from './menu/profile';
 import { Liveries } from './livery';
@@ -101,9 +102,11 @@ async function main(): Promise<void> {
   // Car damage setting (Car damage card), remembered in this browser. Off by default (Justin).
   let damageMode: DamageMode = profile.settings.damage;
   const settings = (): SessionSettings => ({ damage: damageMode });
-  // AI driver skill: seeded once per page load, so the same drivers carry through a whole race weekend.
+  // AI drivers (AI driver roster card): the roster seeded once per page load, so the same drivers carry
+  // through a whole race weekend. Car k + 1 is driven by roster[k].
   const driverSeed = crypto.getRandomValues(new Uint32Array(1))[0]!;
-  const skillOn = (): boolean => (perfMode === 'equal' ? aiCfg.skill?.inEqual : aiCfg.skill?.inTeam) ?? false;
+  const roster = (driversJson as { drivers: DriverDef[] }).drivers;
+  const lineup = assignDrivers(roster, 19, driverSeed);
   const vfx = new Vfx(mask.track.mask.width, mask.track.mask.height, vfxConfig);
   const evoLayer = new EvolutionLayer(evolution.visual ?? { rubberRgb: '22, 22, 24', rubberMaxAlpha: 0.55, marbleRgb: '38, 30, 24', marbleDots: 14 });
   vfx.wearRubber = !evolution.enabled;
@@ -155,7 +158,8 @@ async function main(): Promise<void> {
   /** Stopped in a box that services the player (any box in practice, its own in a race). */
   const stoppedInBox = (): boolean => !!curr.cars[0]?.servicing;
   const aiDrivers = (count: number): InputSource[] => Array.from({ length: count }, (_, k) =>
-    aiInputSource(k + 1, () => ({ world: curr, ctx, line: racingLine }), () => skilledPreset(aiCfg.presets[aiPreset] ?? aiCfg.presets[aiCfg.defaultPreset]!, skillOn() ? driverSkill(driverSeed, k + 1, aiCfg.skill?.spread ?? 0) : 0), () => aiCfg, 1000 + k));
+    aiInputSource(k + 1, () => ({ world: curr, ctx, line: racingLine }), () => driverPreset(aiCfg.presets[aiPreset] ?? aiCfg.presets[aiCfg.defaultPreset]!, lineup[k], aiCfg.skill?.spread ?? 0), () => aiCfg, 1000 + k));
+  setCarDrivers([undefined, ...lineup]);
   const aiBuilds = (me: CarBuild, count: number): CarBuild[] => {
     const teams = ctx.catalog.teams.filter((t) => t.id !== me.team);
     // The AI runs this track's searched setup (config/ai-setups.json, npm run setup-search), else neutral.
@@ -709,7 +713,7 @@ async function main(): Promise<void> {
           if (!editor) {
             const codes = curr.cars.map((car, i) => {
               const team = ctx.catalog.teams.find((t) => t.id === car.build.team);
-              return { code: i === 0 ? player.code : teamCode(team?.name ?? '???'), swatch: team?.colors.primary ?? '#888' };
+              return { code: carIdentity(i, team?.name).code, swatch: team?.colors.primary ?? '#888' };
             });
             drawCarLabels(c, prev, curr, alpha, labelMode, sessionOrder(curr, ctx.catalog), codes, json.pxPerMeter, lw, physics.car.lengthM * json.pxPerMeter * 0.55 + 3 * lw);
           }

@@ -24,35 +24,16 @@ export interface AiPreset {
   trafficConeM: number;
   overtakeOffsetM: number;
   throttleCap: number;
-}
-
-/**
- * A driver's skill (Equal performance card): seeded per driver, uniform in -1..1, then scaled by
- * `spread` (a fraction of pace). Same seed and car = same driver.
- */
-export function driverSkill(seed: number, car: number, spread: number): number {
-  let s = (seed ^ Math.imul(car + 1, 0x9e3779b1)) >>> 0;
-  for (let k = 0; k < 3; k++) [, s] = rand(s); // stir
-  const [r] = rand(s);
-  return (r * 2 - 1) * spread;
-}
-
-/** A difficulty preset adjusted by driver skill: faster corners, later braking, fewer mistakes when skill > 0. */
-export function skilledPreset(p: AiPreset, skill: number): AiPreset {
-  if (!skill) return p;
-  return {
-    ...p,
-    cornerMargin: Math.min(1, p.cornerMargin * (1 + skill)),
-    brakeMargin: Math.min(1, p.brakeMargin * (1 + skill)),
-    mistakesPerMin: Math.max(0, p.mistakesPerMin * (1 - skill * 10)),
-    noise: Math.max(0, p.noise * (1 - skill * 10)),
-  };
+  /** From the driver (drivers.ts), 0..1, 0.5 = average when absent: attacking/defending eagerness, traffic judgement, tyre care. */
+  aggression?: number;
+  racecraft?: number;
+  tyreCare?: number;
 }
 
 export interface AiConfig {
   defaultPreset: string;
-  /** Driver skill (Equal performance card): spread = +- fraction of pace between drivers; on in Equal mode by default (inEqual), off in Team stats (inTeam). */
-  skill?: { spread: number; inEqual: boolean; inTeam: boolean };
+  /** AI driver roster (drivers.ts): spread = how far a driver's PACE stat moves its margins (+- fraction at pace 0 / 100). */
+  skill?: { spread: number };
   presets: Record<string, AiPreset>;
   /** resetAfterSec: still in trouble (crawling, reversing out, stuck) this long -> reset to track, same as a player (race.json reset). */
   recovery: { stuckSec: number; reverseSec: number; backwardsDeg: number; resetAfterSec?: number };
@@ -879,7 +860,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // it let cars overshoot corners into walls; the brake cap below already keeps the fronts honest.)
   // Combined slip (ellipse): throttle is what eats the rears' sideways grip on exit, so cut it on either.
   const rearUse = Math.max(car.wheels[2].usage, car.wheels[3].usage);
-  if (rearUse > aids.tcSlip) throttle *= clamp(1 - (rearUse - aids.tcSlip) / aids.tcRange, 0, 1);
+  // Tyre care (driver stat): a careful driver lets the rears slip less (less wear, a touch slower out).
+  const tcSlip = aids.tcSlip * (1 - 0.06 * ((preset.tyreCare ?? 0.5) - 0.5) * 2);
+  if (rearUse > tcSlip) throttle *= clamp(1 - (rearUse - tcSlip) / aids.tcRange, 0, 1);
   // Facing well off the line at low speed (e.g. after a spin): don't floor it.
   if (Math.abs(err) > 1 && speed < 8) throttle = Math.min(throttle, 0.4);
   // Brake like a driver who knows the car: never press harder than the front tyres can use at this

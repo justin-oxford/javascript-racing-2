@@ -2,6 +2,7 @@
 // Car physics on small synthetic arenas (built here, not real tracks), so each behaviour is isolated.
 import evolutionJson from '../../config/evolution.json';
 import ersJson from '../../config/ers.json';
+import driversJson from '../../config/drivers.json';
 import damageJson from '../../config/damage.json';
 import assistsJson from '../../tools/fixtures/assists-baseline.json';
 import slipstreamJson from '../../tools/fixtures/slipstream-baseline.json';
@@ -19,8 +20,9 @@ import {
   NEUTRAL_SETUP,
   setupEffects,
   type CarSetup,
-  driverSkill,
-  skilledPreset,
+  assignDrivers,
+  driverPreset,
+  type DriverDef,
   createPhysicsCache,
   createSimTrack,
   createWorld,
@@ -92,19 +94,22 @@ describe('car stats (team x spec x setup)', () => {
     expect(buildStats({ ...build('motus'), equalise: 0 }, catalog)).toEqual(buildStats(build('motus'), catalog)); // team stats unchanged
   });
 
-  it('driver skill: seeded, within the spread, and it moves the preset the right way', () => {
-    const sk = Array.from({ length: 50 }, (_, i) => driverSkill(42, i, 0.02));
-    expect(sk).toEqual(Array.from({ length: 50 }, (_, i) => driverSkill(42, i, 0.02)));
-    expect(Math.max(...sk.map(Math.abs))).toBeLessThanOrEqual(0.02);
-    expect(new Set(sk).size).toBe(50);
-    expect(driverSkill(43, 1, 0.02)).not.toBe(driverSkill(42, 1, 0.02));
+  it('driver roster: seeded line-up, stats move the preset the right way', () => {
+    const roster = (driversJson as { drivers: DriverDef[] }).drivers;
+    expect(new Set(roster.map((d) => d.code)).size).toBe(roster.length); // codes unique
+    const a = assignDrivers(roster, 10, 42);
+    expect(a).toEqual(assignDrivers(roster, 10, 42));
+    expect(new Set(a.map((d) => d.code)).size).toBe(10); // no driver twice
+    expect(assignDrivers(roster, 10, 43)).not.toEqual(a);
     const p = { cornerMargin: 0.9, brakeMargin: 0.8, lookaheadBaseM: 7, lookaheadPerMps: 0.3, steerKp: 1, steerKd: 0, noise: 0.02, mistakesPerMin: 1, trafficConeM: 30, overtakeOffsetM: 3, throttleCap: 1 };
-    const fast = skilledPreset(p, 0.02), slow = skilledPreset(p, -0.02);
-    expect(fast.cornerMargin).toBeGreaterThan(p.cornerMargin);
-    expect(slow.cornerMargin).toBeLessThan(p.cornerMargin);
-    expect(fast.mistakesPerMin).toBeLessThan(slow.mistakesPerMin);
-    expect(skilledPreset({ ...p, cornerMargin: 0.99 }, 0.05).cornerMargin).toBe(1); // never past the tyre's limit
-    expect(skilledPreset(p, 0)).toBe(p);
+    const avg = { pace: 50, aggression: 50, racecraft: 50, consistency: 50, tyres: 50 };
+    const fast = driverPreset(p, { ...avg, pace: 100 }, 0.02), slow = driverPreset(p, { ...avg, pace: 0 }, 0.02);
+    expect(fast.cornerMargin).toBeCloseTo(0.9 * 1.02, 9);
+    expect(slow.cornerMargin).toBeCloseTo(0.9 * 0.98, 9);
+    expect(driverPreset(p, { ...avg, consistency: 100 }, 0.02).mistakesPerMin).toBeLessThan(driverPreset(p, { ...avg, consistency: 0 }, 0.02).mistakesPerMin);
+    expect(driverPreset(p, { ...avg, aggression: 80 }, 0.02).aggression).toBe(0.8);
+    expect(driverPreset({ ...p, cornerMargin: 0.99 }, { ...avg, pace: 100 }, 0.05).cornerMargin).toBe(1); // never past the tyre's limit
+    expect(driverPreset(p, undefined, 0.02)).toBe(p);
   });
 
   it('carries v0.16 ratios: Motus is slow, C3 is slower than C1; setup notches trade (short gearing: accel for top speed, wings: grip for drag)', () => {

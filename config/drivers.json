@@ -1,0 +1,29 @@
+{
+  "_comment": "AI driver roster (AI driver roster card). Placeholder, clearly fictional names until Justin names them. Stats 0-100 (50 = average): pace = how close to the limit (corner and braking margins, scaled by ai.json skill.spread); aggression = how eagerly it attacks, how hard it defends, how late it concedes; racecraft = judgement in traffic (when a move is on, leaving space); consistency = fewer mistakes, less steering noise; tyres = tyre management (gentler on the rears, traction control holds less slip). code = the 3 letters in the ticker and labels.",
+  "drivers": [
+    { "code": "VRK", "name": "Tomas Varek", "pace": 92, "aggression": 70, "racecraft": 85, "consistency": 80, "tyres": 60 },
+    { "code": "LND", "name": "Ilse Lindqvist", "pace": 89, "aggression": 55, "racecraft": 90, "consistency": 88, "tyres": 75 },
+    { "code": "BRV", "name": "Marco Bravetti", "pace": 87, "aggression": 85, "racecraft": 65, "consistency": 60, "tyres": 45 },
+    { "code": "OKA", "name": "Kenji Okabe", "pace": 85, "aggression": 45, "racecraft": 80, "consistency": 90, "tyres": 85 },
+    { "code": "DUV", "name": "Celine Duvall", "pace": 83, "aggression": 65, "racecraft": 75, "consistency": 70, "tyres": 70 },
+    { "code": "HAL", "name": "Rory Hallett", "pace": 80, "aggression": 90, "racecraft": 55, "consistency": 50, "tyres": 40 },
+    { "code": "MRS", "name": "Ana Morais", "pace": 78, "aggression": 50, "racecraft": 70, "consistency": 85, "tyres": 80 },
+    { "code": "KOV", "name": "Dmitri Kovalenko", "pace": 76, "aggression": 75, "racecraft": 60, "consistency": 65, "tyres": 55 },
+    { "code": "FIN", "name": "Aoife Finnegan", "pace": 74, "aggression": 60, "racecraft": 80, "consistency": 75, "tyres": 65 },
+    { "code": "WEB", "name": "Lukas Weber", "pace": 72, "aggression": 40, "racecraft": 65, "consistency": 80, "tyres": 90 },
+    { "code": "SAN", "name": "Mateo Santoro", "pace": 70, "aggression": 80, "racecraft": 50, "consistency": 55, "tyres": 50 },
+    { "code": "NAK", "name": "Yui Nakamura", "pace": 68, "aggression": 55, "racecraft": 75, "consistency": 70, "tyres": 60 },
+    { "code": "PEL", "name": "Hugo Pelletier", "pace": 66, "aggression": 65, "racecraft": 60, "consistency": 60, "tyres": 55 },
+    { "code": "AKN", "name": "Kwame Akintola", "pace": 64, "aggression": 70, "racecraft": 55, "consistency": 65, "tyres": 70 },
+    { "code": "HOL", "name": "Freya Holm", "pace": 62, "aggression": 35, "racecraft": 70, "consistency": 85, "tyres": 80 },
+    { "code": "CRU", "name": "Diego Cruz", "pace": 60, "aggression": 75, "racecraft": 45, "consistency": 45, "tyres": 40 },
+    { "code": "MAR", "name": "Elena Marchetti", "pace": 58, "aggression": 50, "racecraft": 60, "consistency": 70, "tyres": 65 },
+    { "code": "OBR", "name": "Sean O'Brannigan", "pace": 56, "aggression": 60, "racecraft": 50, "consistency": 55, "tyres": 50 },
+    { "code": "JAN", "name": "Pieter Jansen", "pace": 54, "aggression": 45, "racecraft": 55, "consistency": 75, "tyres": 75 },
+    { "code": "REY", "name": "Lucia Reyes", "pace": 52, "aggression": 65, "racecraft": 45, "consistency": 50, "tyres": 45 },
+    { "code": "STR", "name": "Nils Strand", "pace": 50, "aggression": 40, "racecraft": 60, "consistency": 65, "tyres": 60 },
+    { "code": "PAT", "name": "Ravi Patel", "pace": 48, "aggression": 55, "racecraft": 50, "consistency": 60, "tyres": 55 },
+    { "code": "GRA", "name": "Moira Grant", "pace": 45, "aggression": 30, "racecraft": 55, "consistency": 70, "tyres": 70 },
+    { "code": "BOU", "name": "Felix Boucher", "pace": 42, "aggression": 70, "racecraft": 40, "consistency": 40, "tyres": 35 }
+  ]
+}

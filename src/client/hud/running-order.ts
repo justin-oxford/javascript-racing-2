@@ -22,6 +22,19 @@ export function setPlayerIdentity(code: string, name: string): void {
   player.name = name;
 }
 
+/** The AI cars' drivers (AI driver roster card), by car index; a car without one shows its team. */
+export const carDrivers: Array<{ code: string; name: string } | undefined> = [];
+export function setCarDrivers(list: ReadonlyArray<{ code: string; name: string } | undefined>): void {
+  carDrivers.length = 0;
+  carDrivers.push(...list);
+}
+/** Code and name for any car: the player's profile, an AI's driver, else its team. */
+export function carIdentity(car: number, teamName: string | undefined): { code: string; name: string } {
+  if (car === 0) return { code: player.code, name: player.name };
+  const d = carDrivers[car];
+  return d ? { code: d.code, name: d.name } : { code: teamCode(teamName ?? '???'), name: teamName ?? '?' };
+}
+
 export const gapText = (g: Gap | undefined): string => (!g ? '' : g.laps ? `+${g.laps} LAP${g.laps > 1 ? 'S' : ''}` : `+${g.seconds.toFixed(3)}`);
 
 /** Three letters from a team name: "Blue Bull" -> BLU, "McFaren" -> MCF. */
@@ -37,8 +50,7 @@ export function runningOrder(world: WorldState, catalog: CarCatalog): OrderEntry
     return {
       pos: k + 1,
       car,
-      code: car === 0 ? player.code : teamCode(team?.name ?? '???'),
-      name: car === 0 ? player.name : (team?.name ?? '?'),
+      ...carIdentity(car, team?.name),
       swatch: team?.colors.primary ?? '#888',
       gap: !started ? '' : k === 0 ? 'LEADER' : gapText(raceGap(race, car, race.order[0]!)),
       state: rc.finished ? 'finished' : world.cars[car]!.inPitLane ? 'pit' : '',
@@ -88,8 +100,7 @@ export function qualiEntries(world: WorldState, catalog: CarCatalog): OrderEntry
     return {
       pos: k + 1,
       car,
-      code: car === 0 ? player.code : teamCode(team?.name ?? '???'),
-      name: car === 0 ? player.name : (team?.name ?? '?'),
+      ...carIdentity(car, team?.name),
       swatch: team?.colors.primary ?? '#888',
       gap: !c.bestLap ? 'NO TIME' : k === 0 ? lapText(c.bestLap) : `+${(c.bestLap - pole).toFixed(3)}`,
       state: c.done ? 'finished' : world.cars[car]!.inPitLane ? 'pit' : '',

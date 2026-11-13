@@ -5,7 +5,7 @@
 //   weekend practice: RACE WEEKEND - PRACTICE | GO TO QUALIFYING
 // Reads world.race / world.quali; never writes sim state. Choices go out through callbacks.
 import { pointsFor, qualiResults, qualiTimeLeft, raceResults, TICK_DT, type CarCatalog, type RaceConfig, type WorldState } from '../../sim';
-import { gapText, lapHead, lapText, playerIntervals, qualiEntries, runningOrder, type OrderEntry, player } from './running-order';
+import { gapText, lapHead, lapText, playerIntervals, qualiEntries, runningOrder, type OrderEntry, carIdentity } from './running-order';
 import './race-hud.css';
 
 export interface RaceHudCallbacks {
@@ -97,7 +97,7 @@ export class RaceHud {
 
   private driver(world: WorldState, car: number): { name: string; swatch: string } {
     const team = this.catalog.teams.find((t) => t.id === world.cars[car]!.build.team);
-    return { name: car === 0 ? player.name : (team?.name ?? '?'), swatch: team ? team.colors.primary : '#888' };
+    return { name: carIdentity(car, team?.name).name, swatch: team ? team.colors.primary : '#888' };
   }
 
   /** `note`: a line under the ticker (e.g. shared pit boxes). */
