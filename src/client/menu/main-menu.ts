@@ -16,6 +16,8 @@ export interface MenuDeps {
   aiPresets: string[];
   /** The difficulty used when the profile hasn't picked one. */
   defaultPreset: string;
+  /** This track has night art (or a preview): offer Day / Night. */
+  nightAvailable: boolean;
   trackName: string;
   profiles: ProfileStore;
   /** Audio buses and their current volume. */
@@ -151,6 +153,7 @@ export class MainMenu {
         <label>Grid</label>${this.choice('grid', s.race.grid, [['random', 'Random'], ['pole', 'Pole'], ['back', 'Back']] as const)}
         <label>Car performance</label>${this.choice('perf', s.perf, [['team', 'Team stats'], ['equal', 'Equal']] as const)}
         <label>Damage</label>${this.choice('damage', s.damage, [['off', 'Off'], ['visual', 'Visual only'], ['realistic', 'Realistic']] as const)}
+        ${this.d.nightAvailable ? `<label>Time of day</label>${this.choice('night', s.night ? 'night' : 'day', [['day', 'Day'], ['night', 'Night']] as const)}` : ''}
       </div>
       <p class="note">Races use at least one AI. Equal: every team performs the same, AI drivers differ by skill. Realistic damage costs grip; the pits repair it.</p>`;
   }
@@ -229,6 +232,7 @@ export class MainMenu {
     else if (key === 'vfx') next.vfx = val as typeof s.vfx;
     else if (key === 'labels') next.labels = val as typeof s.labels;
     else if (key === 'spec') next.spec = val;
+    else if (key === 'night') next.night = val === 'night';
     this.save({ ...p, settings: next });
   }
 

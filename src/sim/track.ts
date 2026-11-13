@@ -38,6 +38,10 @@ export interface TrackJson {
     maskDraft?: string;
     /** Things cars drive under. */
     overhead?: string;
+    /** Night races (optional): the night painting, and a greyscale floodlight map (white = lit). Defaults
+     *  background_night.png / lightmap_night.png in the track folder. */
+    backgroundNight?: string;
+    lightmapNight?: string;
   };
   /** Placed in the editor; a freshly blocked-out track has none yet. */
   timingLines: Partial<Record<TimingKey, TimingLine>>;

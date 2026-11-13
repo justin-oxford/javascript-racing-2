@@ -11,6 +11,8 @@ export interface ProfileSettings {
   labels: 'off' | 'position' | 'name';
   vfx: 'high' | 'low' | 'off';
   race: { laps: number; grid: 'random' | 'pole' | 'back' };
+  /** Night race (Night races card), when the track has night art. */
+  night: boolean;
   /** Car spec class (C1..C3); absent = the default car's. */
   spec?: string | undefined;
   /** Audio bus -> volume 0..1 (only the ones changed). */
@@ -41,6 +43,7 @@ export const DEFAULT_SETTINGS: Readonly<ProfileSettings> = Object.freeze<Profile
   labels: 'position',
   vfx: 'high',
   race: { laps: 5, grid: 'random' },
+  night: false,
   volumes: {},
 });
 
@@ -70,6 +73,7 @@ function completeSettings(raw: unknown): ProfileSettings {
     vfx: pick(s.vfx, ['high', 'low', 'off'] as const, 'high'),
     race: { laps: Number.isFinite(s.race?.laps) ? Math.max(1, Math.min(99, Math.round(s.race!.laps))) : 5, grid: pick(s.race?.grid, ['random', 'pole', 'back'] as const, 'random') },
     spec: typeof s.spec === 'string' && s.spec ? s.spec : undefined,
+    night: s.night === true,
     volumes: s.volumes && typeof s.volumes === 'object' ? Object.fromEntries(Object.entries(s.volumes).filter(([, v]) => typeof v === 'number' && v >= 0 && v <= 1)) : {},
   };
 }

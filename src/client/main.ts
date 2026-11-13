@@ -16,6 +16,7 @@ import {
   loadBackground,
   loadMask,
   loadOverhead,
+  loadNightArt,
   physics,
   rules,
   simContext,
@@ -42,6 +43,8 @@ import vfxConfig from '../../config/vfx.json';
 import { GameAudio } from './audio/audio';
 import { soundTargets, topSpeedKph } from './audio/targets';
 import { Vfx } from './vfx/vfx';
+import nightJson from '../../config/night.json';
+import { drawRearLights, previewNight, shadeImage, type NightConfig } from './night';
 import './style.css';
 
 async function main(): Promise<void> {
@@ -49,7 +52,7 @@ async function main(): Promise<void> {
   const stub = getTrackJsonStub(trackId);
   let mask: MaskState = await loadMask(stub);
   const json = mask.track.json; // the stub, completed in place: the editor edits this same object
-  const [background, overhead0, liveries] = await Promise.all([loadBackground(json), loadOverhead(json), new Liveries(liveryConfig).load(siteUrl)]);
+  const [background, overhead0, liveries, nightArt] = await Promise.all([loadBackground(json), loadOverhead(json), new Liveries(liveryConfig).load(siteUrl), loadNightArt(json)]);
   let overhead = overhead0;
   let hasArt = !!background;
   let ctx: SimContext = simContext(mask);
@@ -298,6 +301,20 @@ async function main(): Promise<void> {
   hud.setPerf(perfMode);
   hud.setDamage(damageMode);
 
+  // ---- Night (Night races card): the track's night art, or ?night=preview faking it from the day art ----
+  const nightCfg = nightJson as NightConfig;
+  const preview = params.get('night') === 'preview';
+  const night = nightArt.background
+    ? { background: nightArt.background as CanvasImageSource, lightmap: nightArt.lightmap as CanvasImageSource | undefined }
+    : preview ? previewNight(background ?? mask.blockout, mask.track.mask.width, mask.track.mask.height, json.racingLine, json.pxPerMeter, nightCfg) : undefined;
+  let nightOn = false;
+  const setNight = (on: boolean): void => {
+    nightOn = on && !!night;
+    renderer.background = nightOn ? night!.background : (background ?? mask.blockout);
+    renderer.nightShade = nightOn ? shadeImage(mask.track.mask.width, mask.track.mask.height, nightCfg, night!.lightmap) : undefined;
+    renderer.shadeRegionPx = nightCfg.regionM * json.pxPerMeter;
+  };
+
   // ---- Profile -> game (Main menu + profiles card) ----
   /** The pause menu is open: no sim ticks. (The main menu leaves the world running behind it.) */
   let paused = false;
@@ -311,6 +328,7 @@ async function main(): Promise<void> {
     for (const [bus, v] of Object.entries(p.settings.volumes)) if (bus in audio.volumes) audio.setVolume(bus as Parameters<typeof audio.setVolume>[0], v);
     if (vfx.quality !== p.settings.vfx) vfx.setQuality(p.settings.vfx);
     if (labelMode !== p.settings.labels) setLabels(p.settings.labels);
+    if (p.settings.night !== nightOn && night) setNight(p.settings.night);
     aiCount = p.settings.ai.count;
     aiPreset = aiCfg.presets[p.settings.ai.preset] ? p.settings.ai.preset : aiCfg.defaultPreset;
     perfMode = p.settings.perf;
@@ -345,6 +363,7 @@ async function main(): Promise<void> {
     catalog: ctx.catalog,
     aiPresets: Object.keys(aiCfg.presets),
     defaultPreset: aiCfg.defaultPreset,
+    nightAvailable: !!night,
     trackName: json.name,
     profiles,
     volumes: () => (['master', 'engine', 'tyres', 'impacts', 'ui'] as const).filter((b) => b in audio.volumes).map((bus) => ({ bus, value: audio.volumes[bus] })),
@@ -373,6 +392,7 @@ async function main(): Promise<void> {
   let prev: WorldState = createWorld(ctx, drivers.length);
   let curr: WorldState = prev;
   startPractice();
+  if (preview && night && !profile.settings.night) persist((s) => ({ ...s, night: true })); // ?night=preview: start at night
   applyProfile(profile);
   // The front door: the main menu on load, unless a dev URL param skips straight in.
   if (!['track', 'ai', 'edit', 'garage', 'level', 'cars'].some((k) => params.has(k))) menu.open('main');
@@ -607,6 +627,7 @@ async function main(): Promise<void> {
           if (editor) drawMask(c, mask.canvas, editor.maskOpacity);
           else if (debug) drawMask(c, mask.canvas, 0.5);
         },
+        lights: (c) => { if (nightOn) drawRearLights(c, prev, curr, alpha, json.pxPerMeter, nightCfg); },
         overCars: (c) => {
           vfx.drawWakes(c, curr, physics, json.pxPerMeter, slipstream.wake);
           vfx.drawOver(c, json.pxPerMeter); // the renderer draws the pre-scaled overhead after this

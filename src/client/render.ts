@@ -29,6 +29,8 @@ export interface DrawLayers {
   overCars?: (ctx: CanvasRenderingContext2D) => void;
   /** On the dynamic layer, topmost (debug + editor). Track-pixel space. */
   overlay?: (ctx: CanvasRenderingContext2D) => void;
+  /** Night: drawn after the night tint, with additive blending (rear lights). Track-pixel space. */
+  lights?: (ctx: CanvasRenderingContext2D) => void;
   /** Screen-space text box, top-left. */
   text?: string | undefined;
   /** Push the text box down this many backing pixels (below the HUD bar). */
@@ -72,6 +74,12 @@ export class Renderer {
   private overheadImg: CanvasImageSource | undefined;
   private readonly overheadCanvas = document.createElement('canvas');
   private overheadDirty = true;
+  /** Night tint (track-size RGBA: ambient colour, alpha = how dark), pre-scaled to the device like the overhead. */
+  private shadeImg: CanvasImageSource | undefined;
+  private readonly shadeCanvas = document.createElement('canvas');
+  private shadeDirty = true;
+  /** Around each car (track px), where the night tint is applied: the car, its smoke and sparks. */
+  shadeRegionPx = 100;
   rebuilds = 0;
 
   constructor(
@@ -121,6 +129,17 @@ export class Renderer {
     this.scale = w / this.trackWidth;
     this.staticDirty = true;
     this.overheadDirty = true;
+    this.shadeDirty = true;
+  }
+
+  /** Night tint image (undefined = day). */
+  set nightShade(img: CanvasImageSource | undefined) {
+    this.shadeImg = img;
+    this.shadeDirty = true;
+    this.overheadDirty = true; // the overhead art (trees, bridges) is tinted once, at rebuild
+  }
+  get night(): boolean {
+    return !!this.shadeImg;
   }
 
   /** Background art, or the blockout canvas while a track has no art. */
@@ -161,12 +180,28 @@ export class Renderer {
     this.rebuilds++;
   }
 
+  private rebuildShade(): void {
+    this.shadeDirty = false;
+    const c = this.shadeCanvas;
+    c.width = this.canvas.width;
+    c.height = this.canvas.height;
+    const g = c.getContext('2d')!;
+    g.clearRect(0, 0, c.width, c.height);
+    if (this.shadeImg) g.drawImage(this.shadeImg, 0, 0, c.width, c.height);
+  }
+
   private rebuildOverhead(): void {
     this.overheadDirty = false;
     const c = this.overheadCanvas.getContext('2d')!;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, this.overheadCanvas.width, this.overheadCanvas.height);
     if (this.overheadImg) c.drawImage(this.overheadImg, 0, 0, this.overheadCanvas.width, this.overheadCanvas.height);
+    // Night: the overhead layer is day art over the cars; tint it like them (only where it has pixels).
+    if (this.overheadImg && this.shadeImg) {
+      c.globalCompositeOperation = 'source-atop';
+      c.drawImage(this.shadeImg, 0, 0, this.overheadCanvas.width, this.overheadCanvas.height);
+      c.globalCompositeOperation = 'source-over';
+    }
   }
 
   /** Mouse event -> track pixel coordinates. */
@@ -208,6 +243,27 @@ export class Renderer {
     });
 
     layers.overCars?.(ctx);
+    // NIGHT: tint what the game drew toward the ambient colour by the darkness at each spot ('source-atop':
+    // only where something was drawn). One composite, clipped to the areas around the cars, not the screen.
+    if (this.shadeImg) {
+      if (this.shadeDirty) this.rebuildShade();
+      ctx.save();
+      ctx.beginPath();
+      const r = this.shadeRegionPx;
+      for (let i = 0; i < curr.cars.length; i++) {
+        const c = interpolatePose(prev.cars[i], curr.cars[i]!, alpha);
+        ctx.rect(c.x * ppm - r, c.y * ppm - r, 2 * r, 2 * r);
+      }
+      ctx.clip();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.drawImage(this.shadeCanvas, 0, 0);
+      ctx.restore();
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      layers.lights?.(ctx);
+      ctx.restore();
+    }
     layers.overlay?.(ctx);
 
     if (layers.text) {

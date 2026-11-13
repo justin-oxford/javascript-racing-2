@@ -184,6 +184,16 @@ export async function loadBackground(json: TrackJson): Promise<HTMLImageElement 
   return blob ? loadImage(URL.createObjectURL(blob)) : undefined;
 }
 
+/** Night art (Night races card), both optional: the night painting and the floodlight map. */
+export async function loadNightArt(json: TrackJson): Promise<{ background?: HTMLImageElement | undefined; lightmap?: HTMLImageElement | undefined }> {
+  const one = async (file: string) => {
+    const blob = await fetchImage(trackFileUrl(json.id, file));
+    return blob ? loadImage(URL.createObjectURL(blob)) : undefined;
+  };
+  const [background, lightmap] = await Promise.all([one(json.files.backgroundNight ?? 'background_night.png'), one(json.files.lightmapNight ?? 'lightmap_night.png')]);
+  return { background, lightmap };
+}
+
 export async function loadOverhead(json: TrackJson): Promise<HTMLImageElement | undefined> {
   if (!json.files.overhead) return undefined;
   const blob = await fetchImage(trackFileUrl(json.id, json.files.overhead));

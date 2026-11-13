@@ -1,0 +1,8 @@
+{
+  "_comment": "Night races (POLISH card), client only. With Night on (a track with background_night.png, or ?night=preview), everything the game draws over the track (cars, smoke, sparks, dust) is tinted toward `ambient` by (1 - light) x darkness, where light comes from the track's lightmap_night.png (white = under a floodlight) or is 0 without one. regionM = how far around each car the tint reaches (smoke and sparks near it). rearLight: the red glow at each car's gearbox. preview: what ?night=preview fakes until there's real night art: the day background darkened to `darken`, and floodlight pools of poolRadiusM every poolEveryM along the racing line.",
+  "ambient": "#101a33",
+  "darkness": 0.72,
+  "regionM": 9,
+  "rearLight": { "color": "255, 40, 30", "radiusM": 1.4, "alpha": 0.9, "backM": 2.6 },
+  "preview": { "darken": 0.28, "poolRadiusM": 16, "poolEveryM": 55 }
+}
