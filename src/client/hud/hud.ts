@@ -1,6 +1,6 @@
 // The v0.16 HUD, rebuilt: top timing bar, timing dropdown, spec/team menu, vehicle + setup panel.
 // It reads sim state and the session; it never writes sim state. Choices go out through callbacks.
-import { normalizeSetup, tyreLife, wearGrip } from '../../sim';
+import { normalizeSetup, snapSetupValue, tyreLife, wearGrip } from '../../sim';
 import type { CarSetup, CarState, CatalogLike } from './hud-types';
 import type { Session, Tile } from './session';
 import type { HudConfig } from './timing-lines';
@@ -37,15 +37,17 @@ const fmt = (t: number | undefined, plus = false): string => {
   return m ? `${sign}${m}:${s}` : `${sign}${(a).toFixed(3)}`;
 };
 
-/** Setup sliders (Car setup overhaul card): what - and + trade, for the labels. */
-export const SETUP_LABELS: Array<{ slot: keyof CarSetup; label: string; minus: string; plus: string }> = [
-  { slot: 'frontWing', label: 'Front wing', minus: 'less front grip, less drag', plus: 'more front grip, more drag' },
-  { slot: 'rearWing', label: 'Rear wing', minus: 'less rear grip, faster on straights', plus: 'more rear grip, slower on straights' },
-  { slot: 'gearing', label: 'Gearing', minus: 'short: acceleration', plus: 'long: top speed' },
-  { slot: 'brakeBias', label: 'Brake bias', minus: 'rearward: rotates, rear can lock', plus: 'forward: stable, fronts lock' },
-  { slot: 'balance', label: 'Suspension', minus: 'stiff rear: oversteer', plus: 'stiff front: understeer' },
-  { slot: 'rideHeight', label: 'Ride height', minus: 'low: downforce, kerbs bite', plus: 'high: less downforce, forgiving' },
-  { slot: 'tyrePressure', label: 'Tyre pressure', minus: 'low: grip, more wear, lazy', plus: 'high: less grip and wear, sharp' },
+/** Setup (Car setup overhaul card), real units: what - and + trade, for the labels (ranges in specs.json). */
+export const SETUP_LABELS: Array<{ slot: keyof CarSetup; minus: string; plus: string }> = [
+  { slot: 'frontWingDeg', minus: 'less front grip, less drag', plus: 'more front grip, more drag' },
+  { slot: 'rearWingDeg', minus: 'less rear grip, faster on straights', plus: 'more rear grip, slower on straights' },
+  { slot: 'topSpeedKph', minus: 'short: acceleration', plus: 'long: top speed' },
+  { slot: 'brakeBiasPct', minus: 'rearward: rotates, rear can lock', plus: 'forward: stable, fronts lock' },
+  { slot: 'arbFront', minus: 'softer front: more turn-in', plus: 'stiffer front: understeer' },
+  { slot: 'arbRear', minus: 'softer rear: more stable', plus: 'stiffer rear: oversteer' },
+  { slot: 'rideFrontMm', minus: 'low: downforce, kerbs bite', plus: 'high: less downforce, forgiving' },
+  { slot: 'rideRearMm', minus: 'low: downforce, kerbs bite', plus: 'high: less downforce, forgiving' },
+  { slot: 'pressurePsi', minus: 'low: grip, more wear, lazy', plus: 'high: less grip and wear, sharp' },
 ];
 const SLOTS = SETUP_LABELS;
 
@@ -177,7 +179,7 @@ export class Hud {
         </div>
         <div class="title setup-title">Car Setup Adjustments</div>
         <div class="setup notched">${SLOTS.map((s) => `
-          <div class="nslot" title="- ${s.minus} / + ${s.plus}"><span class="lbl">${s.label.toUpperCase()}</span>
+          <div class="nslot" title="- ${s.minus} / + ${s.plus}"><span class="lbl">${this.catalog.specs.setup.fields[s.slot].label.toUpperCase()}</span>
             <button class="dn" data-slot="${s.slot}" data-dir="-1">-</button>
             <span class="track"><span class="mark" data-id="setupMark-${s.slot}"></span></span>
             <button class="up" data-slot="${s.slot}" data-dir="1">+</button>
@@ -209,9 +211,9 @@ export class Hud {
     this.root.querySelectorAll<HTMLButtonElement>('[data-slot]').forEach((b) =>
       b.addEventListener('click', () => {
         const slot = b.dataset.slot as keyof CarSetup;
-        const range = this.catalog.specs.setup.range;
-        const current = this.setup?.[slot] ?? 0;
-        const next = Math.max(-range, Math.min(range, current + Number(b.dataset.dir)));
+        const f = this.catalog.specs.setup.fields[slot];
+        const current = this.setup?.[slot] ?? f.neutral;
+        const next = snapSetupValue(current + Number(b.dataset.dir) * f.step, f);
         if (next !== current) this.cb.onSetup(slot, next);
       }),
     );
@@ -380,12 +382,11 @@ export class Hud {
     this.el.fuelPct!.textContent = String(Math.round(fuel * 100));
 
     // Setup: shows the car's setup; changes only while stopped in a pit box.
-    this.setup = normalizeSetup(car.build.setup, this.catalog.specs.setup.range);
-    const range = this.catalog.specs.setup.range;
+    this.setup = normalizeSetup(car.build.setup, this.catalog.specs.setup);
     for (const s of SLOTS) {
-      const v = this.setup[s.slot];
-      this.el[`setup-${s.slot}`]!.textContent = v > 0 ? `+${v}` : String(v);
-      this.el[`setupMark-${s.slot}`]!.style.left = `${((v + range) / (2 * range)) * 100}%`;
+      const v = this.setup[s.slot], f = this.catalog.specs.setup.fields[s.slot];
+      this.el[`setup-${s.slot}`]!.textContent = `${v} ${f.unit}`;
+      this.el[`setupMark-${s.slot}`]!.style.left = `${((v - f.min) / (f.max - f.min)) * 100}%`;
     }
     this.root.querySelectorAll<HTMLButtonElement>('[data-slot]').forEach((b) => (b.disabled = !inBoxStopped));
     this.el.setupHint!.textContent = inBoxStopped ? 'In the box: fresh tyres, refuelling. Setup changes apply now.'

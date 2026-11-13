@@ -63,9 +63,25 @@ export interface TeamDef {
   stats: Stats;
 }
 
-/** specs.json setup: what one notch of each slider does (linear in the notch). */
+/** A setup field in real units: range, step, and where it sits against the physics' per-notch effects. */
+export interface SetupFieldDef {
+  label: string;
+  unit: string;
+  min: number;
+  max: number;
+  step: number;
+  /** The value that is "notch 0" for the physics effects below (the old neutral car). */
+  neutral: number;
+  /** Units per physics notch (anti-roll bars: clicks of front-minus-rear difference per notch). */
+  perNotch: number;
+}
+
+export type SetupFieldId = keyof CarSetup;
+export const SETUP_FIELDS: ReadonlyArray<SetupFieldId> = ['frontWingDeg', 'rearWingDeg', 'topSpeedKph', 'brakeBiasPct', 'arbFront', 'arbRear', 'rideFrontMm', 'rideRearMm', 'pressurePsi'];
+
+/** specs.json setup: the fields (real units) and what one physics notch of each setting does (linear). */
 export interface SetupEffectsConfig {
-  range: number;
+  fields: Record<SetupFieldId, SetupFieldDef>;
   frontWing: { frontDownforce: number; drag: number };
   rearWing: { rearDownforce: number; drag: number };
   gearing: { engine: number; topSpeed: number };
@@ -81,21 +97,66 @@ export interface SpecsConfig {
   setup: SetupEffectsConfig;
 }
 
-export const SETUP_SLOTS: ReadonlyArray<keyof CarSetup> = ['frontWing', 'rearWing', 'gearing', 'brakeBias', 'balance', 'rideHeight', 'tyrePressure'];
-export const NEUTRAL_SETUP: Readonly<CarSetup> = Object.freeze({ frontWing: 0, rearWing: 0, gearing: 0, brakeBias: 0, balance: 0, rideHeight: 0, tyrePressure: 0 });
+/** The physics' view of a setup: notches (fractional) per setting, 0 = the old neutral car. */
+export interface SetupNotches { frontWing: number; rearWing: number; gearing: number; brakeBias: number; balance: number; rideHeight: number; tyrePressure: number }
+
+/** Every field at its neutral value (the old neutral car; a track's base setup is in its track.json). */
+export function neutralSetup(cfg: SetupEffectsConfig): CarSetup {
+  return Object.fromEntries(SETUP_FIELDS.map((k) => [k, cfg.fields[k].neutral])) as unknown as CarSetup;
+}
+
+/** A value clamped to the field's range and snapped to its step. */
+export function snapSetupValue(v: number, f: SetupFieldDef): number {
+  const snapped = f.min + Math.round((v - f.min) / f.step) * f.step;
+  return Math.round(Math.max(f.min, Math.min(f.max, snapped)) * 1000) / 1000;
+}
+
+/** From real units to the physics' notches. */
+export function setupNotches(s: CarSetup, cfg: SetupEffectsConfig): SetupNotches {
+  const f = cfg.fields, n = (k: SetupFieldId, v = s[k]) => (v - f[k].neutral) / f[k].perNotch;
+  return {
+    frontWing: n('frontWingDeg'),
+    rearWing: n('rearWingDeg'),
+    gearing: n('topSpeedKph'),
+    brakeBias: n('brakeBiasPct'),
+    balance: (s.arbFront - s.arbRear - (f.arbFront.neutral - f.arbRear.neutral)) / f.arbFront.perNotch,
+    rideHeight: n('rideFrontMm', (s.rideFrontMm + s.rideRearMm) / 2),
+    tyrePressure: n('pressurePsi'),
+  };
+}
+
+/** From the old notch format (-5..+5) to real units. */
+function fromNotches(o: Partial<Record<keyof SetupNotches, number>>, cfg: SetupEffectsConfig): CarSetup {
+  const f = cfg.fields, at = (k: SetupFieldId, notch = 0) => f[k].neutral + notch * f[k].perNotch;
+  const bal = (o.balance ?? 0) * f.arbFront.perNotch;
+  return {
+    frontWingDeg: at('frontWingDeg', o.frontWing), rearWingDeg: at('rearWingDeg', o.rearWing), topSpeedKph: at('topSpeedKph', o.gearing),
+    brakeBiasPct: at('brakeBiasPct', o.brakeBias), arbFront: f.arbFront.neutral + bal / 2, arbRear: f.arbRear.neutral - bal / 2,
+    rideFrontMm: at('rideFrontMm', o.rideHeight), rideRearMm: at('rideRearMm', o.rideHeight), pressurePsi: at('pressurePsi', o.tyrePressure),
+  };
+}
+
+const OLD_SLOTS = ['frontWing', 'rearWing', 'gearing', 'brakeBias', 'balance', 'rideHeight', 'tyrePressure'];
 
 /**
- * A valid setup from anything: notches clamped to the range and rounded; a v0.16-style one (Low/Med/High
- * switches, e.g. physics.json's defaultCar) is converted (Med = neutral).
+ * A valid setup from anything: real units clamped and snapped; the old notch format (-5..+5, profiles and
+ * configs from before real units) and the v0.16 Low/Med/High switches (physics.json defaultCar) converted.
+ * Anything missing takes `base` (a track's base setup), else neutral.
  */
-export function normalizeSetup(raw: unknown, range = 5): CarSetup {
+export function normalizeSetup(raw: unknown, cfg: SetupEffectsConfig, base?: CarSetup): CarSetup {
   const s = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const notch = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(-range, Math.min(range, Math.round(v))) : 0);
+  const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+  let out: CarSetup;
   if (typeof s.downforce === 'string' || typeof s.gearing === 'string' || typeof s.brakes === 'string') {
     const wings = ({ Low: -2, High: 2 } as Record<string, number>)[String(s.downforce)] ?? 0;
-    return { ...NEUTRAL_SETUP, frontWing: wings, rearWing: wings, gearing: ({ Long: 2, Short: -3 } as Record<string, number>)[String(s.gearing)] ?? 0 };
-  }
-  return Object.fromEntries(SETUP_SLOTS.map((k) => [k, notch(s[k])])) as unknown as CarSetup;
+    out = fromNotches({ frontWing: wings, rearWing: wings, gearing: ({ Long: 2, Short: -3 } as Record<string, number>)[String(s.gearing)] ?? 0 }, cfg);
+  } else if (SETUP_FIELDS.some((k) => num(s[k]) !== undefined)) {
+    const fallback = base ?? neutralSetup(cfg);
+    out = Object.fromEntries(SETUP_FIELDS.map((k) => [k, num(s[k]) ?? fallback[k]])) as unknown as CarSetup;
+  } else if (OLD_SLOTS.some((k) => num(s[k]) !== undefined)) {
+    out = fromNotches(Object.fromEntries(OLD_SLOTS.map((k) => [k, num(s[k]) ?? 0])) as Partial<Record<keyof SetupNotches, number>>, cfg);
+  } else out = base ?? neutralSetup(cfg);
+  return Object.fromEntries(SETUP_FIELDS.map((k) => [k, snapSetupValue(out[k], cfg.fields[k])])) as unknown as CarSetup;
 }
 
 /** What a setup does beyond the stat multipliers: per-axle downforce, brake bias, load transfer, tyres. */
@@ -116,7 +177,7 @@ export interface SetupEffects {
 }
 
 export function setupEffects(raw: CarSetup, catalog: CarCatalog): SetupEffects {
-  const c = catalog.specs.setup, s = normalizeSetup(raw, c.range);
+  const c = catalog.specs.setup, s = setupNotches(normalizeSetup(raw, c), c);
   const ride = 1 + s.rideHeight * c.rideHeight.downforce;
   return {
     frontDownforce: (1 + s.frontWing * c.frontWing.frontDownforce) * ride,
@@ -132,7 +193,7 @@ export function setupEffects(raw: CarSetup, catalog: CarCatalog): SetupEffects {
 
 /** The setup's share of the six stats (team x spec x THIS). Downforce here = the two axles' average. */
 function setupStats(raw: CarSetup, catalog: CarCatalog): Partial<Stats> {
-  const c = catalog.specs.setup, s = normalizeSetup(raw, c.range), e = setupEffects(s, catalog);
+  const c = catalog.specs.setup, s = setupNotches(normalizeSetup(raw, c), c), e = setupEffects(raw, catalog);
   return {
     engine: 1 + s.gearing * c.gearing.engine,
     topSpeed: 1 + s.gearing * c.gearing.topSpeed,

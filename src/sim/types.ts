@@ -47,22 +47,25 @@ export interface Pose {
 export type Wheels<T> = [T, T, T, T];
 
 /**
- * Car setup (Car setup overhaul card): seven notched sliders, -range..+range (specs.json setup.range),
- * 0 = neutral. What each notch does is in specs.json setup; every one trades something.
+ * Car setup (Car setup overhaul card), in real units (Justin, 2026-11-13). Ranges, steps and what each value
+ * does live in specs.json "setup"; the physics works from the per-notch effects there (car-config.ts).
  */
 export interface CarSetup {
-  frontWing: number;
-  rearWing: number;
-  /** + = longer (top speed), - = shorter (acceleration). */
-  gearing: number;
-  /** + = more front brake bias. */
-  brakeBias: number;
-  /** Suspension balance: + = stiffer front (understeer), - = stiffer rear (oversteer). */
-  balance: number;
-  /** + = higher (less downforce, kerbs and grass hurt less). */
-  rideHeight: number;
-  /** + = higher pressure (less grip and wear, sharper). */
-  tyrePressure: number;
+  /** Wing angles, degrees: downforce on that axle vs drag. */
+  frontWingDeg: number;
+  rearWingDeg: number;
+  /** Gearing as top-gear speed, kph (reference car): long = top speed, short = acceleration. */
+  topSpeedKph: number;
+  /** Brake bias, % front. */
+  brakeBiasPct: number;
+  /** Anti-roll bars, clicks (stiffer front than rear = understeer; the reverse = oversteer). */
+  arbFront: number;
+  arbRear: number;
+  /** Ride height, mm (low = downforce, but kerbs and grass bite; front and rear average for now). */
+  rideFrontMm: number;
+  rideRearMm: number;
+  /** Tyre pressure, psi (low = grip and wear, lazy; high = the reverse, sharp). */
+  pressurePsi: number;
 }
 
 /** Which car this is: team x spec x setup (SYS - Car model). */

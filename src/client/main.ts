@@ -1,4 +1,4 @@
-import { aiStartCompound, consumableScale, defaultPitPlan, offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { aiStartCompound, consumableScale, defaultPitPlan, offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type CarSetup, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -27,7 +27,6 @@ import {
   type MaskState,
 } from './track-loader';
 import aiJson from '../../config/ai.json';
-import aiSetups from '../../config/ai-setups.json';
 import driversJson from '../../config/drivers.json';
 import audioConfig from '../../config/audio.json';
 import hudConfig from '../../config/hud.json';
@@ -143,12 +142,16 @@ async function main(): Promise<void> {
   };
   let session = new Session(pbStore(profile), json.id, pbSpec(startBuild.spec), startBuild.team);
   /** The player's car from the profile: preferred team and spec on the default car. */
+  /** This track's base setup (Car setup overhaul card): track.json baseSetup, else the default car's. */
+  function trackBase(): CarSetup {
+    return normalizeSetup(json.baseSetup ?? physics.defaultCar.setup, ctx.catalog.specs.setup);
+  }
   function curr0Build(): CarBuild {
     const d = physics.defaultCar;
     const team = profile.team && ctx.catalog.teams.some((t) => t.id === profile.team) ? profile.team : d.team;
     const spec = profile.settings.spec && ctx.catalog.specs.specs[profile.settings.spec] ? profile.settings.spec : d.spec;
-    // Setup: this track's preset from the profile (Garage), else the default car's.
-    const setup = normalizeSetup(profile.setups[json.id] ?? d.setup, ctx.catalog.specs.setup.range);
+    // Setup: this track's preset from the profile (Garage), else the track's base setup.
+    const setup = normalizeSetup(profile.setups[json.id] ?? trackBase(), ctx.catalog.specs.setup, trackBase());
     return { ...d, team, spec, setup };
   }
   /** Swap the player's car build and put it back in the pits (spec/team change). A race restarts. */
@@ -173,8 +176,8 @@ async function main(): Promise<void> {
   setCarDrivers([undefined, ...lineup]);
   const aiBuilds = (me: CarBuild, count: number): CarBuild[] => {
     const teams = ctx.catalog.teams.filter((t) => t.id !== me.team);
-    // The AI runs this track's searched setup (config/ai-setups.json, npm run setup-search), else neutral.
-    const aiSetup = normalizeSetup((aiSetups as Record<string, unknown>)[json.id] ?? physics.defaultCar.setup, ctx.catalog.specs.setup.range);
+    // The AI runs this track's base setup (track.json baseSetup, from npm run setup-search).
+    const aiSetup = trackBase();
     return Array.from({ length: count }, (_, k) => withPerf({ ...physics.defaultCar, setup: aiSetup, spec: me.spec, team: teams[k % teams.length]!.id }));
   };
   /** Player's fuel use per lap (HUD fuel margin): fuel and lap count at the last line crossing. */
@@ -303,7 +306,7 @@ async function main(): Promise<void> {
     onSetup: (slot, value) => {
       if (!stoppedInBox()) return; // setup changes only while stopped in a pit box
       const b = curr.cars[0]!.build;
-      const build = { ...b, setup: { ...normalizeSetup(b.setup, ctx.catalog.specs.setup.range), [slot]: value } };
+      const build = { ...b, setup: normalizeSetup({ ...normalizeSetup(b.setup, ctx.catalog.specs.setup), [slot]: value }, ctx.catalog.specs.setup) };
       profile = profiles.save({ ...profile, setups: { ...profile.setups, [json.id]: { ...build.setup } } }); // this track's preset
       balance?.reset(); // a new setup: a fresh readout
       curr = setCarBuild(curr, 0, build);
@@ -427,7 +430,8 @@ async function main(): Promise<void> {
     evolution: ctx.evolution.enabled,
     trackName: json.name,
     trackId: json.id,
-    setupRange: ctx.catalog.specs.setup.range,
+    setupFields: ctx.catalog.specs.setup.fields,
+    trackBase: () => ({ ...trackBase() }),
     setupSlots: SETUP_LABELS,
     profiles,
     volumes: () => (['master', 'engine', 'tyres', 'impacts', 'ui'] as const).filter((b) => b in audio.volumes).map((bus) => ({ bus, value: audio.volumes[bus] })),
@@ -453,7 +457,7 @@ async function main(): Promise<void> {
     },
   });
 
-  let prev: WorldState = createWorld(ctx, drivers.length);
+  let prev: WorldState = createWorld(ctx, [startBuild]); // the profile's car, on this track's base setup unless the profile has its own
   let curr: WorldState = prev;
   startPractice();
   if (preview && night && !profile.settings.night) persist((s) => ({ ...s, night: true })); // ?night=preview: start at night

@@ -1,5 +1,5 @@
 {
-  "_comment": "Spec levels and setups from SYS - Car model. Spec values are v0.16 raw numbers; the sim uses each one's ratio to referenceSpec. Setups are multipliers (Med = 1). Suspension is deliberately absent.",
+  "_comment": "Spec levels and setups from SYS - Car model. Spec values are v0.16 raw numbers; the sim uses each one's ratio to referenceSpec. setup.fields (Car setup overhaul card, real units): each setting's range, step and unit as shown to players, and how it maps to the physics: notch = (value - neutral) / perNotch (anti-roll bars: front minus rear clicks; ride height: the average of front and rear, no rake effect yet). The other setup entries say what one notch does (linear). Widen min/max for other tracks freely; neutral and perNotch keep the physics where it was. A track's base setup is in its track.json (npm run setup-search -- --write).",
   "referenceSpec": "C1",
   "specs": {
     "C1": { "name": "C1 Max", "engine": 0.03, "topSpeed": 7.0, "brakes": 0.06, "drag": 0.001, "downforce": 0.03, "grip": 0.05 },
@@ -8,7 +8,17 @@
   },
   "_comment_setup": "setup (Car setup overhaul card): each slider is a notch from -range..+range, 0 = neutral; every effect is per notch and linear. frontWing / rearWing: that axle's downforce vs drag. gearing: + = longer (top speed) vs - = shorter (acceleration). brakeBias: + = more front bias (front lockups, stable), - = rearward (rotates on entry, rear can lock). balance: + = stiffer front = more of the cornering load transfer at the front (understeer, stable), - = the rear (oversteer). rideHeight: + = higher: less downforce, kerbs and grass punish less; - = lower: more downforce, they punish more. tyrePressure: + = higher: less grip, less wear, sharper (lower peak slip); - = lower: more grip, more wear, lazier.",
   "setup": {
-    "range": 5,
+    "fields": {
+      "frontWingDeg": { "label": "Front wing", "unit": "°", "min": 0, "max": 30, "step": 1, "neutral": 8, "perNotch": 1.5 },
+      "rearWingDeg": { "label": "Rear wing", "unit": "°", "min": 0, "max": 30, "step": 1, "neutral": 8, "perNotch": 1.5 },
+      "topSpeedKph": { "label": "Gearing (top gear)", "unit": "kph", "min": 240, "max": 340, "step": 2, "neutral": 340, "perNotch": 4.08 },
+      "brakeBiasPct": { "label": "Brake bias (front)", "unit": "%", "min": 55, "max": 75, "step": 0.5, "neutral": 60, "perNotch": 1.2 },
+      "arbFront": { "label": "Front anti-roll bar", "unit": "clicks", "min": 1, "max": 11, "step": 1, "neutral": 6, "perNotch": 1 },
+      "arbRear": { "label": "Rear anti-roll bar", "unit": "clicks", "min": 1, "max": 11, "step": 1, "neutral": 6, "perNotch": 1 },
+      "rideFrontMm": { "label": "Ride height front", "unit": "mm", "min": 20, "max": 80, "step": 1, "neutral": 65, "perNotch": 3 },
+      "rideRearMm": { "label": "Ride height rear", "unit": "mm", "min": 20, "max": 80, "step": 1, "neutral": 65, "perNotch": 3 },
+      "pressurePsi": { "label": "Tyre pressure", "unit": "psi", "min": 16, "max": 28, "step": 0.5, "neutral": 24.5, "perNotch": 0.5 }
+    },
     "frontWing": { "frontDownforce": 0.04, "drag": 0.012 },
     "rearWing": { "rearDownforce": 0.04, "drag": 0.03 },
     "gearing": { "engine": -0.03, "topSpeed": 0.012 },

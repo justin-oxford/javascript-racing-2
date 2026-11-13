@@ -1,3 +1,4 @@
+import type { CarSetup } from './types';
 // Track data as the sim sees it. Pure: no image decoding here. Loaders (browser canvas,
 // Node pngjs) produce RGBA; snapToPalette turns it into palette indices; the sim only
 // ever reads the index array.
@@ -49,6 +50,9 @@ export interface TrackJson {
   racingLine: Point[];
   /** The seed the optimizer started from (hand-placed or earlier): driving direction. Kept so it can re-run. */
   racingLineSeed?: Point[];
+  /** Car setup overhaul card: this track's base setup (real units; npm run setup-search -- --write). What
+   *  players and the AI load here; players adjust from it. Absent = the default car's. */
+  baseSetup?: CarSetup;
   /** Reference-car target speed at each racingLine point, m/s (editor colours; the AI computes its own). */
   racingLineSpeed?: number[];
   /** Ordered grid slots. */

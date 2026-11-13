@@ -22,8 +22,10 @@ export interface MenuDeps {
   evolution: boolean;
   /** This track's id (setup presets are per track) and the setup sliders' range. */
   trackId: string;
-  setupRange: number;
-  setupSlots: ReadonlyArray<{ slot: string; label: string; minus: string; plus: string }>;
+  /** Setup fields in real units (specs.json setup.fields) and this track's base setup. */
+  setupFields: Record<string, { label: string; unit: string; min: number; max: number; step: number }>;
+  trackBase: () => { [field: string]: number };
+  setupSlots: ReadonlyArray<{ slot: string; minus: string; plus: string }>;
   trackName: string;
   profiles: ProfileStore;
   /** Audio buses and their current volume. */
@@ -169,14 +171,15 @@ export class MainMenu {
   }
 
   private garageBody(p: Profile): string {
-    const cur = p.setups[this.d.trackId] ?? {}, r = this.d.setupRange;
+    const base = this.d.trackBase(), cur = { ...base, ...(p.setups[this.d.trackId] ?? {}) } as Record<string, number>;
     return `<h2>Garage: setup for ${esc(this.d.trackName)}</h2>
-      <p class="note">Saved for this track in your profile and used whenever you drive it. Each slider trades something: no notch is best everywhere. You can also change it in practice when stopped in your pit box (car panel), where the balance readout shows which axle lets go first in each corner.</p>
+      <p class="note">Starts from this track's base setup (the AI runs it too); your changes are saved for this track in your profile. Every setting trades something. You can also change it in practice when stopped in your pit box (car panel), where the balance readout shows which axle lets go first in each corner.</p>
       <div class="rows setup">${this.d.setupSlots.map((s) => {
-        const v = Math.max(-r, Math.min(r, Math.round(cur[s.slot] ?? 0)));
-        return `<label>${esc(s.label)}</label><div class="inline"><small class="trade">${esc(s.minus)}</small><input type="range" min="${-r}" max="${r}" step="1" value="${v}" data-setup="${s.slot}" /><small class="trade">${esc(s.plus)}</small><b class="notch">${v > 0 ? '+' + v : v}</b></div>`;
+        const f = this.d.setupFields[s.slot]!, v = Number.isFinite(cur[s.slot]) ? cur[s.slot]! : base[s.slot]!;
+        const mark = v === base[s.slot] ? '' : ` <small class="trade">(base ${base[s.slot]})</small>`;
+        return `<label>${esc(f.label)}</label><div class="inline"><small class="trade">${esc(s.minus)}</small><input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${v}" data-setup="${s.slot}" /><small class="trade">${esc(s.plus)}</small><b class="notch">${v} ${esc(f.unit)}</b>${mark}</div>`;
       }).join('')}</div>
-      <div class="inline"><button data-act="neutralSetup">NEUTRAL</button></div>
+      <div class="inline"><button data-act="neutralSetup">TRACK BASE</button></div>
       <p class="note">Liveries come here with the livery card (phase 2).</p>`;
   }
 
@@ -270,7 +273,7 @@ export class MainMenu {
       if (code) code.textContent = nameCode(cleanName(t.value) || 'Player');
     } else if (t.dataset.setup) {
       const b = t.parentElement?.querySelector('.notch');
-      if (b) b.textContent = Number(t.value) > 0 ? `+${t.value}` : t.value;
+      if (b) b.textContent = `${t.value} ${this.d.setupFields[t.dataset.setup]?.unit ?? ''}`;
     } else if (t.dataset.volume) {
       const p = this.p;
       // Volumes apply live; saved on release (change) so dragging doesn't rewrite the profile every step.
@@ -286,7 +289,7 @@ export class MainMenu {
     else if (f === 'team') this.save({ ...p, team: t.value });
     else if (f === 'active') { const q = this.d.profiles.setActive(t.value); if (q) { this.d.onProfile(q); this.render(); } }
     else if (f === 'import') void this.importProfile(t);
-    else if (t.dataset.setup) this.save({ ...p, setups: { ...p.setups, [this.d.trackId]: { ...(p.setups[this.d.trackId] ?? {}), [t.dataset.setup]: Number(t.value) } } });
+    else if (t.dataset.setup) this.save({ ...p, setups: { ...p.setups, [this.d.trackId]: { ...this.d.trackBase(), ...(p.setups[this.d.trackId] ?? {}), [t.dataset.setup]: Number(t.value) } } });
     else if (t.dataset.volume) this.save({ ...p, settings: { ...p.settings, volumes: { ...p.settings.volumes, [t.dataset.volume]: Number(t.value) } } });
   }
 

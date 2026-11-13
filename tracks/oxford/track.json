@@ -2,6 +2,7 @@
   "id": "oxford",
   "name": "Oxford",
   "pxPerMeter": 10.8,
+  "baseSetup": { "frontWingDeg": 15, "rearWingDeg": 30, "topSpeedKph": 288, "brakeBiasPct": 65.5, "arbFront": 8, "arbRear": 4, "rideFrontMm": 48, "rideRearMm": 46, "pressurePsi": 23 },
   "files": { "background": "background.png", "mask": "mask.png", "overhead": "overhead.png" },
   "timingLines": {
     "startFinish": { "a": { "x": 1560, "y": 378 }, "b": { "x": 1560, "y": 121 } },

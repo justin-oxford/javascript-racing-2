@@ -18,7 +18,8 @@ import { catalog, surfaces } from '../../tools/load-track-node';
 import {
   buildStats,
   normalizeSetup,
-  NEUTRAL_SETUP,
+  neutralSetup,
+  setupNotches,
   setupEffects,
   type CarSetup,
   assignDrivers,
@@ -80,7 +81,8 @@ const FULL: CarInput = { throttle: 1, brake: 0, steer: 0 };
 const kph = (ms: number) => ms * 3.6;
 
 describe('car stats (team x spec x setup)', () => {
-  const build = (team: string, spec = 'C1', setup: Partial<CarSetup> = {}): CarBuild => ({ team, spec, setup: { ...NEUTRAL_SETUP, ...setup } });
+  /** A build with a setup given in the old notch format (-5..+5) or real units, normalised. */
+  const build = (team: string, spec = 'C1', setup: Record<string, number> = {}): CarBuild => ({ team, spec, setup: normalizeSetup(setup, catalog.specs.setup) });
 
   it('Foucault C1 with a neutral setup is the baseline', () => {
     expect(buildStats(build('foucault'), catalog)).toEqual({ engine: 1, topSpeed: 1, brakes: 1, drag: 1, downforce: 1, grip: 1 });
@@ -118,18 +120,25 @@ describe('car stats (team x spec x setup)', () => {
     expect(buildStats(build('motus'), catalog).engine).toBeCloseTo(0.75);
     expect(buildStats(build('foucault', 'C3'), catalog).topSpeed).toBeCloseTo(5 / 7);
     const c = catalog.specs.setup;
-    const short = buildStats(build('foucault', 'C1', { gearing: -3 }), catalog);
-    expect(short.engine).toBeCloseTo(1 - 3 * c.gearing.engine, 9);
-    expect(short.topSpeed).toBeCloseTo(1 - 3 * c.gearing.topSpeed, 9);
+    const shortBuild = build('foucault', 'C1', { gearing: -3 }), n = setupNotches(shortBuild.setup, c).gearing;
+    expect(n).toBeCloseTo(-3, 0); // -3 old notches, snapped to the real-units step
+    const short = buildStats(shortBuild, catalog);
+    expect(short.engine).toBeCloseTo(1 + n * c.gearing.engine, 9);
+    expect(short.topSpeed).toBeCloseTo(1 + n * c.gearing.topSpeed, 9);
     expect(short.engine).toBeGreaterThan(1);
     expect(short.topSpeed).toBeLessThan(1);
     const wings = buildStats(build('foucault', 'C1', { frontWing: 3, rearWing: 3 }), catalog);
     expect(wings.downforce).toBeGreaterThan(1);
     expect(wings.drag).toBeGreaterThan(1);
-    // A v0.16-style setup (physics.json's default car) still works: Med = neutral, High downforce = +2 wings.
-    expect(normalizeSetup({ downforce: 'Med', gearing: 'Med', brakes: 'Med' })).toEqual(NEUTRAL_SETUP);
-    expect(normalizeSetup({ downforce: 'High', gearing: 'Short', brakes: 'Med' })).toMatchObject({ frontWing: 2, rearWing: 2, gearing: -3 });
-    expect(normalizeSetup({ frontWing: 9, gearing: -2.6, balance: 'x' })).toMatchObject({ frontWing: 5, gearing: -3, balance: 0 });
+    // A v0.16-style setup (physics.json's default car) still works: Med = neutral, High downforce = +2 wings;
+    // so does the old notch format (profiles from before real units); real units are clamped and snapped.
+    const f = c.fields;
+    expect(normalizeSetup({ downforce: 'Med', gearing: 'Med', brakes: 'Med' }, c)).toEqual(neutralSetup(c));
+    expect(normalizeSetup({ downforce: 'High', gearing: 'Short', brakes: 'Med' }, c)).toMatchObject({ frontWingDeg: f.frontWingDeg.neutral + 2 * f.frontWingDeg.perNotch, rearWingDeg: f.rearWingDeg.neutral + 2 * f.rearWingDeg.perNotch });
+    expect(normalizeSetup({ balance: 4, rideHeight: -5 }, c)).toMatchObject({ arbFront: f.arbFront.neutral + 2, arbRear: f.arbRear.neutral - 2, rideFrontMm: f.rideFrontMm.neutral - 5 * f.rideFrontMm.perNotch });
+    expect(normalizeSetup({ frontWingDeg: 99, topSpeedKph: f.topSpeedKph.min + 1.2, pressurePsi: 'x' }, c)).toMatchObject({ frontWingDeg: f.frontWingDeg.max, topSpeedKph: f.topSpeedKph.min + f.topSpeedKph.step, pressurePsi: f.pressurePsi.neutral });
+    // Real units map back to the same physics: the neutral value of every field = notch 0.
+    expect(Object.values(setupNotches(neutralSetup(c), c)).every((v) => v === 0)).toBe(true);
   });
 });
 
@@ -226,7 +235,7 @@ describe('physics', () => {
   });
 
   it('setup: front wing loads the fronts, balance shifts the transfer, bias the brakes, pressure trades grip for wear', () => {
-    const fx = (setup: Partial<CarSetup>) => setupEffects({ ...NEUTRAL_SETUP, ...setup }, catalog);
+    const fx = (setup: Record<string, number>) => setupEffects(normalizeSetup(setup, catalog.specs.setup), catalog); // old notches -> real units
     expect(fx({}).frontDownforce).toBe(1);
     expect(fx({ frontWing: 3 }).frontDownforce).toBeGreaterThan(1);
     expect(fx({ frontWing: 3 }).rearDownforce).toBe(1);
@@ -241,7 +250,7 @@ describe('physics', () => {
     // On the road: a stiff front (understeer) turns less at the same steer than a stiff rear.
     const ctx = arena(300, 300, { x: 150, y: 290, heading: 0 });
     const yaw = (balance: number) => {
-      let w = createWorld(ctx, [{ ...ctx.physics.defaultCar, setup: { ...NEUTRAL_SETUP, balance } }]);
+      let w = createWorld(ctx, [{ ...ctx.physics.defaultCar, setup: normalizeSetup({ balance }, ctx.catalog.specs.setup) }]);
       w = drive(ctx, w, 60 * 2, { throttle: 0.6, brake: 0, steer: 0 });
       let y = 0;
       w = drive(ctx, w, 45, { throttle: 0.6, brake: 0, steer: 0.7 }, (s) => { y += Math.abs(s.cars[0]!.angVel); });
