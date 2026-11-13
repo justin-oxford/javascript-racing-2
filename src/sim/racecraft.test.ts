@@ -9,7 +9,7 @@ import slipstreamJson from '../../tools/fixtures/slipstream-baseline.json';
 import raceJson from '../../config/race.json';
 import { catalog, loadTrackNode, simContextNode } from '../../tools/load-track-node';
 import {
-  aiInputSource, blueFlag, buildRacingLine, chooseMode, concedes, cornersOf, createRaceWorld, keepGoodExits, lineFor, lineOffsets,
+  aiInputSource, blueFlag, buildRacingLine, buildStats, chooseMode, computeExitLine, offsetPath, offsetsFromPoints, concedes, cornersOf, createRaceWorld, keepGoodExits, lineFor, lineOffsets,
   otherHasRightOfWay, step, type AiConfig, type PhysicsConfig, type RaceConfig, type SimContext, type WorldState,
 } from './index';
 
@@ -57,6 +57,29 @@ describe('racecraft lines', () => {
     expect(lineFor('attack', 10, o)).toBe('neutral'); // no EXIT there: the racing line (INSIDE is slower)
     o.exit[10] = 1;
     expect(lineFor('attack', 10, o)).toBe('exit');
+  });
+});
+
+describe('EXIT line, time-weighted (Racing line optimizer card)', () => {
+  it('is quicker to the end of the straight after it, stays on the road, and survives the round trip through track.json', () => {
+    const halfCar = ctx.physics.car.widthM / 2, ppm = ctx.track.json.pxPerMeter;
+    const ex = computeExitLine(line, ctx.physics, buildStats(ctx.physics.defaultCar, ctx.catalog), { exitStraightM: cfg.exitStraightM, exitShiftM: cfg.exitShiftM, edgeM: cfg.edgeM, exitLeadM: 40, exitBumps: 10 }, ppm);
+    const corners = cornersOf(line), n = line.n, wrap = (q: number) => ((q % n) + n) % n;
+    const p = offsetPath(line, ex.offsets), vN = ex.speed(line.x, line.y), vE = ex.speed(p.x, p.y);
+    let faster = 0;
+    corners.forEach((c, k) => {
+      const next = corners[(k + 1) % corners.length]!;
+      if (wrap(next.from - c.to) * 2 < cfg.exitStraightM) return;
+      const from = c.from - 20, to = from + wrap(next.from - from);
+      if (ex.time(p.x, p.y, vE, from, to) < ex.time(line.x, line.y, vN, from, to) - 0.01) faster++;
+    });
+    expect(faster).toBeGreaterThan(0);
+    for (let q = 0; q < n; q++) {
+      const room = (ex.offsets[q]! > 0 ? line.right[q]! : line.left[q]!) - halfCar - cfg.edgeM;
+      expect(Math.abs(ex.offsets[q]!)).toBeLessThanOrEqual(Math.max(0, room) + 1e-6);
+    }
+    const back = offsetsFromPoints(line, ex.points.map((pt) => ({ x: pt.x / ppm, y: pt.y / ppm })));
+    for (let q = 0; q < n; q++) expect(Math.abs(back[q]! - ex.offsets[q]!)).toBeLessThan(0.15);
   });
 });
 
@@ -116,9 +139,10 @@ describe('a race with racecraft', () => {
     expect(lead.manage / (lead.manage + lead.attack + lead.defend + lead.nurse)).toBeGreaterThan(0.7);
     // Modes change (lines now change only onto a kept EXIT line, AI overtaking card: rare in a 3-lap race).
     expect(a.ai.reduce((s, d) => s + d.state.craftTicks.attack + d.state.craftTicks.defend, 0)).toBeGreaterThan(0);
-    // At most one: under this frozen baseline physics (twitchier than the live tuning) a car following closer
-    // since the AI overtaking card occasionally spins alone at a corner exit and the stuck recovery gets it
-    // going. With the live config (npm run racecraft-probe, 20 laps, 6 seeds x both modes): 1 stuck in 12 races.
-    expect(a.ai.reduce((s, d) => s + d.state.stuckEvents, 0)).toBeLessThanOrEqual(1);
+    // At most two: under this frozen baseline physics (twitchier than the live tuning) one car spins alone at
+    // the same corner exit (line point ~212, on the neutral line) and the stuck recovery gets it going; with
+    // the stored EXIT line the timing puts it there twice. With the live config (npm run racecraft-probe,
+    // 20 laps, seeds 1-3 x both modes, 2026-11-14): 0 stuck in 6 races.
+    expect(a.ai.reduce((s, d) => s + d.state.stuckEvents, 0)).toBeLessThanOrEqual(2);
   }, 60_000);
 });

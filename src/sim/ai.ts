@@ -5,7 +5,7 @@
 // in that state, so the server (card 07) runs it unchanged and replays stay exact.
 import { buildStats } from './car-config';
 import { damageGrip, isDamaged } from './damage';
-import { blueFlag, chooseMode, concedes, keepGoodExits, lineFor, LINE_IDS, lineOffsets, offsetPath, otherHasRightOfWay, type CraftMode, type LineId, type OvertakingConfig, type RacecraftConfig } from './racecraft';
+import { blueFlag, chooseMode, concedes, keepGoodExits, lineFor, LINE_IDS, lineOffsets, offsetPath, offsetsFromPoints, otherHasRightOfWay, type CraftMode, type LineId, type OvertakingConfig, type RacecraftConfig } from './racecraft';
 import { speedProfile } from './line-optimizer';
 import { aiCompound, compoundGrip, consumableScale, FUEL_TO_END, fuelGrip, stopDone, type PitPlan } from './strategy';
 import type { SimTrack } from './track';
@@ -410,10 +410,19 @@ const profiles = new WeakMap<AiPath, Map<string, Float64Array>>();
 /** The EXIT and INSIDE lines for a racing line (offsets + their geometry as paths), per racecraft config. */
 const craftLines = new WeakMap<RacingLine, { key: string; offsets: { exit: Float64Array; inside: Float64Array }; paths: [AiPath, AiPath, AiPath] }>();
 function racecraftLines(line: RacingLine, cfg: RacecraftConfig, halfCarM: number, ctx?: SimContext) {
-  const key = JSON.stringify([cfg.insideM, cfg.insideLeadM, cfg.exitStraightM, cfg.exitShiftM, cfg.exitWeight, cfg.exitIterations, cfg.edgeM, halfCarM]);
+  const key = JSON.stringify([cfg.insideM, cfg.insideLeadM, cfg.exitStraightM, cfg.exitShiftM, cfg.exitWeight, cfg.exitIterations, cfg.edgeM, halfCarM, ctx?.track.json.racingLineExit?.length ?? 0]);
   let c = craftLines.get(line);
   if (!c || c.key !== key) {
     let offsets = lineOffsets(line, cfg, halfCarM);
+    // The track's own EXIT line (Racing line optimizer card: time-weighted, npm run optimize-exit-line), when it
+    // has one: projected onto this line; tiny offsets away from those corners are just projection noise.
+    const stored = ctx?.track.json.racingLineExit;
+    if (stored && stored.length > 2) {
+      const ppm = ctx!.track.json.pxPerMeter;
+      const exit = offsetsFromPoints(line, stored.map((p) => ({ x: p.x / ppm, y: p.y / ppm })));
+      for (let q = 0; q < exit.length; q++) if (Math.abs(exit[q]!) < 0.05) exit[q] = 0;
+      offsets = { ...offsets, exit };
+    }
     // Only EXIT lines that are actually faster onto their straight (with the default car's speed profile).
     if (ctx) {
       const stats = buildStats(ctx.physics.defaultCar, ctx.catalog), o = { cornerMargin: 1, brakeMargin: 1, fuelKg: ctx.physics.fuel.startKg / 2 };

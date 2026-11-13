@@ -7,7 +7,7 @@
 // Usage: npm run racecraft-probe [-- --laps 20 --seed 1 --equal]   (--equal: identical cars, the drivers decide)
 import aiJson from '../config/ai.json' with { type: 'json' };
 import driversJson from '../config/drivers.json' with { type: 'json' };
-import { aiInputSource, assignDrivers, driverPreset, type DriverDef, buildRacingLine, buildStats, cornersOf, createRaceWorld, keepGoodExits, lineOffsets, offsetPath, speedProfile, step, type AiConfig, type CarBuild, type WorldState } from '../src/sim/index.ts';
+import { aiInputSource, assignDrivers, driverPreset, type DriverDef, buildRacingLine, buildStats, cornersOf, createRaceWorld, keepGoodExits, lineOffsets, offsetPath, offsetsFromPoints, speedProfile, step, type AiConfig, type CarBuild, type WorldState } from '../src/sim/index.ts';
 import { catalog, defaultTrackIdNode, loadTrackNode, simContextNode } from './load-track-node.ts';
 
 const args = process.argv.slice(2);
@@ -21,7 +21,10 @@ const rc = cfg.racecraft!;
 
 // 1. Lines.
 {
-  const raw = lineOffsets(line, rc, ctx.physics.car.widthM / 2);
+  // The track's stored EXIT line (npm run optimize-exit-line) when it has one, else the generated one.
+  const gen = lineOffsets(line, rc, ctx.physics.car.widthM / 2), stored = loaded.track.json.racingLineExit, ppm = loaded.track.json.pxPerMeter;
+  const raw = stored?.length ? { ...gen, exit: offsetsFromPoints(line, stored.map((p) => ({ x: p.x / ppm, y: p.y / ppm }))).map((v) => (Math.abs(v) < 0.05 ? 0 : v)) } : gen;
+  console.log(`EXIT line: ${stored?.length ? 'track.json racingLineExit' : 'generated from curvature'}`);
   const corners = cornersOf(line);
   const stats = buildStats(ctx.physics.defaultCar, ctx.catalog);
   const prof = (x: Float64Array, y: Float64Array) => speedProfile(x, y, ctx.physics, stats, { cornerMargin: 1, brakeMargin: 1, fuelKg: ctx.physics.fuel.startKg / 2 });

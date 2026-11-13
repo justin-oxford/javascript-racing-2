@@ -32,7 +32,8 @@
     "setup-search": "tsx tools/setup-search.ts",
     "racecraft-probe": "tsx tools/racecraft-probe.ts",
     "pass-probe": "tsx tools/pass-probe.ts",
-    "strategy-probe": "tsx tools/strategy-probe.ts"
+    "strategy-probe": "tsx tools/strategy-probe.ts",
+    "optimize-exit-line": "tsx tools/optimize-exit-line.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

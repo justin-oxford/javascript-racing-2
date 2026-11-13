@@ -117,6 +117,76 @@ export function lineOffsets(line: LinePath, cfg: RacecraftConfig, halfCarM: numb
   return { exit, inside };
 }
 
+/**
+ * EXIT line, time-weighted (Racing line optimizer card, Justin 2026-11-13): for every corner followed by at least
+ * exitStraightM of straight, move the line sideways by a sum of smooth bumps (no kinks) from exitLeadM before
+ * the corner to exitShiftM after it, choosing the bump sizes that minimise the TIME from before the corner to
+ * the end of the following straight. `timeOver(offsets, from, to)` is the lap's speed profile on the offset
+ * line, timed over line points from..to (the caller supplies the physics). Inside the track: room minus half a
+ * car and edgeM. Returns offsets (+ = right of travel), 0 away from those corners.
+ */
+export function optimizeExitOffsets(line: LinePath, timeOver: (off: Float64Array, from: number, to: number) => number, cfg: Pick<RacecraftConfig, 'exitStraightM' | 'exitShiftM' | 'edgeM'> & { exitLeadM: number; exitBumps: number }, halfCarM: number): Float64Array {
+  const n = line.n, step = 2, corners = cornersOf(line), out = new Float64Array(n);
+  const room = (q: number, side: number) => Math.max(0, (side > 0 ? line.right[q]! : line.left[q]!) - halfCarM - cfg.edgeM);
+  corners.forEach((c, ci) => {
+    const next = corners[(ci + 1) % corners.length]!;
+    if (wrap(next.from - c.to, n) * step < cfg.exitStraightM) return;
+    const a = c.from - Math.round(cfg.exitLeadM / step), b = c.to + Math.round(cfg.exitShiftM / step), span = b - a;
+    const to = a + wrap(next.from - a, n); // timed to the end of the straight (unwrapped: may run past index 0)
+    const K = Math.max(2, cfg.exitBumps), width = span / (K - 1) * 1.25;
+    // Raised-cosine bumps, centred evenly between the ends (each end itself pinned at 0).
+    const centre = (k: number) => a + (span * (k + 1)) / (K + 1);
+    const basis = (k: number, j: number) => { const u = (j - centre(k)) / width; return Math.abs(u) < 1 ? 0.5 * (1 + Math.cos(Math.PI * u)) : 0; };
+    const coef = new Float64Array(K);
+    const build = (cf: Float64Array): Float64Array | undefined => {
+      const off = Float64Array.from(out);
+      for (let j = a; j <= b; j++) {
+        let v = 0;
+        for (let k = 0; k < K; k++) v += cf[k]! * basis(k, j);
+        const q = wrap(j, n);
+        if (v > room(q, 1) + 1e-9 || -v > room(q, -1) + 1e-9) return undefined; // off the usable road
+        off[q] = v;
+      }
+      return off;
+    };
+    let best = timeOver(build(coef)!, a, to);
+    for (const h of [1, 0.5, 0.25, 0.1]) {
+      for (let pass = 0, improved = true; pass < 6 && improved; pass++) {
+        improved = false;
+        for (let k = 0; k < K; k++) for (const dir of [-1, 1]) {
+          const cand = Float64Array.from(coef); cand[k] = cand[k]! + dir * h;
+          const off = build(cand);
+          if (!off) continue;
+          const t = timeOver(off, a, to);
+          if (t < best - 1e-4) { best = t; coef.set(cand); improved = true; }
+        }
+      }
+    }
+    const done = build(coef)!;
+    for (let j = a; j <= b; j++) out[wrap(j, n)] = done[wrap(j, n)]!;
+  });
+  return out;
+}
+
+/** Offsets of a stored line (track.json racingLineExit, metres) from this line, point by point (+ = right). */
+export function offsetsFromPoints(line: LinePath, pts: ReadonlyArray<{ x: number; y: number }>): Float64Array {
+  const n = line.n, out = new Float64Array(n);
+  if (pts.length < 3) return out;
+  let j = 0, bd = Infinity;
+  for (let i = 0; i < pts.length; i++) { const d = (pts[i]!.x - line.x[0]!) ** 2 + (pts[i]!.y - line.y[0]!) ** 2; if (d < bd) { bd = d; j = i; } }
+  for (let q = 0; q < n; q++) {
+    // Walk forward along the stored points to the nearest one (they run the same way round).
+    for (let s = 0; s < 8; s++) {
+      const nj = (j + 1) % pts.length, dn = (pts[nj]!.x - line.x[q]!) ** 2 + (pts[nj]!.y - line.y[q]!) ** 2, dc = (pts[j]!.x - line.x[q]!) ** 2 + (pts[j]!.y - line.y[q]!) ** 2;
+      if (dn < dc) j = nj; else break;
+    }
+    const a = wrap(q - 1, n), b = wrap(q + 1, n);
+    const tx = line.x[b]! - line.x[a]!, ty = line.y[b]! - line.y[a]!, l = Math.hypot(tx, ty) || 1;
+    out[q] = (pts[j]!.x - line.x[q]!) * (-ty / l) + (pts[j]!.y - line.y[q]!) * (tx / l);
+  }
+  return out;
+}
+
 /** A variant line's points (neutral + offset along the right-hand normal) and their curvature. */
 export function offsetPath(line: LinePath, off: Float64Array): { x: Float64Array; y: Float64Array; k: Float64Array } {
   const n = line.n, x = new Float64Array(n), y = new Float64Array(n), k = new Float64Array(n), raw = new Float64Array(n);

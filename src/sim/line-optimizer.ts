@@ -13,6 +13,7 @@
 import type { PhysicsConfig, Stats } from './car-config';
 import type { Point, SimTrack } from './track';
 import { surfaceAt } from './track';
+import { offsetPath, optimizeExitOffsets, type LinePath } from './racecraft';
 
 const G = 9.81;
 
@@ -302,4 +303,22 @@ export function speedProfile(x: ArrayLike<number>, y: ArrayLike<number>, physics
     }
   }
   return v;
+}
+
+/**
+ * The EXIT line (Racing line optimizer card): the racing line moved for exit speed before long straights,
+ * timed with this speed profile (see racecraft.ts optimizeExitOffsets). Returns the whole lap's points in
+ * track pixels (track.json racingLineExit) and the offsets. Used by npm run optimize-exit-line and the editor.
+ */
+export function computeExitLine(line: LinePath, physics: PhysicsConfig, stats: Stats, cfg: { exitStraightM: number; exitShiftM: number; edgeM: number; exitLeadM: number; exitBumps: number }, ppm: number): { points: Point[]; offsets: Float64Array; speed: (x: ArrayLike<number>, y: ArrayLike<number>) => Float64Array; time: (x: ArrayLike<number>, y: ArrayLike<number>, v: ArrayLike<number>, from: number, to: number) => number } {
+  const n = line.n, wrap = (q: number) => ((q % n) + n) % n;
+  const speed = (x: ArrayLike<number>, y: ArrayLike<number>) => speedProfile(x, y, physics, stats, { cornerMargin: 1, brakeMargin: 1, fuelKg: physics.fuel.startKg / 2 });
+  const time = (x: ArrayLike<number>, y: ArrayLike<number>, v: ArrayLike<number>, from: number, to: number) => {
+    let t = 0;
+    for (let q = from; q < to; q++) { const i = wrap(q), j = wrap(q + 1); t += Math.hypot(x[j]! - x[i]!, y[j]! - y[i]!) / Math.max(1, (v[i]! + v[j]!) / 2); }
+    return t;
+  };
+  const offsets = optimizeExitOffsets(line, (off, from, to) => { const p = offsetPath(line, off); return time(p.x, p.y, speed(p.x, p.y), from, to); }, cfg, physics.car.widthM / 2);
+  const p = offsetPath(line, offsets);
+  return { points: Array.from({ length: n }, (_, i) => ({ x: Math.round(p.x[i]! * ppm * 10) / 10, y: Math.round(p.y[i]! * ppm * 10) / 10 })), offsets, speed, time };
 }

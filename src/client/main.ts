@@ -1,4 +1,4 @@
-import { aiStartCompound, consumableScale, defaultPitPlan, offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type CarSetup, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { aiStartCompound, computeExitLine, consumableScale, defaultPitPlan, offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type CarSetup, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -507,6 +507,12 @@ async function main(): Promise<void> {
         json.racingLine = out.line;
         json.racingLineSpeed = Array.from(speedProfile(out.line.map((p) => p.x / ppm), out.line.map((p) => p.y / ppm), physics, buildStats(physics.defaultCar, ctx.catalog), { cornerMargin: 1, brakeMargin: 1, fuelKg: physics.fuel.startKg / 2 }), (v) => Math.round(v * 10) / 10);
         racingLine = buildRacingLine(ctx.track);
+        // ...and the EXIT line on top of it (racecraft), so the two stay in step.
+        const rc = aiCfg.racecraft, lc = racingLineConfig as unknown as { exitLeadM: number; exitBumps: number };
+        if (racingLine && rc) {
+          json.racingLineExit = computeExitLine(racingLine, physics, buildStats(physics.defaultCar, ctx.catalog), { exitStraightM: rc.exitStraightM, exitShiftM: rc.exitShiftM, edgeM: rc.edgeM, exitLeadM: lc.exitLeadM, exitBumps: lc.exitBumps }, ppm).points;
+          racingLine = buildRacingLine(ctx.track); // a fresh line object: the AI rebuilds its racecraft lines
+        }
         return `Optimized: ${out.line.length} points, ${out.lengthM.toFixed(0)} m, tightest radius ${out.minRadiusM.toFixed(1)} m, kerb use ${Math.round(kerbUse * 100)}%.`;
       }, racingLineConfig.kerbUse)
     : undefined;

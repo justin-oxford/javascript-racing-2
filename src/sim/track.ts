@@ -50,6 +50,9 @@ export interface TrackJson {
   racingLine: Point[];
   /** The seed the optimizer started from (hand-placed or earlier): driving direction. Kept so it can re-run. */
   racingLineSeed?: Point[];
+  /** AI racecraft EXIT line (Racing line optimizer card): the racing line moved for exit speed before long
+   *  straights, same points round the lap (npm run optimize-exit-line). Absent = generated from curvature. */
+  racingLineExit?: Point[];
   /** Car setup overhaul card: this track's base setup (real units; npm run setup-search -- --write). What
    *  players and the AI load here; players adjust from it. Absent = the default car's. */
   baseSetup?: CarSetup;
