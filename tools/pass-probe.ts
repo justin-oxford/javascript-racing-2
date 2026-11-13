@@ -3,7 +3,8 @@
 // margins x --slow, or with identical cars it never gets close), rolling, on the main straight.
 // Does it get by, how often does it commit to a move and complete it, does it touch, and does aggression
 // (how early it pulls out, how close it follows; a low-aggression defender concedes) change it?
-// Usage: npm run pass-probe [-- --laps 3 --slow 0.9]
+// Usage: npm run pass-probe [-- --laps 3 --slow 0.9]   (env TRACE=1 / TRACE=2: attacker state every 0.5 s / every
+// 5 ticks during a committed move; LAPS=1: lap times and battery; HITS=1: each contact's geometry)
 import aiJson from '../config/ai.json' with { type: 'json' };
 import { aiInputSource, buildRacingLine, createWorld, driverPreset, step, type AiConfig, type DriverStats, type WorldState } from '../src/sim/index.ts';
 import { defaultTrackIdNode, loadTrackNode, simContextNode } from './load-track-node.ts';
@@ -40,8 +41,17 @@ function duel(attacker: DriverStats, defender: DriverStats, gapM: number, v: num
   for (let t = 0; t < 60 * 40 * laps && w.cars[0]!.timing.laps < laps; t++) {
     const prev = w;
     w = step(w, ai.map((d) => d.read(w.tick)), ctx);
-    if (w.cars[1]!.carContact && !prev.cars[1]!.carContact) contacts++;
+    if (w.cars[1]!.carContact && !prev.cars[1]!.carContact) {
+      contacts++;
+      if (process.env.HITS) {
+        const a = w.cars[1]!, d = w.cars[0]!, fx = Math.sin(a.heading), fy = -Math.cos(a.heading);
+        const lon = (d.x - a.x) * fx + (d.y - a.y) * fy, lat = -(d.x - a.x) * fy + (d.y - a.y) * fx;
+        console.log(`hit t=${(t / 60).toFixed(1)} near ${ai[1]!.state.near} lon ${lon.toFixed(1)} lat ${lat.toFixed(1)} vA ${Math.hypot(a.vx, a.vy).toFixed(1)} vD ${Math.hypot(d.vx, d.vy).toFixed(1)} offA ${ai[1]!.state.offset.toFixed(2)} offD ${ai[0]!.state.offset.toFixed(2)} tgt ${ai[1]!.state.passTarget} side ${ai[1]!.state.passSide}`);
+      }
+    }
     const gap = (prog(0) - prog(1)) * 2;
+    if (process.env.LAPS) for (const e of w.events) if (e.type === 'lap') console.log('lap car', e.car, e.time.toFixed(2), 'deploying', w.cars.map((c) => c.ers.deploying).join('/'), 'batt', w.cars.map((c) => c.ers.batteryKJ.toFixed(0)).join('/'));
+    if (process.env.TRACE && (t % 30 === 0 || (process.env.TRACE === '2' && ai[1]!.state.passTarget >= 0 && t % 5 === 0)) && t < 60 * 45) console.log((t / 60).toFixed(1), 'gap', gap, 'v', w.cars.map((c) => Math.hypot(c.vx, c.vy).toFixed(1)).join('/'), 'craft', ai[1]!.state.craft, 'off', ai[1]!.state.offset.toFixed(2), 'tgt', ai[1]!.state.passTarget, 'near', ai[1]!.state.near, 'brk', ai[1]!.state.lastAllowed.toFixed(1));
     if (t > 120) { sumGap += gap; nGap++; ahead = gap < -3; if (ahead && firstPassSec < 0) firstPassSec = t / 60; }
   }
   return { ahead, firstPassSec, contacts, avgGap: sumGap / Math.max(1, nGap), tries: ai[1]!.state.passTries, made: ai[1]!.state.passesMade, conceded: ai[0]!.state.concessions };
