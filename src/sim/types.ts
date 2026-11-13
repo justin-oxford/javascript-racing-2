@@ -3,6 +3,7 @@ import type { EngineMode, ErsState } from './ers';
 import type { DamageMode, DamageState } from './damage';
 import type { RejoinState } from './rejoin';
 import type { Compound, PitPlan, RaceLengthMode, StopState } from './strategy';
+import type { WeatherMode } from './weather';
 // All sim state is plain, JSON-serializable data. No classes, no hidden state.
 import type { QualiState } from './quali';
 import type { RaceState } from './race';
@@ -176,6 +177,9 @@ export interface SessionSettings {
   damage?: DamageMode;
   /** Race strategy: scale fuel burn and tyre wear to the race length ('matched'), or not ('off', default). */
   raceLength?: RaceLengthMode;
+  /** Wet weather card: Dry (default), Wet, or Changeable (a seeded shower: weatherSeed). */
+  weather?: WeatherMode;
+  weatherSeed?: number;
 }
 
 export interface Rules {

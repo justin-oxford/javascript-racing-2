@@ -2,6 +2,7 @@
 // VFX triggers against real sim runs on synthetic arenas.
 import evolutionJson from '../../../config/evolution.json';
 import strategyJson from '../../../config/strategy.json';
+import weatherJson from '../../../config/weather.json';
 import ersJson from '../../../config/ers.json';
 import damageJson from '../../../config/damage.json';
 import assistsJson from '../../../tools/fixtures/assists-baseline.json';
@@ -15,7 +16,7 @@ import rules from '../../../config/rules.json';
 import vfx from '../../../tools/fixtures/vfx-baseline.json';
 import wallTracing from '../../../config/wall-tracing.json';
 import { catalog, surfaces } from '../../../tools/load-track-node';
-import { createPhysicsCache, createSimTrack, createWorld, step, traceWalls, type CarInput, type ErsConfig, type StrategyConfig, type PhysicsConfig, type SimContext, type TrackJson, type WorldState } from '../../sim';
+import { createPhysicsCache, createSimTrack, createWorld, step, traceWalls, type CarInput, type ErsConfig, type StrategyConfig, type WeatherConfig, type PhysicsConfig, type SimContext, type TrackJson, type WorldState } from '../../sim';
 import { wheelFx, type WheelFx } from './triggers';
 
 const PPM = 10;
@@ -37,7 +38,7 @@ function arena(wM: number, hM: number, spawn: { x: number; y: number; heading: n
       data[y * w + x] = idx(x < PPM || y < PPM || x >= w - PPM || y >= h - PPM ? 'wall' : (paint?.(x / PPM, y / PPM) ?? 'asphalt'));
   const json: TrackJson = { id: 't', name: 't', pxPerMeter: PPM, files: { mask: 'm' }, timingLines: {}, racingLine: [], grid: [], spawn: { x: spawn.x * PPM, y: spawn.y * PPM, heading: spawn.heading } };
   const track = createSimTrack(json, { width: w, height: h, data }, surfaces);
-  return { track, walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing), physics: rawPhysics(), catalog, rules, contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: { ...assistsJson, abs: { ...assistsJson.abs, enabled: false } }, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, strategy: strategyJson as StrategyConfig, cache: createPhysicsCache() };
+  return { track, walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing), physics: rawPhysics(), catalog, rules, contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: { ...assistsJson, abs: { ...assistsJson.abs, enabled: false } }, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, strategy: strategyJson as unknown as StrategyConfig, weather: weatherJson as unknown as WeatherConfig, cache: createPhysicsCache() };
 }
 
 /** Run inputs, collect each tick's per-wheel FX. */

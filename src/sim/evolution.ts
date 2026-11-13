@@ -32,6 +32,8 @@ export interface SurfaceGrid {
   cellM: number;
   rubber: number[];
   marbles: number[];
+  /** Wet weather card: standing water 0..1 per cell; absent = a dry track (weather.ts). */
+  water?: number[] | undefined;
 }
 
 // Which cells are drivable track (static per track + cell size, not state).
@@ -58,6 +60,11 @@ function drivable(track: SimTrack, cellM: number, w: number, h: number): Uint8Ar
     }
   m.set(cellM, d);
   return d;
+}
+
+/** Which cells of a grid are drivable track (weather.ts uses it for rain). */
+export function drivableCells(track: SimTrack, g: Pick<SurfaceGrid, 'w' | 'h' | 'cellM'>): Uint8Array {
+  return drivable(track, g.cellM, g.w, g.h);
 }
 
 /** A green track: no rubber, no marbles. */
@@ -98,7 +105,7 @@ function segDist(px: number, py: number, ax: number, ay: number, bx: number, by:
 /** Between sessions: marbles swept to zero, rubber kept minus sessions.rubberLoss. */
 export function nextSession(g: SurfaceGrid, cfg: EvolutionConfig): SurfaceGrid {
   const keep = 1 - cfg.sessions.rubberLoss;
-  return { ...g, rubber: g.rubber.map((r) => r * keep), marbles: new Array<number>(g.w * g.h).fill(0) };
+  return { ...g, rubber: g.rubber.map((r) => r * keep), marbles: new Array<number>(g.w * g.h).fill(0) }; // (water carries over: weather.ts)
 }
 
 /** Bilinear sample of a layer at (x, y) metres (cell centres). */
@@ -114,11 +121,14 @@ export function surfaceAtPoint(g: SurfaceGrid | undefined, x: number, y: number)
   return g ? { rubber: sample(g, g.rubber, x, y), marbles: sample(g, g.marbles, x, y) } : { rubber: 0, marbles: 0 };
 }
 
-/** Grip multiplier for a wheel at (x, y) metres. */
-export function evolutionGrip(g: SurfaceGrid | undefined, x: number, y: number, cfg: EvolutionConfig): number {
+/** Grip multiplier for a wheel at (x, y) metres. With water (`wetRubber` from weather.json): rubber is
+ *  slippery in the wet, its bonus turning into -wetRubber x gripBonus at full water, so the dry-weather line
+ *  is the worst place to be in the rain. */
+export function evolutionGrip(g: SurfaceGrid | undefined, x: number, y: number, cfg: EvolutionConfig, water = 0, wetRubber = 0): number {
   if (!g || !cfg.enabled) return 1;
   const s = surfaceAtPoint(g, x, y);
-  return (1 + cfg.rubber.gripBonus * s.rubber) * (1 - cfg.marbles.gripLoss * s.marbles);
+  const rubberFx = 1 - water * (1 + wetRubber); // 1 dry, -wetRubber at full water
+  return (1 + cfg.rubber.gripBonus * s.rubber * rubberFx) * (1 - cfg.marbles.gripLoss * s.marbles);
 }
 
 /** One wheel's effect this tick (what update() needs from the car step). */

@@ -3,7 +3,7 @@
 // Tuning is Justin's job; this file's job is to be a good instrument.
 import GUI, { type Controller } from 'lil-gui';
 import { normalizeSetup, SETUP_FIELDS, surfaceAtPoint, wheelPositions } from '../../sim';
-import type { AiConfig, AssistsConfig, CarBuild, DamageConfig, ErsConfig, EvolutionConfig, StrategyConfig, ContactConfig, PhysicsConfig, RaceConfig, Rules, SlipstreamConfig, SurfaceDef, WorldState } from '../../sim';
+import type { AiConfig, AssistsConfig, CarBuild, DamageConfig, ErsConfig, EvolutionConfig, StrategyConfig, WeatherConfig, ContactConfig, PhysicsConfig, RaceConfig, Rules, SlipstreamConfig, SurfaceDef, WorldState } from '../../sim';
 import type { VfxConfig } from '../vfx/triggers';
 import type { VfxQuality } from '../vfx/vfx';
 import type { AudioConfig } from '../audio/targets';
@@ -48,6 +48,23 @@ const RANGES: Record<string, [number, number, number]> = {
   'strategy.raceLength.refLaps': [1, 60, 1],
   'strategy.pitBoard.fuelStepKg': [1, 20, 1],
   'strategy.ai.startStintShare': [0.2, 1, 0.05],
+  'weather.rainPerSec': [0, 0.1, 0.001],
+  'weather.dryPerSec': [0, 0.03, 0.0005],
+  'weather.offLineDry': [1, 10, 0.1],
+  'weather.clearPerSec': [0, 1, 0.01],
+  'weather.clearRefMps': [5, 80, 1],
+  'weather.washRubberPerSec': [0, 0.1, 0.001],
+  'weather.washMarblesPerSec': [0, 0.3, 0.005],
+  'weather.wetRubber': [0, 4, 0.05],
+  'weather.wetStartWater': [0, 1, 0.05],
+  'weather.aquaplane.depth': [0, 1, 0.05],
+  'weather.aquaplane.speedMps': [10, 100, 1],
+  'weather.aquaplane.grip': [0, 1, 0.05],
+  'weather.wet.intensity': [0, 1, 0.05],
+  'weather.ai.interAbove': [0, 1, 0.01],
+  'weather.ai.wetAbove': [0, 1, 0.01],
+  'weather.ai.slickBelow': [0, 1, 0.01],
+  'weather.ai.lookM': [20, 1000, 10],
   'car.frontAxleFromCentreM': [0.5, 3, 0.005],
   'steering.assistPeakPct': [0.5, 2, 0.01],
   'steering.assistFromKph': [0, 150, 1],
@@ -192,11 +209,13 @@ export interface TuningTargets {
   evolution: EvolutionConfig;
   /** config/strategy.json, live: compounds, stops, race-length scaling. */
   strategy: StrategyConfig;
+  /** config/weather.json, live: rain, water, drying (Wet weather card). */
+  weather: WeatherConfig;
   /** Called when the team/spec/setup changes, to rebuild the player's car. */
   onBuildChange(build: CarBuild): void;
 }
 
-async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai' | 'contact' | 'race' | 'slipstream' | 'assists' | 'damage' | 'ers' | 'evolution' | 'strategy', value: unknown): Promise<string> {
+async function saveConfig(name: 'physics' | 'surfaces' | 'rules' | 'vfx' | 'audio' | 'ai' | 'contact' | 'race' | 'slipstream' | 'assists' | 'damage' | 'ers' | 'evolution' | 'strategy' | 'weather', value: unknown): Promise<string> {
   const res = await fetch(`/__tuning/save/${name}`, { method: 'POST', headers: { 'x-tuning-panel': '1' }, body: formatTrackJson(value) });
   return res.ok ? `config/${name}.json` : `${name}: ${await res.text()}`;
 }
@@ -335,6 +354,12 @@ export class TuningPanel {
     for (const section of ['service', 'raceLength', 'pitBoard', 'ai'] as const) for (const key of Object.keys(this.t.strategy[section])) this.slider(strat, this.t.strategy[section] as unknown as Record<string, number>, key, `strategy.${section}.${key}`, `${section}.${key}`);
     strat.close();
 
+    const wxF = gui.addFolder('Weather (rain, water, drying)');
+    const wx = this.t.weather as unknown as Record<string, unknown>;
+    for (const key of ['rainPerSec', 'dryPerSec', 'offLineDry', 'clearPerSec', 'clearRefMps', 'washRubberPerSec', 'washMarblesPerSec', 'wetRubber', 'wetStartWater']) this.slider(wxF, wx as Record<string, number>, key, `weather.${key}`);
+    for (const section of ['aquaplane', 'wet', 'ai'] as const) for (const key of Object.keys(this.t.weather[section])) this.slider(wxF, this.t.weather[section] as unknown as Record<string, number>, key, `weather.${section}.${key}`, `${section}.${key}`);
+    wxF.close();
+
     const dmg = gui.addFolder('Car damage (when the menu setting is on)');
     for (const key of ['thresholdMps', 'perMps', 'strength', 'wallMult', 'barrierMult', 'carMult', 'endZone'] as const) this.slider(dmg, this.t.damage, key, `damage.${key}`);
     for (const section of ['effects', 'repair'] as const) {
@@ -378,9 +403,9 @@ export class TuningPanel {
       status.msg = m;
       statusCtl.updateDisplay();
     };
-    const all = () => ({ physics, surfaces: this.t.surfacesConfig, rules, vfx: this.t.vfx, audio: this.t.audio, ai: this.t.ai, contact: this.t.contact, race: this.t.race, slipstream: this.t.slipstream, assists: this.t.assists, damage: this.t.damage, ers: this.t.ers, evolution: this.t.evolution, strategy: this.t.strategy });
+    const all = () => ({ physics, surfaces: this.t.surfacesConfig, rules, vfx: this.t.vfx, audio: this.t.audio, ai: this.t.ai, contact: this.t.contact, race: this.t.race, slipstream: this.t.slipstream, assists: this.t.assists, damage: this.t.damage, ers: this.t.ers, evolution: this.t.evolution, strategy: this.t.strategy, weather: this.t.weather });
     io.add({
-      save: async () => !import.meta.env.DEV ? show('Save only works on the local dev server: use Copy all settings') : show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai), saveConfig('contact', this.t.contact), saveConfig('race', this.t.race), saveConfig('slipstream', this.t.slipstream), saveConfig('assists', this.t.assists), saveConfig('damage', this.t.damage), saveConfig('ers', this.t.ers), saveConfig('evolution', this.t.evolution), saveConfig('strategy', this.t.strategy)])).join(', ')),
+      save: async () => !import.meta.env.DEV ? show('Save only works on the local dev server: use Copy all settings') : show('Saved ' + (await Promise.all([saveConfig('physics', physics), saveConfig('surfaces', this.t.surfacesConfig), saveConfig('rules', rules), saveConfig('vfx', this.t.vfx), saveConfig('audio', this.t.audio), saveConfig('ai', this.t.ai), saveConfig('contact', this.t.contact), saveConfig('race', this.t.race), saveConfig('slipstream', this.t.slipstream), saveConfig('assists', this.t.assists), saveConfig('damage', this.t.damage), saveConfig('ers', this.t.ers), saveConfig('evolution', this.t.evolution), saveConfig('strategy', this.t.strategy), saveConfig('weather', this.t.weather)])).join(', ')),
     }, 'save').name('Save to /config');
     io.add({ copy: () => void navigator.clipboard.writeText(formatTrackJson(physics)).then(() => show('physics.json copied')) }, 'copy').name('Copy physics JSON');
     // Every config file the panel edits, keyed by file name: paste it to Claude to write them to /config.

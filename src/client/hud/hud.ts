@@ -91,6 +91,14 @@ export class Hud {
     window.addEventListener('resize', () => this.layout());
   }
 
+  /** Wet weather card: the weather tag in the bar ('' hides it). */
+  setWeather(text: string, raining: boolean): void {
+    const e = this.el.weather!;
+    if (e.textContent !== text) e.textContent = text;
+    e.classList.toggle('on', !!text);
+    e.classList.toggle('rain', raining);
+  }
+
   /** Height of the top bar in canvas backing pixels (so the K debug text can sit below it). */
   barHeightBackingPx(): number {
     return this.el.bar!.getBoundingClientRect().height * (window.devicePixelRatio || 1);
@@ -116,6 +124,7 @@ export class Hud {
         <div class="lap-speed">Lap:<b data-id="lap">0</b>Speed:<b data-id="speed">--</b>kph</div>
         <div class="current">Time:<b data-id="time">---</b></div>
         <div class="tow" data-id="tow" title="Slipstream: less drag behind another car">TOW</div>
+        <div class="weather" data-id="weather" title="Weather: rain now, or when it's coming"></div>
         <div class="ers" title="Engine mode (E) and battery: hold Shift or / to deploy">
           <span class="compound" data-id="compound" title="Tyre compound (pit board: 1 / 2 / 3)">M</span>
           <span class="mode" data-id="ersMode">STD</span>

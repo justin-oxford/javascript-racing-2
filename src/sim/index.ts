@@ -18,3 +18,4 @@ export * from './evolution';
 export * from './racecraft';
 export * from './drivers';
 export * from './strategy';
+export * from './weather';

@@ -76,7 +76,7 @@ export class KeyboardInput implements InputSource {
   private pitKey(code: string): boolean {
     const is = (a: BindAction) => this.binds[a].includes(code);
     const p = this.pitPlan, step = this.fuelStepKg, maxSteps = Math.floor(this.tankKg / step) * step;
-    const compound: Compound | undefined = is('pitSoft') ? 'soft' : is('pitMedium') ? 'medium' : is('pitHard') ? 'hard' : undefined;
+    const compound: Compound | undefined = is('pitSoft') ? 'soft' : is('pitMedium') ? 'medium' : is('pitHard') ? 'hard' : is('pitInter') ? 'inter' : is('pitWet') ? 'wet' : undefined;
     if (compound) this.pitPlan = { ...p, compound, tyres: true };
     else if (is('pitFuelUp')) this.pitPlan = { ...p, fuelKg: p.fuelKg === FUEL_TO_END || p.fuelKg + step > maxSteps ? FUEL_TO_END : p.fuelKg + step };
     else if (is('pitFuelDown')) this.pitPlan = { ...p, fuelKg: p.fuelKg === FUEL_TO_END ? maxSteps : Math.max(0, p.fuelKg - step) };

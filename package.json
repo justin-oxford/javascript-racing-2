@@ -34,7 +34,8 @@
     "pass-probe": "tsx tools/pass-probe.ts",
     "strategy-probe": "tsx tools/strategy-probe.ts",
     "optimize-exit-line": "tsx tools/optimize-exit-line.ts",
-    "noise-probe": "tsx tools/noise-probe.ts"
+    "noise-probe": "tsx tools/noise-probe.ts",
+    "weather-probe": "tsx tools/weather-probe.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

@@ -2,6 +2,7 @@
 // Slipstream (tow) + dirty air: the wake rules on their own, then two cars down a long straight.
 import evolutionJson from '../../config/evolution.json';
 import strategyJson from '../../config/strategy.json';
+import weatherJson from '../../config/weather.json';
 import ersJson from '../../config/ers.json';
 import damageJson from '../../config/damage.json';
 import assistsJson from '../../tools/fixtures/assists-baseline.json';
@@ -13,7 +14,7 @@ import raceJson from '../../config/race.json';
 import rules from '../../config/rules.json';
 import wallTracing from '../../config/wall-tracing.json';
 import { catalog, surfaces } from '../../tools/load-track-node';
-import { createPhysicsCache, createSimTrack, createWorld, step, traceWalls, wakeEffects, type ErsConfig, type StrategyConfig, type PhysicsConfig, type SimContext, type SlipstreamConfig, type TrackJson, type WorldState } from './index';
+import { createPhysicsCache, createSimTrack, createWorld, step, traceWalls, wakeEffects, type ErsConfig, type StrategyConfig, type WeatherConfig, type PhysicsConfig, type SimContext, type SlipstreamConfig, type TrackJson, type WorldState } from './index';
 
 const cfg = slipstreamJson as SlipstreamConfig;
 const car = (x: number, y: number, heading = 0, v = 50) => ({ x, y, heading, vx: Math.sin(heading) * v, vy: -Math.cos(heading) * v, angVel: 0 });
@@ -57,7 +58,7 @@ describe('two cars down a straight', () => {
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) data[y * w + x] = id(x < wall || y < wall || x >= w - wall || y >= h - wall ? 'wall' : 'asphalt');
     const json: TrackJson = { id: 'strip', name: 'strip', pxPerMeter: PPM, files: { mask: 'mask.png' }, timingLines: {}, racingLine: [], grid: [], spawn: { x: 150, y: h - 100, heading: 0 } };
     const track = createSimTrack(json, { width: w, height: h, data }, surfaces);
-    return { track, walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing), physics: structuredClone(physicsJson) as unknown as PhysicsConfig, catalog, rules, contact: contactJson, race: raceJson, slipstream: slip, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, strategy: strategyJson as StrategyConfig, cache: createPhysicsCache() };
+    return { track, walls: traceWalls(track.mask, track.index.wall, track.index.tyreBarrier, wallTracing), physics: structuredClone(physicsJson) as unknown as PhysicsConfig, catalog, rules, contact: contactJson, race: raceJson, slipstream: slip, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, strategy: strategyJson as unknown as StrategyConfig, weather: weatherJson as unknown as WeatherConfig, cache: createPhysicsCache() };
   };
   const run = (slip: SlipstreamConfig) => {
     const ctx = strip(slip);

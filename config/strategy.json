@@ -1,13 +1,15 @@
 {
-  "_comment": "Race strategy card. compounds: grip x and wear x per compound (the log10 wear cliff stays; softs reach it sooner); lifeLaps = about how many Oxford laps a set lasts to the AI's pit threshold at wear x 1 (the AI's estimate when picking; npm run strategy-probe measures it). defaultCompound: what a car starts on unless its build says otherwise. pitBoard: fuelStepKg = one press of fuel - / + on the pit board. service: tyreChangeSec = a tyre change (all four, alongside refuelling: the stop takes the longest of tyres, fuel and repair). fuelEndMarginLaps: 'fuel to the end' adds this much spare. raceLength 'matched': fuel burn and tyre wear x refLaps / race laps (never below 1), so a short race still needs a stop or saving; 'off' = normal rates. ai: the AI starts on a compound whose life covers raceLaps x startStintShare (seeded pick between the best two), and at a stop takes the grippiest compound that lasts the laps left.",
+  "_comment": "Race strategy card. compounds: grip x and wear x per compound (the log10 wear cliff stays; softs reach it sooner); lifeLaps = about how many Oxford laps a set lasts to the AI's pit threshold at wear x 1 (the AI's estimate when picking; npm run strategy-probe measures it). defaultCompound: what a car starts on unless its build says otherwise. pitBoard: fuelStepKg = one press of fuel - / + on the pit board. service: tyreChangeSec = a tyre change (all four, alongside refuelling: the stop takes the longest of tyres, fuel and repair). fuelEndMarginLaps: 'fuel to the end' adds this much spare. raceLength 'matched': fuel burn and tyre wear x refLaps / race laps (never below 1), so a short race still needs a stop or saving; 'off' = normal rates. ai: the AI starts on a compound whose life covers raceLaps x startStintShare (seeded pick between the best two), and at a stop takes the grippiest compound that lasts the laps left. Wet weather card: water = grip x at water 0 (dry), 0.3 (damp), 1 (wet), straight lines between: slicks fall away fast in the wet, inters (I) are best when damp, full wets (W) in standing water; dryWear: inters and wets overheat on a dry track (wear x (1 + dryWear x (1 - water))). lifeLaps for inter / wet are their life in the conditions they're for.",
   "compounds": {
-    "soft": { "grip": 1.03, "wear": 1.8, "lifeLaps": 16, "color": "#e8413b", "letter": "S" },
-    "medium": { "grip": 1.0, "wear": 1.0, "lifeLaps": 29, "color": "#f2c230", "letter": "M" },
-    "hard": { "grip": 0.97, "wear": 0.6, "lifeLaps": 52, "color": "#e9e9e9", "letter": "H" }
+    "soft": {"grip": 1.03, "wear": 1.8, "lifeLaps": 16, "color": "#e8413b", "letter": "S", "water": [1, 0.7, 0.42]},
+    "medium": {"grip": 1.0, "wear": 1.0, "lifeLaps": 29, "color": "#f2c230", "letter": "M", "water": [1, 0.72, 0.45]},
+    "hard": {"grip": 0.97, "wear": 0.6, "lifeLaps": 52, "color": "#e9e9e9", "letter": "H", "water": [1, 0.7, 0.43]},
+    "inter": {"grip": 1.0, "wear": 1.2, "lifeLaps": 14, "color": "#3fb950", "letter": "I", "water": [0.9, 0.92, 0.72], "dryWear": 3},
+    "wet": {"grip": 1.0, "wear": 1.0, "lifeLaps": 20, "color": "#2f81f7", "letter": "W", "water": [0.82, 0.82, 0.84], "dryWear": 5}
   },
   "defaultCompound": "medium",
-  "pitBoard": { "fuelStepKg": 5 },
-  "service": { "tyreChangeSec": 3, "fuelEndMarginLaps": 0.5 },
-  "raceLength": { "refLaps": 25 },
-  "ai": { "startStintShare": 0.6 }
+  "pitBoard": {"fuelStepKg": 5},
+  "service": {"tyreChangeSec": 3, "fuelEndMarginLaps": 0.5},
+  "raceLength": {"refLaps": 25},
+  "ai": {"startStintShare": 0.6}
 }

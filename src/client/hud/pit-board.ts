@@ -9,9 +9,10 @@ const key = (b: Keybinds, a: keyof Keybinds): string => (b[a][0] ? keyLabel(b[a]
 export const fuelText = (plan: PitPlan): string => (plan.fuelKg === FUEL_TO_END ? 'TO END' : `+${Math.round(plan.fuelKg)} kg`);
 
 export function pitBoardHtml(plan: PitPlan, cfg: StrategyConfig, binds: Keybinds, car: Pick<CarState, 'stop' | 'fuelKg' | 'servicing'>, repairAvailable: boolean): string {
-  const tyres = (['soft', 'medium', 'hard'] as const).map((c) => {
+  const keyOf = { soft: 'pitSoft', medium: 'pitMedium', hard: 'pitHard', inter: 'pitInter', wet: 'pitWet' } as const;
+  const tyres = (['soft', 'medium', 'hard', 'inter', 'wet'] as const).filter((c) => cfg.compounds[c]).map((c) => {
     const d = cfg.compounds[c], on = plan.tyres && plan.compound === c;
-    return `<span class="cmp${on ? ' on' : ''}" style="--c:${d.color}">${d.letter}<i>${key(binds, c === 'soft' ? 'pitSoft' : c === 'medium' ? 'pitMedium' : 'pitHard')}</i></span>`;
+    return `<span class="cmp${on ? ' on' : ''}" style="--c:${d.color}">${d.letter}<i>${key(binds, keyOf[c])}</i></span>`;
   }).join('');
   const rows = [
     `<div class="row"><span class="k">TYRES</span>${tyres}<span class="tog${plan.tyres ? ' on' : ''}">${plan.tyres ? 'CHANGE' : 'KEEP'}<i>${key(binds, 'pitTyres')}</i></span></div>`,

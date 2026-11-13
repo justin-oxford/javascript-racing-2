@@ -2,6 +2,7 @@
 // Car physics on small synthetic arenas (built here, not real tracks), so each behaviour is isolated.
 import evolutionJson from '../../config/evolution.json';
 import strategyJson from '../../config/strategy.json';
+import weatherJson from '../../config/weather.json';
 import ersJson from '../../config/ers.json';
 import driversJson from '../../config/drivers.json';
 import damageJson from '../../config/damage.json';
@@ -36,7 +37,7 @@ import {
   wearGrip,
   type CarBuild,
   type CarInput,
-  type ErsConfig, type StrategyConfig, type PhysicsConfig,
+  type ErsConfig, type StrategyConfig, type WeatherConfig, type PhysicsConfig,
   type Pose,
   type SimContext,
   type TrackJson,
@@ -66,7 +67,7 @@ function arena(wM: number, hM: number, spawnM: Pose, paint?: (xM: number, yM: nu
     physics: structuredClone(physicsJson) as unknown as PhysicsConfig,
     catalog,
     rules,
-    contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, strategy: strategyJson as StrategyConfig, cache: createPhysicsCache(),
+    contact: contactJson, race: raceJson, slipstream: slipstreamJson, assists: assistsJson, damage: damageJson, ers: ersJson as ErsConfig, evolution: { ...evolutionJson, enabled: false }, strategy: strategyJson as unknown as StrategyConfig, weather: weatherJson as unknown as WeatherConfig, cache: createPhysicsCache(),
   };
 }
 

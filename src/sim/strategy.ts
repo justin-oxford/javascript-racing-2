@@ -1,12 +1,21 @@
 // Race strategy card: tyre compounds, the pit board (what the next stop does), timed stops, fuel weight
 // and race-length scaling of fuel burn and tyre wear. Pure functions over plain data.
 
-export type Compound = 'soft' | 'medium' | 'hard';
+export type Compound = 'soft' | 'medium' | 'hard' | 'inter' | 'wet';
+/** The dry-weather slicks (what the AI picks between on a dry track). */
 export const COMPOUNDS: readonly Compound[] = ['soft', 'medium', 'hard'];
+/** Every compound, wet-weather tyres included (Wet weather card). */
+export const ALL_COMPOUNDS: readonly Compound[] = ['soft', 'medium', 'hard', 'inter', 'wet'];
 
 /** config/strategy.json. */
 export interface StrategyConfig {
-  compounds: Record<Compound, { grip: number; wear: number; lifeLaps: number; color: string; letter: string }>;
+  compounds: Record<Compound, {
+    grip: number; wear: number; lifeLaps: number; color: string; letter: string;
+    /** Wet weather card: grip x this at water 0 (dry), 0.3 (damp) and 1 (wet), straight lines between. */
+    water?: [number, number, number];
+    /** Wear x (1 + dryWear x (1 - water)): inters and wets overheat on a dry track. */
+    dryWear?: number;
+  }>;
   defaultCompound: Compound;
   pitBoard: { fuelStepKg: number };
   service: { tyreChangeSec: number; fuelEndMarginLaps: number };
@@ -51,7 +60,7 @@ export function defaultPitPlan(cfg: StrategyConfig, compound: Compound = cfg.def
   return { compound, fuelKg: FUEL_TO_END, tyres: true, repair: true };
 }
 
-export const isCompound = (c: unknown): c is Compound => c === 'soft' || c === 'medium' || c === 'hard';
+export const isCompound = (c: unknown): c is Compound => c === 'soft' || c === 'medium' || c === 'hard' || c === 'inter' || c === 'wet';
 
 /** A plan from an input, checked (anything malformed keeps the car's current plan). */
 export function validPitPlan(p: unknown, current: PitPlan, maxFuelKg: number): PitPlan {
@@ -63,8 +72,16 @@ export function validPitPlan(p: unknown, current: PitPlan, maxFuelKg: number): P
 
 /** Grip multiplier for a compound. */
 export const compoundGrip = (c: Compound, cfg: StrategyConfig): number => cfg.compounds[c]?.grip ?? 1;
-/** Wear multiplier for a compound. */
-export const compoundWear = (c: Compound, cfg: StrategyConfig): number => cfg.compounds[c]?.wear ?? 1;
+/** Wear multiplier for a compound (x its overheating on a dry track, for inters and wets). */
+export const compoundWear = (c: Compound, cfg: StrategyConfig, water = 0): number => (cfg.compounds[c]?.wear ?? 1) * (1 + (cfg.compounds[c]?.dryWear ?? 0) * (1 - Math.min(1, water)));
+
+/** Wet weather card: a compound's grip on this much standing water (0 dry .. 1 wet), as a multiplier. */
+export function compoundWaterGrip(c: Compound, water: number, cfg: StrategyConfig): number {
+  const w = cfg.compounds[c]?.water;
+  if (!w || water <= 0) return w ? w[0] : 1;
+  const x = Math.min(1, water);
+  return x < 0.3 ? w[0] + (w[1] - w[0]) * (x / 0.3) : w[1] + (w[2] - w[1]) * ((x - 0.3) / 0.7);
+}
 
 /**
  * Fuel weight: tyres lose grip as the car gets heavier (load sensitivity, at the level of the whole car):

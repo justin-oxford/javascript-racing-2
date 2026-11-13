@@ -165,9 +165,10 @@ export class MainMenu {
         <label>Car performance</label>${this.choice('perf', s.perf, [['team', 'Team stats'], ['equal', 'Equal']] as const)}
         <label>Damage</label>${this.choice('damage', s.damage, [['off', 'Off'], ['visual', 'Visual only'], ['realistic', 'Realistic']] as const)}
         ${this.d.evolution ? `<label>Track</label>${this.choice('trackStart', s.trackStart, [['green', 'Green'], ['medium', 'Medium'], ['rubbered', 'Rubbered']] as const)}` : ''}
+        ${this.d.evolution ? `<label>Weather</label>${this.choice('weather', s.weather, [['dry', 'Dry'], ['wet', 'Wet'], ['changeable', 'Changeable']] as const)}` : ''}
         ${this.d.nightAvailable ? `<label>Time of day</label>${this.choice('night', s.night ? 'night' : 'day', [['day', 'Day'], ['night', 'Night']] as const)}` : ''}
       </div>
-      <p class="note">Races use at least one AI. Equal: every team performs the same, AI drivers differ by skill. Realistic damage costs grip; the pits repair it. Tyres: soft is quickest and wears fastest, hard the reverse; set the next stop while driving with 1 / 2 / 3 (tyres), 4 / 5 (fuel), 6 (change tyres), 7 (repair). Matched: fuel and tyres go faster in a short race, so it still needs a stop.</p>`;
+      <p class="note">Races use at least one AI. Equal: every team performs the same, AI drivers differ by skill. Realistic damage costs grip; the pits repair it. Tyres: soft is quickest and wears fastest, hard the reverse; set the next stop while driving with 1 / 2 / 3 (tyres), 4 / 5 (fuel), 6 (change tyres), 7 (repair). Matched: fuel and tyres go faster in a short race, so it still needs a stop. Weather: Changeable brings a shower at some point (8 / 9 on the pit board: inters / full wets); a dry line forms where cars drive.</p>`;
   }
 
   private garageBody(p: Profile): string {
@@ -263,6 +264,7 @@ export class MainMenu {
     else if (key === 'spec') next.spec = val;
     else if (key === 'night') next.night = val === 'night';
     else if (key === 'trackStart') next.trackStart = val as typeof s.trackStart;
+    else if (key === 'weather') next.weather = val as typeof s.weather;
     this.save({ ...p, settings: next });
   }
 

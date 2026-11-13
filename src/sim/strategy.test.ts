@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import strategyJson from '../../config/strategy.json';
 import { aiCompound, aiStartCompound, compoundGrip, compoundWear, consumableScale, defaultPitPlan, FUEL_TO_END, fuelGrip, startStop, stopDone, stopFuelTarget, validPitPlan, type StrategyConfig } from './strategy';
 
-const cfg = strategyJson as StrategyConfig;
+const cfg = strategyJson as unknown as StrategyConfig;
 
 describe('strategy', () => {
   it('compounds: soft grips most and wears fastest, hard the reverse', () => {

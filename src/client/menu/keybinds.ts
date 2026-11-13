@@ -4,7 +4,7 @@
 export type BindAction =
   | 'throttle' | 'brake' | 'left' | 'right'
   | 'reset' | 'engineMode' | 'deploy'
-  | 'pitSoft' | 'pitMedium' | 'pitHard' | 'pitFuelDown' | 'pitFuelUp' | 'pitTyres' | 'pitRepair'
+  | 'pitSoft' | 'pitMedium' | 'pitHard' | 'pitInter' | 'pitWet' | 'pitFuelDown' | 'pitFuelUp' | 'pitTyres' | 'pitRepair'
   | 'labels' | 'vfx' | 'mute' | 'debug';
 
 export type Keybinds = Record<BindAction, string[]>;
@@ -20,6 +20,8 @@ export const BIND_ACTIONS: ReadonlyArray<{ id: BindAction; label: string }> = [
   { id: 'pitSoft', label: 'Pit board: soft tyres' },
   { id: 'pitMedium', label: 'Pit board: medium tyres' },
   { id: 'pitHard', label: 'Pit board: hard tyres' },
+  { id: 'pitInter', label: 'Pit board: intermediates' },
+  { id: 'pitWet', label: 'Pit board: full wets' },
   { id: 'pitFuelDown', label: 'Pit board: fuel -' },
   { id: 'pitFuelUp', label: 'Pit board: fuel +' },
   { id: 'pitTyres', label: 'Pit board: change tyres on/off' },
@@ -41,6 +43,8 @@ export const DEFAULT_KEYBINDS: Readonly<Keybinds> = Object.freeze({
   pitSoft: ['Digit1', 'Numpad1'],
   pitMedium: ['Digit2', 'Numpad2'],
   pitHard: ['Digit3', 'Numpad3'],
+  pitInter: ['Digit8', 'Numpad8'],
+  pitWet: ['Digit9', 'Numpad9'],
   pitFuelDown: ['Digit4', 'Numpad4'],
   pitFuelUp: ['Digit5', 'Numpad5'],
   pitTyres: ['Digit6', 'Numpad6'],

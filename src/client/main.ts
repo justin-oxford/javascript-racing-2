@@ -1,4 +1,4 @@
-import { aiStartCompound, computeExitLine, consumableScale, defaultPitPlan, offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type CarSetup, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { aiStartCompound, computeExitLine, rainAt, shower, consumableScale, defaultPitPlan, offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type CarSetup, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -48,6 +48,7 @@ import { GameAudio } from './audio/audio';
 import { soundTargets, topSpeedKph } from './audio/targets';
 import { Vfx } from './vfx/vfx';
 import { EvolutionLayer } from './vfx/evolution-layer';
+import { WeatherLayer } from './vfx/weather-layer';
 import nightJson from '../../config/night.json';
 import { drawRearLights, previewNight, shadeImage, type NightConfig } from './night';
 import './style.css';
@@ -101,7 +102,9 @@ async function main(): Promise<void> {
   };
   // Car damage setting (Car damage card), remembered in this browser. Off by default (Justin).
   let damageMode: DamageMode = profile.settings.damage;
-  const settings = (): SessionSettings => ({ damage: damageMode, raceLength: profile.settings.race.length });
+  /** This session's weather seed (Wet weather card: a Changeable shower comes from it). */
+  let weatherSeed = 1;
+  const settings = (): SessionSettings => ({ damage: damageMode, raceLength: profile.settings.race.length, weather: profile.settings.weather, weatherSeed });
   /** Race strategy card: the player's starting compound and fuel (main menu), and a fresh pit board to match. */
   const withStrategy = (b: CarBuild): CarBuild => {
     const compound = profile.settings.race.compound;
@@ -118,6 +121,7 @@ async function main(): Promise<void> {
   const roster = (driversJson as { drivers: DriverDef[] }).drivers;
   const lineup = assignDrivers(roster, 19, driverSeed);
   const vfx = new Vfx(mask.track.mask.width, mask.track.mask.height, vfxConfig);
+  const weatherLayer = new WeatherLayer();
   const evoLayer = new EvolutionLayer(evolution.visual ?? { rubberRgb: '22, 22, 24', rubberMaxAlpha: 0.55, marbleRgb: '38, 30, 24', marbleDots: 14 });
   vfx.wearRubber = !evolution.enabled;
   const audio = new GameAudio(audioConfig);
@@ -212,6 +216,7 @@ async function main(): Promise<void> {
     raceSetup = undefined;
     if (!keepWeekend) weekend = undefined;
     const me = withStrategy(withPerf(curr?.cars[0]?.build ?? startBuild));
+    weatherSeed = crypto.getRandomValues(new Uint32Array(1))[0]!; // a new shower each session
     if (!racingLine) aiCount = 0;
     const builds: CarBuild[] = [me, ...aiBuilds(me, aiCount)];
     if (aiCount === 0) for (let i = 1; i <= extra; i++) builds.push(physics.defaultCar);
@@ -237,6 +242,7 @@ async function main(): Promise<void> {
     const me = withStrategy(withPerf(curr?.cars[0]?.build ?? startBuild));
     const count = Math.max(1, aiCount);
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!; // client-side: the sim itself stays seeded
+    weatherSeed = seed;
     // The AI's starting tyres (Race strategy card): seeded, from the race length.
     const scale = consumableScale(profile.settings.race.length, laps, ctx.strategy);
     const builds: CarBuild[] = [me, ...aiBuilds(me, count).map((b, k) => ({ ...b, compound: aiStartCompound(laps, scale, ctx.strategy, (((seed ^ ((k + 1) * 2654435761)) >>> 0) % 1000) / 1000) }))];
@@ -540,6 +546,7 @@ async function main(): Promise<void> {
         ers,
         evolution,
         strategy: ctx.strategy,
+        weather: ctx.weather,
         volumes: { values: audio.volumes, set: (bus, v) => audio.setVolume(bus, v) },
         onBuildChange: (b) => {
           const build = withPerf(b);
@@ -709,6 +716,7 @@ async function main(): Promise<void> {
             renderer.invalidateStatic(); // editor moved a line
           }
           timingLines.drawFlash(c, ctx.track, performance.now());
+          weatherLayer.drawWater(c, curr.surface, json.pxPerMeter, performance.now()); // standing water: the dry line shows lighter
           if (editor) drawMask(c, mask.canvas, editor.maskOpacity);
           else if (debug) drawMask(c, mask.canvas, 0.5);
         },
@@ -716,6 +724,10 @@ async function main(): Promise<void> {
         overCars: (c) => {
           vfx.drawWakes(c, curr, physics, json.pxPerMeter, slipstream.wake);
           vfx.drawOver(c, json.pxPerMeter); // the renderer draws the pre-scaled overhead after this
+          // Wet weather: rain lights while it's wet, rain streaks while it rains.
+          const rainNow = rainAt(curr.tick * TICK_DT, curr.settings?.weather, curr.settings?.weatherSeed ?? 0, ctx.weather);
+          if (rainNow > 0 || curr.surface?.water) weatherLayer.drawRainLights(c, curr, physics, json.pxPerMeter, performance.now());
+          weatherLayer.drawRain(c, rainNow, mask.track.mask.width, mask.track.mask.height, performance.now());
         },
         overlay: (c) => {
           if (debug || editor) {
@@ -758,6 +770,17 @@ async function main(): Promise<void> {
           fuelLap.laps = me.timing.laps; fuelLap.kg = me.fuelKg;
         }
         const fuelMargin = race && fuelLap.perLap > 0 ? me.fuelKg / fuelLap.perLap - Math.max(0, race.laps - me.timing.laps) : undefined;
+        // Weather tag: rain now, or (Changeable) when the shower comes, or that the track is drying.
+        {
+          const wx = curr.settings?.weather, sec = curr.tick * TICK_DT, rainNow = rainAt(sec, wx, curr.settings?.weatherSeed ?? 0, ctx.weather);
+          let text = '';
+          if (rainNow > 0.01) text = `RAIN ${Math.round(rainNow * 100)}%`;
+          else if (wx === 'changeable') {
+            const sh = shower(curr.settings?.weatherSeed ?? 0, ctx.weather), lapSec = me.timing.laps > 0 && session.personalBest.lap ? session.personalBest.lap : 30;
+            text = sec < sh.start ? `RAIN IN ${Math.max(1, Math.ceil((sh.start - sec) / lapSec))} LAP${Math.ceil((sh.start - sec) / lapSec) > 1 ? 'S' : ''}` : curr.surface?.water ? 'DRYING' : '';
+          } else if (wx === 'wet' || curr.surface?.water) text = 'WET';
+          hud.setWeather(text, rainNow > 0.01);
+        }
         hud.update(me, (curr.tick + alpha) * TICK_DT, session, !!json.timingLines.startFinish, stoppedInBox(), race ? { laps: race.laps, box: (race.cars[0]?.box ?? -1) + 1 } : undefined, { holdFrac: me.rejoin.holdTicks / Math.max(1, ctx.race.reset.holdSec * TICK_HZ), penaltySec: me.rejoin.penaltyTicks / TICK_HZ }, { batteryFrac: me.ers.batteryKJ / Math.max(1, ctx.ers.battery.capacityKJ), fuelMargin }, {
           letter: ctx.strategy.compounds[me.compound].letter,
           color: ctx.strategy.compounds[me.compound].color,

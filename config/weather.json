@@ -1,0 +1,16 @@
+{
+  "_comment": "Wet weather + emergent dry line (POLISH card). Water is a layer on the track evolution grid, 0..1 per cell. Rain adds rainPerSec x intensity; without rain a cell dries dryPerSec (offLineDry x slower where nobody drives); each wheel clears clearPerSec x its load share x speed / clearRefMps (up to 2x) from its cell: that is the dry line. Rain washes rubber (washRubberPerSec) and marbles (washMarblesPerSec) at full rain. wetRubber: at full water rubber's grip bonus becomes -wetRubber x it (rubber is slippery in the wet). aquaplane: deeper than depth above speedMps, that wheel's grip x grip. Sessions: Wet = rain at wet.intensity all session, the track starting at wetStartWater; Changeable = dry, then a seeded shower (start in startSec, length in lengthSec, intensity in intensity, ramping over rampSec), then dry. Tyres in the wet: config/strategy.json compounds (water grip, and inters / wets overheat on a dry track). ai: pit for inters above interAbove water under its line, wets above wetAbove, back to slicks below slickBelow (averaged over the next lookM).",
+  "rainPerSec": 0.02,
+  "dryPerSec": 0.004,
+  "offLineDry": 3,
+  "clearPerSec": 0.25,
+  "clearRefMps": 30,
+  "washRubberPerSec": 0.01,
+  "washMarblesPerSec": 0.05,
+  "wetRubber": 1.5,
+  "aquaplane": { "depth": 0.7, "speedMps": 55, "grip": 0.35 },
+  "wet": { "intensity": 0.6 },
+  "changeable": { "startSec": [90, 240], "lengthSec": [150, 300], "intensity": [0.5, 0.9], "rampSec": 20 },
+  "wetStartWater": 0.6,
+  "ai": { "interAbove": 0.15, "wetAbove": 0.55, "slickBelow": 0.08, "lookM": 300 }
+}

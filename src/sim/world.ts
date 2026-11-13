@@ -2,7 +2,8 @@ import { evolutionGrip, newSurfaceGrid, updateSurface, type EvolutionConfig, typ
 import { deployPowerW, newErs, updateErs, type EngineMode, type ErsConfig } from './ers';
 import { applyHits, damageDrag, damageGrip, damagePull, isDamaged, NO_DAMAGE, repairStep, type DamageConfig } from './damage';
 import { applyResets, newRejoin, trackRejoin } from './rejoin';
-import { compoundGrip, compoundWear, consumableScale, defaultPitPlan, fuelGrip, startStop, stopFuelTarget, validPitPlan, type StrategyConfig } from './strategy';
+import { rainAt, startWater, updateWater, waterAt, type WeatherConfig } from './weather';
+import { compoundWaterGrip, compoundGrip, compoundWear, consumableScale, defaultPitPlan, fuelGrip, startStop, stopFuelTarget, validPitPlan, type StrategyConfig } from './strategy';
 import { bodyOffsetM, buildStats, setupEffects, type CarCatalog, type PhysicsConfig } from './car-config';
 import { applyCarForce, prepareCache, readStateFromWorld, setCarMass, stepWorld, type PhysicsCache } from './planck-cache';
 import type { SimTrack, WallChain } from './track';
@@ -46,6 +47,8 @@ export interface SimContext {
   evolution: EvolutionConfig;
   /** config/strategy.json: compounds, pit board, stops, race-length scaling (Race strategy card). */
   strategy: StrategyConfig;
+  /** config/weather.json: rain, water, drying, aquaplaning (Wet weather card). */
+  weather: WeatherConfig;
   cache: PhysicsCache;
 }
 
@@ -327,6 +330,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
   const mass = cfg.car.dryMassKg + Math.max(0, car.fuelKg);
   const f = forward(car.heading), r = right(car.heading);
   const vFwd = car.vx * f.x + car.vy * f.y;
+  const vFwdAll = vFwd; // (for aquaplaning: the car's speed, not a wheel's)
   const v2 = car.vx * car.vx + car.vy * car.vy;
   const speed = Math.sqrt(v2);
 
@@ -412,7 +416,10 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
     // balance (anti-roll bars) works through: more of the transfer at one end = less grip there.
     const pairMean = (w < 2 ? load[0] + load[1] : load[2] + load[3]) / 2;
     const transferMul = kT && pairMean > 0 && load[w]! > 0 ? (load[w]! / pairMean) ** -kT : 1;
-    const cap = transferMul * gripBase * (w < 2 ? cfg.tyres.frontGrip : cfg.tyres.rearGrip) * wearGrip(car.wheels[w]!.wear) * damageGrip(dmg, w, ctx.damage) * evolutionGrip(surface, p.x, p.y, ctx.evolution) * surf.grip * (surf.id === 'asphalt' ? 1 : setup.offTrackGrip) * load[w]!;
+    // Wet weather: the compound's grip on the water under this wheel, wet rubber, aquaplaning.
+    const water = waterAt(surface, p.x, p.y);
+    const wet = water > 0 ? compoundWaterGrip(car.compound, water, ctx.strategy) / compoundWaterGrip(car.compound, 0, ctx.strategy) * (water > ctx.weather.aquaplane.depth && Math.abs(vFwdAll) > ctx.weather.aquaplane.speedMps ? ctx.weather.aquaplane.grip : 1) : 1;
+    const cap = wet * transferMul * gripBase * (w < 2 ? cfg.tyres.frontGrip : cfg.tyres.rearGrip) * wearGrip(car.wheels[w]!.wear) * damageGrip(dmg, w, ctx.damage) * evolutionGrip(surface, p.x, p.y, ctx.evolution, water, ctx.weather.wetRubber) * surf.grip * (surf.id === 'asphalt' ? 1 : setup.offTrackGrip) * load[w]!;
     const capLat = cap * cfg.tyres.lateralGrip;
     const stopCap = (Math.abs(vLong) * wheelMass) / dt; // never push a wheel past standstill
 
@@ -478,7 +485,7 @@ function applyCarForces(i: number, car: CarState, controls: CarInput, ctx: SimCo
 }
 
 /** Tyre wear + fuel for one tick (SYS - Car model rules), and pit service. */
-function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimContext, dt: number, ownBox: number, fillToKg: number | undefined, power: { mode: EngineMode; deployW: number }, scale: number, lapsToGo: number | undefined, progressLaps: number | undefined): Pick<CarState, 'fuelKg' | 'wheels' | 'servicing' | 'damage' | 'ers' | 'compound' | 'stop' | 'fuelUsedKg'> {
+function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimContext, dt: number, ownBox: number, fillToKg: number | undefined, power: { mode: EngineMode; deployW: number }, scale: number, lapsToGo: number | undefined, progressLaps: number | undefined, surface: SurfaceGrid | undefined): Pick<CarState, 'fuelKg' | 'wheels' | 'servicing' | 'damage' | 'ers' | 'compound' | 'stop' | 'fuelUsedKg'> {
   const cfg = ctx.physics;
   const kph = Math.abs(car.speed) / KPH;
   const v4 = (kph / cfg.wear.refSpeedKph) ** 4;
@@ -490,7 +497,9 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
   // Tyre pressure (setup), the compound, and race-length scaling.
   // ...and dirty air (Race noise card: following closely through corners costs tyre, not just downforce).
   const dirtyWear = 1 + (ctx.slipstream.dirtyAir.wearMul ?? 0) * (car.dirtyAir / Math.max(1e-6, ctx.slipstream.dirtyAir.maxDownforceLoss));
-  const wearMul = setupEffects(car.build.setup, ctx.catalog).wear * compoundWear(car.compound, ctx.strategy) * scale * dirtyWear;
+  // (Inters and wets overheat on a dry track: the water under the car decides how much.)
+  const waterHere = surface ? waterAt(surface, car.x, car.y) : 0;
+  const wearMul = setupEffects(car.build.setup, ctx.catalog).wear * compoundWear(car.compound, ctx.strategy, waterHere) * scale * dirtyWear;
 
   const wheels = car.wheels.map((wheel, w) => {
     let dw = cfg.wear.cornerPerSec * v4 * (Math.abs(forces[w]!.lat) / quarterWeight); // by actual lateral load
@@ -634,7 +643,7 @@ export function step(world0: WorldState, inputs: readonly CarInput[], ctx: SimCo
     // The pit board: the driver's latest plan (kept until it sends another).
     const plan = inputs[i]?.pitPlan ? validPitPlan(inputs[i]!.pitPlan, moved.pitPlan, ctx.physics.fuel.tankKg) : moved.pitPlan;
     const rc = world.race?.cars[i];
-    const next = { ...moved, pitPlan: plan, ...updateConsumables({ ...moved, pitPlan: plan }, forces[i]!, ctx, dt, rc?.box ?? -1, world.quali ? qualiFuelKg(ctx) : undefined, power[i]!, scale, world.race && rc ? world.race.laps - rc.progress : undefined, rc?.progress), timing };
+    const next = { ...moved, pitPlan: plan, ...updateConsumables({ ...moved, pitPlan: plan }, forces[i]!, ctx, dt, rc?.box ?? -1, world.quali ? qualiFuelKg(ctx) : undefined, power[i]!, scale, world.race && rc ? world.race.laps - rc.progress : undefined, rc?.progress, world.surface), timing };
     // Out of bounds should be unreachable behind walls. If a wheel gets there, the mask has a gap.
     if (surfaces.includes(ctx.track.index.outOfBounds)) {
       const ppm = ctx.track.json.pxPerMeter;
@@ -644,7 +653,16 @@ export function step(world0: WorldState, inputs: readonly CarInput[], ctx: SimCo
     return next;
   });
   // Track evolution: what every wheel did this tick lays rubber, sheds marbles to the outside, sweeps them.
-  const surface = world.surface && ctx.evolution.enabled ? updateSurface(world.surface, ctx.track, cars.flatMap((c, i) => surfaceWork(world.cars[i]!, c, ctx)), dt, ctx.evolution) : world.surface;
+  const work = world.surface && ctx.evolution.enabled ? cars.flatMap((c, i) => surfaceWork(world.cars[i]!, c, ctx).map((wk) => ({ ...wk, speed: Math.hypot(c.vx, c.vy) }))) : [];
+  let surface = world.surface && ctx.evolution.enabled ? updateSurface(world.surface, ctx.track, work, dt, ctx.evolution) : world.surface;
+  // Wet weather: the session's rain (a seeded curve) on the water layer; wheels clear it (the dry line).
+  // A Wet session starts with water down. (Needs the evolution grid: with evolution off, the track stays dry.)
+  const weather = world.settings?.weather;
+  if (surface && weather && weather !== 'dry') {
+    if (weather === 'wet' && !surface.water && world.tick === 0) surface = startWater(surface, ctx.track, weather, ctx.weather);
+    const rain = rainAt(world.tick * dt, weather, world.settings?.weatherSeed ?? 0, ctx.weather);
+    surface = updateWater(surface, ctx.track, work, rain, dt, ctx.weather);
+  }
   // Reset to track bookkeeping, once every car has moved: last on-track point, ghosts clearing.
   const tracked = cars.map((c, i) => {
     const allLegal = c.wheels.every((w) => ctx.track.surfaces[w.surface]!.legal);

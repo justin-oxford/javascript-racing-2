@@ -7,7 +7,8 @@ import { buildStats } from './car-config';
 import { damageGrip, isDamaged } from './damage';
 import { blueFlag, chooseMode, concedes, keepGoodExits, lineFor, LINE_IDS, lineOffsets, offsetPath, offsetsFromPoints, otherHasRightOfWay, type CraftMode, type LineId, type OvertakingConfig, type RacecraftConfig } from './racecraft';
 import { speedProfile, transferGripFactor } from './line-optimizer';
-import { aiCompound, compoundGrip, consumableScale, FUEL_TO_END, fuelGrip, stopDone, type PitPlan } from './strategy';
+import { aiCompound, compoundGrip, compoundWaterGrip, consumableScale, FUEL_TO_END, fuelGrip, stopDone, type Compound, type PitPlan } from './strategy';
+import { waterAt } from './weather';
 import type { SimTrack } from './track';
 import { surfaceAt } from './track';
 import type { CarInput, CarState, InputSource, WorldState } from './types';
@@ -552,6 +553,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     if (world.quali && world.quali.phase !== 'running') want = false;
     // In a race the decision is re-made every tick: once it's sure to reach the flag (and the tyres last) it
     // stops wanting a stop (latched, it pitted for nothing on the last lap). Elsewhere it stays wanted.
+    // WET WEATHER: the wrong tyres for the water under its line -> a stop (slicks in the wet, inters in
+    // standing water or on a dry line, wets once it's drying).
+    if (race && line.pit && wrongTyres(car.compound, waterAlong(world, line, Math.max(0, st.near), ctx.weather.ai.lookM), ctx)) want = true;
     if (line.pit && want) st.pitWanted = true;
     else if (race && st.fuelPerLap > 0) st.pitWanted = false;
     if (line.pit && st.pitWanted) {
@@ -662,7 +666,12 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   const dmgGrip = world.settings?.damage === 'realistic' ? [0, 1, 2, 3].reduce((a, w) => a + damageGrip(car.damage, w, ctx.damage), 0) / 4 : 1;
   // ...and the compound and fuel weight (its speed profile assumes a medium-grip tyre at half a tank).
   const loadK = phys.tyres.loadSensitivity;
+  // ...and the water along its line (Wet weather card): what its tyres grip on what's coming.
+  // (Off the dry line, e.g. passing or running wide, the water where the car actually is counts: on slicks
+  // it carried dry-line speed onto a wet patch and went off.)
+  const lineWater = Math.max(waterAlong(world, line, Math.max(0, st.near), ctx.weather.ai.lookM), world.surface?.water ? waterAt(world.surface, car.x, car.y) : 0);
   const tyre = (car.wheels.reduce((a, w) => a + wearGrip(w.wear), 0) / 4) * dmgGrip * compoundGrip(car.compound, ctx.strategy)
+    * (compoundWaterGrip(car.compound, lineWater, ctx.strategy) / compoundWaterGrip(car.compound, 0, ctx.strategy))
     * (fuelGrip(phys.car.dryMassKg, car.fuelKg, loadK) / fuelGrip(phys.car.dryMassKg, phys.fuel.startKg / 2, loadK));
   const mu = phys.tyres.baseGrip * stats.grip * tyre;
   const kAero = phys.aero.downforceCoef * stats.downforce;
@@ -1102,7 +1111,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   let pitPlan: PitPlan | undefined;
   if (st.pitWanted || st.mode === 'pit') {
     const lapsToGo = race ? Math.max(0, race.laps - (race.cars[i]?.progress ?? car.timing.laps)) : 0;
-    const compound = race ? aiCompound(lapsToGo, consumableScale(world.settings?.raceLength, race?.laps, ctx.strategy), ctx.strategy) : car.compound;
+    const wetCall = tyreForWater(car.compound, waterAlong(world, line, Math.max(0, st.near), ctx.weather.ai.lookM), ctx);
+    const compound = wetCall === 'dry' ? (race ? aiCompound(lapsToGo, consumableScale(world.settings?.raceLength, race?.laps, ctx.strategy), ctx.strategy) : car.compound) : wetCall;
     // Serviced and waiting to leave the box: ask for nothing more (it used to get a second tyre change).
     pitPlan = st.serviced ? { compound: car.compound, fuelKg: 0, tyres: false, repair: false } : { compound, fuelKg: FUEL_TO_END, tyres: true, repair: isDamaged(car.damage) };
   }
@@ -1192,4 +1202,28 @@ export function aiInputSource(
     },
   };
   return src;
+}
+
+/** Mean standing water over the next lookM of the racing line from point q (0 on a dry track). */
+function waterAlong(world: WorldState, line: RacingLine, q: number, lookM: number): number {
+  const g = world.surface;
+  if (!g?.water) return 0;
+  let sum = 0, n = 0;
+  for (let d = 0; d <= lookM; d += 10) { const j = (q + Math.round(d / SPACING_M)) % line.n; sum += waterAt(g, line.x[j]!, line.y[j]!); n++; }
+  return n ? sum / n : 0;
+}
+
+/** The tyre the water calls for (weather.json ai thresholds), or 'dry' (pick a slick); keeps the current one in between. */
+function tyreForWater(current: Compound, water: number, ctx: SimContext): Compound | 'dry' {
+  const a = ctx.weather.ai;
+  if (water > a.wetAbove) return 'wet';
+  if (water > a.interAbove) return current === 'wet' && water > (a.interAbove + a.wetAbove) / 2 ? 'wet' : 'inter';
+  if (water < a.slickBelow) return 'dry';
+  return current === 'inter' || current === 'wet' ? 'inter' : 'dry';
+}
+
+/** On tyres the water doesn't call for. */
+function wrongTyres(current: Compound, water: number, ctx: SimContext): boolean {
+  const call = tyreForWater(current, water, ctx);
+  return call === 'dry' ? current === 'inter' || current === 'wet' : call !== current;
 }
