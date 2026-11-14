@@ -7,6 +7,7 @@ import { buildStats } from './car-config';
 import { damageGrip, isDamaged } from './damage';
 import { blueFlag, chooseMode, concedes, coverChance, keepGoodExits, lineFor, LINE_IDS, lineOffsets, offsetPath, offsetsFromPoints, otherHasRightOfWay, type CraftMode, type DefenceConfig, type LineId, type OvertakingConfig, type RacecraftConfig } from './racecraft';
 import { speedProfile, transferGripFactor } from './line-optimizer';
+import { planMove, type LookaheadConfig, type Plan } from './lookahead';
 import { aiCompound, compoundGrip, compoundWaterGrip, consumableScale, FUEL_TO_END, fuelGrip, stopDone, type Compound, type PitPlan } from './strategy';
 import { waterAt } from './weather';
 import type { SimTrack } from './track';
@@ -42,6 +43,13 @@ export interface AiConfig {
   /** fuelLaps: pit with this many laps of fuel left (races, practice); qualiFuelLaps: the same in qualifying (light runs). */
   /** Plan corner speeds from the worse axle's tyre wear (else the four-wheel mean). Absent = false. */
   wearAxle?: boolean;
+  /** The follower's brain (AI look-ahead brain card): "rules" (absent: the hand-written follow / pass rules) or
+   *  "lookahead" (lookahead.ts: candidate moves predicted ~1 s ahead pick the lane, the following gap and the braking). */
+  brain?: 'rules' | 'lookahead';
+  lookahead?: LookaheadConfig;
+  /** Round 5: SAVE (fuel) stops once the tank holds releaseLaps laps more than the flag needs in STANDARD (absent: sticky
+   *  for the race; attackers spent 90% of their catches saving and finished with 2-4 laps of fuel to spare). */
+  fuelSave?: { releaseLaps: number };
   pits?: { fuelLaps: number; qualiFuelLaps?: number; minWear: number; pitSpeedMarginKph: number; repairDamage?: number; entryCornerMargin?: number; reachLaps?: number };
   /** Pit lane driving: fastLaneM = offset from the pit path away from the boxes when driving through; boxApproachM = distance before its box to pull across into it; laneGapM = sideways clearance (beyond a car width) under which a car ahead is "in our lane"; releaseGapM = how far back up the lane a car must be clear before pulling out of the box; latRateMps = how fast it moves across in the lane. */
   pitLane?: { fastLaneM: number; boxApproachM: number; laneGapM: number; releaseGapM: number; latRateMps: number; creepMps?: number };
@@ -418,6 +426,16 @@ export interface AiState {
   lastAllowed: number;
   /** Ticks it held a passing / racecraft offset back on slicks to stay on the dry line (Wet weather card). */
   slickHeld: number;
+  /** Diagnostics for the probes (overtaking round 5), written every tick, never read by the driving: the cornering
+   *  margin factor in use (push, 1 = none), the braking factor (late: < 1 brakes earlier), whether it's closing up,
+   *  the speed its own profile allows vs what's left after traffic (the follow rule pulling it back when lower),
+   *  the engine mode and deploy asked for. */
+  /** The look-ahead brain's current choice (undefined: none, the rules drive) and ticks to its next look. */
+  plan?: Plan | undefined;
+  planTicks?: number;
+  diag: { push: number; late: number; closeUp: boolean; following: boolean; profileV: number; trafficV: number; engineMode: 'save' | 'standard' | 'push'; deploy: boolean;
+    /** Deploy's conditions this tick: racecraft mode allows it, a car 12 m..tow range ahead, straight ahead, no braking zone within 3 s, throttle > 0.9. */
+    dz?: [boolean, boolean, boolean, boolean, boolean] };
 }
 
 export function newAiState(seed: number): AiState {
@@ -427,6 +445,7 @@ export function newAiState(seed: number): AiState {
     craft: 'manage', craftHold: 0, craftEval: 0, lineW: [1, 0, 0], craftTicks: { manage: 0, attack: 0, defend: 0, nurse: 0 }, lineChanges: 0, lineTarget: 'neutral', conceding: false, passTarget: -1, passSide: 0, passTries: 0, passesMade: 0, concessions: 0, blueYield: false, blueYields: 0,
     defence: 'none', covering: 0, defAgainst: -1, defAt: 0, defApex: 0, defCovers: 0, defCoverLost: 0, defHolds: 0, defHoldLost: 0,
     pitWanted: false, pitCall: 'dry', serviced: false, fuelAtLap: -1, fuelPerLap: 0, stuckEvents: 0, mistakes: 0, pitStops: 0, attack: false, launchTick: -1, trust: 1, lastAllowed: 0, slickHeld: 0,
+    diag: { push: 1, late: 1, closeUp: false, following: false, profileV: 0, trafficV: 0, engineMode: 'standard', deploy: false },
   };
 }
 
@@ -575,6 +594,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
       const perLapStd = st.fuelPerLap / (ctx.ers.modes[car.ers.mode]?.fuel ?? 1);
       const needStd = perLapStd * (lapsLeft + 0.3 / scale), needSave = needStd * ctx.ers.modes.save.fuel;
       if (car.fuelKg < needStd && car.fuelKg >= needSave) st.saving = true;
+      else if (st.saving && cfg.fuelSave && car.fuelKg > needStd + cfg.fuelSave.releaseLaps * perLapStd) st.saving = false;
       const enough = car.fuelKg > (st.saving ? needSave : needStd);
       if (want && !broken && enough && car.wheels.every((wh) => wh.wear > 0.3)) want = false;
     }
@@ -742,7 +762,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // Following, it brakes earlier (followBrake, safety); attacking, less so (attackFollowBrake): braking that much
   // earlier gave away every metre it gained in the corners (AI overtaking card).
   const ovb = cfg.overtaking ?? OVERTAKING_OFF;
-  const late = (mistakeNow === 'lateBrake' ? mk.lateBrakeMul : 1) * (following ? (cfg.racecraft?.enabled && st.craft === 'attack' && !pit ? ovb.attackFollowBrake : 0.8) : 1);
+  let late = (mistakeNow === 'lateBrake' ? mk.lateBrakeMul : 1) * (following ? (cfg.racecraft?.enabled && st.craft === 'attack' && !pit ? ovb.attackFollowBrake : 0.8) : 1);
   /** Braking it plans with at speed v: each axle gives the lesser of its brake share and its grip. */
   const bias = phys.brakes.frontBias, wf = phys.car.weightFront, brakeF = phys.brakes.maxForceN * stats.brakes;
   const brakeA = (v: number) => {
@@ -750,6 +770,27 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     const front = Math.min(brakeF * bias, grip * wf), rear = Math.min(brakeF * (1 - bias), grip * (1 - wf));
     return ((front + rear) / mass) * preset.brakeMargin * late;
   };
+  // LOOK-AHEAD BRAIN (trial): every evalSec, with a car ahead in range, the planner picks the lane, the following gap
+  // and whether to brake at the full limit (lookahead.ts); the code below drives it. Not in the pit lane, nor during
+  // a mistake or on lap one (no start manners in the model: the rules drive lap one).
+  const la = cfg.brain === 'lookahead' ? cfg.lookahead : undefined;
+  if (la && !pit && !st.mistake && (!race || (race.phase === 'racing' && (race.cars[i]?.progress ?? 0) >= 1))) {
+    st.planTicks = (st.planTicks ?? 0) - 1;
+    if (st.planTicks <= 0) {
+      st.planTicks = Math.max(1, Math.round(la.evalSec / TICK_DT));
+      const pf = carProfile(line, car, ctx, preset), pScale = Math.sqrt(Math.max(0.05, tyre)) * st.trust;
+      const bF = brakeA(speed);
+      st.plan = planMove({
+        speed, lat: crossErr, latRate: cfg.pitLane?.latRateMps ?? 5,
+        profile: (q) => pf[idx(best + q)]! * pScale, k: (q) => path.k[idx(best + q)]!, roomR: (q) => path.right[idx(best + q)]!, roomL: (q) => path.left[idx(best + q)]!,
+        spacingM: SPACING_M, brakeFollow: bF, brakeFull: bF / Math.max(0.1, late), accel: Math.max(1.5, 9 - speed * 0.12),
+        safeGapM: phys.car.lengthM + 1 + (cfg.predict?.headwaySec ?? 0.35) * speed, lengthM: phys.car.lengthM, widthM: phys.car.widthM,
+        aggression: preset.aggression ?? 0.5, others,
+      }, la, st.plan);
+    }
+  } else if (st.plan || st.planTicks) { st.plan = undefined; st.planTicks = 0; }
+  const plan = st.plan;
+  if (plan?.fullBrake && mistakeNow !== 'lateBrake') late = 1;
   const pitV = (ctx.rules.pitSpeedLimitKph - pits.pitSpeedMarginKph) / 3.6;
   /** Speed limit at a path point: corner speed, the pit limiter in the lane, a stop at the box. */
   const pointV = (q: number) => {
@@ -761,6 +802,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     return v;
   };
   let allowed: number;
+  let diagPush = 1;
   /** A braking zone within ~1.5 s: the moment to pull out of a tow and go for the pass. */
   let brakingSoon = false;
   /** Seconds to the next braking point on the line (Infinity: none within ~6 s): when to pull out of a tow. */
@@ -787,6 +829,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     // it) rather than slide on what downforce is left.
     const backOff = 1 - (cfg.fight?.dirtyBackOff ?? 0) * (preset.tyreCare ?? 0.5) * (car.dirtyAir / Math.max(1e-6, ctx.slipstream.dirtyAir.maxDownforceLoss));
     allowed = prof.at(idx(best + ahead)) * Math.sqrt(Math.max(0.05, tyre)) * st.trust * push * backOff;
+    diagPush = push;
     if (cfg.predict) { profN = carProfile(line, car, ctx, preset); profI = rc ? carProfile(rc.paths[2], car, ctx, preset) : undefined; profScale = Math.sqrt(Math.max(0.05, tyre)) * st.trust; }
     for (let q = 1, look = Math.ceil((speed * 6) / SPACING_M); q <= look; q++) if (prof.at(idx(best + q)) < speed * 0.9) { brakeInSec = (q * SPACING_M) / Math.max(1, speed); brakingSoon = brakeInSec <= 3; break; }
     st.brakeInSec = brakeInSec;
@@ -861,7 +904,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // headway can be shorter (predict.headwaySec): the 0.35 s one made a follower drop back as the speed rose out of
   // every corner (the headway grows with speed), so the car behind lost on every exit what it gained in the corner.
   const followHeadway = cfg.predict?.headwaySec ?? 0.35;
-  const gap = closeUp ? phys.car.lengthM + 1.5 + ov.attackHeadwaySec * (1.5 - (preset.aggression ?? 0.5)) * speed : phys.car.lengthM + 1 + followHeadway * speed;
+  const diagProfileV = allowed;
+  const gap = plan ? plan.gapM : closeUp ? phys.car.lengthM + 1.5 + ov.attackHeadwaySec * (1.5 - (preset.aggression ?? 0.5)) * speed : phys.car.lengthM + 1 + followHeadway * speed;
   // Only start (or keep) a pass where the next ~40 m is fairly straight, not side by side into a braking zone.
   let straightAhead = true;
   for (let q = 0; q < 10; q++) if (Math.abs(path.k[idx(best + q)]!) > 0.03) straightAhead = false;
@@ -1078,7 +1122,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
       squeezeSoon = room - 1.5 < needSide;
     }
     if (pr && profN && (passSide === undefined || Math.abs(side) < 2.2 || squeezeSoon)) {
-      const onInside = coveringAhead(o) && !!profI, pL = best + Math.round(ahead / SPACING_M), a = brakeA(speed), g = phys.car.lengthM + pr.gapM;
+      const onInside = coveringAhead(o) && !!profI, pL = best + Math.round(ahead / SPACING_M), a = brakeA(speed), g = plan && oi === plan.target ? Math.min(plan.gapM, phys.car.lengthM + pr.gapM) : phys.car.lengthM + pr.gapM;
       let vCap = Infinity;
       for (let k = 0, K = Math.ceil((Math.max(10, speed) * pr.lookSec) / SPACING_M); k <= K; k++) {
         const q = idx(pL + k);
@@ -1090,6 +1134,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     }
   }
   st.attack = attack;
+  const diagTrafficV = allowed;
   // Room for an offset lane over the road AHEAD (the next ~2 s, at least 40 m), not just here: a car
   // carrying a lane offset into a hairpin runs off the outside. (Half a car width + a little margin.)
   let maxR = Math.max(0, path.right[best]! - 1.5), maxL = Math.max(0, path.left[best]! - 1.5);
@@ -1103,6 +1148,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     maxR = Math.min(maxR, Math.max(0, path.right[j]! - 1.5));
     maxL = Math.min(maxL, Math.max(0, path.left[j]! - 1.5));
   }
+  // The look-ahead brain's lane (the clamps below still keep it off a car alongside and on the road).
+  if (plan && mistakeNow !== 'wide') wantOffset = plan.offset;
   const needIn = st.offset > maxR + 0.3 ? -1 : st.offset < -maxL - 0.3 ? 1 : 0; // must move back toward the line
   // LEAVING ROOM (overlap rule, round 2/3): a car overlapped on our INSIDE for the coming corner has the apex; we
   // take a line a car width + sideGapM wide of the racing line rather than turn in on it (the racing line itself
@@ -1247,12 +1294,14 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // tow range. (Deploying once alongside too raised ai-run contacts ~20% over 4 seeds; closing-only ~5%.)
   const deployTarget = others.some((o) => !!o && ((o.ahead >= 12 && o.ahead <= towCfg.tow.maxRangeM && Math.abs(o.side) < 3.5)));
   const craftOk = !cfg.racecraft?.enabled || st.craft === 'attack' || st.craft === 'defend';
-  const deploy = racing && !pit && craftOk && (deployTarget || st.craft === 'defend') && straightAhead && !brakingSoon && throttle > 0.9; // not into a braking zone
+  const deployOpen = ov.deployBrakeSec === undefined ? !brakingSoon : brakeInSec > ov.deployBrakeSec;
+  const deploy = racing && !pit && craftOk && (deployTarget || st.craft === 'defend') && straightAhead && deployOpen && throttle > 0.9; // not into a braking zone
   // PUSH only while going for it (deploying): pushing all the time it's close behind just runs it into
   // the car ahead (ai-run: contacts 42 -> 57).
   const engineMode = st.saving ? 'save' : deploy ? 'push' : 'standard';
   st.modeTicks = { ...st.modeTicks, [engineMode]: st.modeTicks[engineMode] + 1 };
   if (deploy && car.ers.deploying) st.deployTicks++;
+  st.diag = { push: diagPush, late, closeUp: !!closeUp, following, profileV: diagProfileV, trafficV: diagTrafficV, engineMode, deploy, dz: [craftOk, deployTarget, straightAhead, deployOpen, throttle > 0.9] };
   // THE PIT BOARD (Race strategy card): going in, it asks for fuel to the end, a repair if damaged, and the
   // grippiest compound that lasts the laps left (or, in practice, the same again).
   let pitPlan: PitPlan | undefined;

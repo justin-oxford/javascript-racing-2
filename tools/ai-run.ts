@@ -21,7 +21,7 @@ const cfg = structuredClone(aiJson) as unknown as AiConfig;
 // --set section.path=value (repeatable): override a live config number for this run, e.g.
 // --set ai.overtaking.closeUntilBrakeSec=0 or --set slipstream.dirtyAir.maxDownforceLoss=0.
 const overrides = args.flatMap((a, i) => (a === '--set' ? [args[i + 1]!] : []));
-const setPath = (root: Record<string, unknown>, path: string[], value: number) => {
+const setPath = (root: Record<string, unknown>, path: string[], value: number | string) => {
   let o = root;
   for (const k of path.slice(0, -1)) o = (o[k] ??= {}) as Record<string, unknown>;
   o[path.at(-1)!] = value;
@@ -36,8 +36,9 @@ const ctx = simContextNode(loaded);
 for (const o of overrides) {
   const [path, v] = o.split('=') as [string, string];
   const [sec, ...rest] = path.split('.');
-  if (sec === 'ai') setPath(cfg as unknown as Record<string, unknown>, rest, Number(v));
-  else setPath((ctx as unknown as Record<string, Record<string, unknown>>)[sec!]!, rest, Number(v));
+  const val = v !== '' && Number.isFinite(Number(v)) ? Number(v) : v; // a number, or a word (--set ai.brain=lookahead)
+  if (sec === 'ai') setPath(cfg as unknown as Record<string, unknown>, rest, val);
+  else setPath((ctx as unknown as Record<string, Record<string, unknown>>)[sec!]!, rest, val);
   console.log(`override ${path} = ${v}`);
 }
 const line = buildRacingLine(loaded.track);
@@ -64,23 +65,43 @@ const drivers = builds.map((_, i) => aiInputSource(i, () => ({ world, ctx, line 
 const catchesOn = race && args.includes('--catches');
 const catchPaceSec = Number(opt('catch-pace', '0.5'));
 const soloBest: number[] = [];
+// Round 5 diagnostics: braking onsets (line point where the brake first passes BRAKE_ON), solo and in the race.
+const BRAKE_ON = 0.3;
+const soloOnsets: number[][] = [];
+const wrapD = (d: number) => { const n = line.n; d = ((d % n) + n) % n; return d > n / 2 ? d - n : d; };
 if (catchesOn) {
   for (let i = 0; i < builds.length; i++) {
     let w: WorldState = createWorld(ctx, [builds[i]!]);
     const d = aiInputSource(0, () => ({ world: w, ctx, line }), () => ({ ...presets[i]!, mistakesPerMin: 0 }), () => cfg, seed * 1000 + i);
-    let best = Infinity;
-    for (let t = 0; t < 60 * 150 && w.cars[0]!.timing.laps < 3; t++) { w = step(w, [d.read(w.tick)], ctx); for (const e of w.events) if (e.type === 'lap' && !e.invalid && w.cars[0]!.timing.laps > 1) best = Math.min(best, e.time); }
-    soloBest.push(best);
+    let best = Infinity, wasBraking = true;
+    const onsets: number[] = [];
+    for (let t = 0; t < 60 * 150 && w.cars[0]!.timing.laps < 3; t++) {
+      w = step(w, [d.read(w.tick)], ctx);
+      for (const e of w.events) if (e.type === 'lap' && !e.invalid && w.cars[0]!.timing.laps > 1) best = Math.min(best, e.time);
+      const braking = w.cars[0]!.controls.brake > BRAKE_ON;
+      if (braking && !wasBraking && w.cars[0]!.timing.laps >= 1 && d.state.mode === 'race') onsets.push(d.state.near);
+      wasBraking = braking;
+    }
+    soloBest.push(best); soloOnsets.push(onsets);
   }
   console.log(`solo pace (best of laps 2-3): ${soloBest.map((b, i) => `${i}:${b.toFixed(2)}`).join(' ')}`);
 }
-interface Catch { a: number; b: number; atSec: number; atLap: number; paceGap: number; outcome?: string; tookSec?: number; tookLaps?: number }
+interface Catch {
+  a: number; b: number; atSec: number; atLap: number; paceGap: number; outcome?: string; tookSec?: number; tookLaps?: number;
+  /** Round 5 diagnostics over the catch (attacker a): ticks by racecraft mode and engine mode, deploy asked / used, saving
+   *  fuel, the push margin on, closing up, the follow rule pulling it below its own profile (by > 0.3 m/s), and the braking
+   *  onsets: vs the car ahead's onset into the same zone (m, + = later = deeper) and vs its own solo onset there. */
+  ticks: number; craft: Record<string, number>; engine: Record<string, number>; deployAsk: number; deployOn: number; saving: number;
+  pushOn: number; closeUp: number; followCapped: number; following: number; vsAhead: number[]; vsSolo: number[]; vsSoloAttack: number[]; vsAheadSolo: number[]; dz: number[]; dzOnly: number[];
+}
 const catches: Catch[] = [];
 const openCatch = new Map<number, Catch>();
+const onsetNow: (number | undefined)[] = [], wasBrakingR: boolean[] = [], lastOnset: ({ near: number; tick: number }[] | undefined)[] = [];
 interface Stat { laps: number[]; invalid: number; walls: number; contacts: number; barriers: number }
 const stats: Stat[] = builds.map(() => ({ laps: [], invalid: 0, walls: 0, contacts: 0, barriers: 0 }));
 const contactsLog = contactLog(ctx);
 const mistakeSeen: number[] = [], mistakeAt: number[] = [], stuckSeen: number[] = [];
+const savingAt: ({ sec: number; lap: number; fuel: number } | undefined)[] = [];
 const maxTicks = 60 * 60 * 30; // 30 simulated minutes safety cap
 const t0 = performance.now();
 let tick = 0;
@@ -98,10 +119,17 @@ for (; tick < maxTicks; tick++) {
   const before = process.env.PITDBG ? drivers.map((d) => ({ mode: d.state.mode, serviced: d.state.serviced, stuck: d.state.stuckEvents, stops: d.state.pitStops })) : [];
   world = step(world, drivers.map((d) => d.read(world.tick)), ctx);
   contactsLog.tick(world);
+  if (catchesOn) world.cars.forEach((c, k) => {
+    const braking = c.controls.brake > BRAKE_ON;
+    onsetNow[k] = braking && !wasBrakingR[k] ? drivers[k]!.state.near : undefined;
+    if (onsetNow[k] !== undefined && drivers[k]!.state.mode === 'race') (lastOnset[k] ??= []).push({ near: onsetNow[k]!, tick });
+    lastOnset[k] = (lastOnset[k] ?? []).filter((e) => tick - e.tick < 60 * 3);
+    wasBrakingR[k] = braking;
+  });
   // TRACEAT=from,to,lo,hi: every car between line pts lo..hi every 0.25 s from `from` to `to` seconds.
   if (process.env.TRACEAT && tick % 15 === 0) {
     const [f, to, lo, hi] = process.env.TRACEAT.split(',').map(Number) as [number, number, number, number];
-    if (tick / 60 >= f && tick / 60 <= to) console.log(`at t=${(tick / 60).toFixed(2)} ` + drivers.map((d, k) => ({ d, k })).filter(({ d }) => d.state.near >= lo && d.state.near <= hi).map(({ d, k }) => { const c = world.cars[k]!; return `[${k} n${d.state.near} v${Math.hypot(c.vx, c.vy).toFixed(1)} ${d.state.craft}${d.state.passTarget >= 0 ? '/pt' + d.state.passTarget : ''} off${d.state.offset.toFixed(1)} thr${c.controls.throttle.toFixed(1)} brk${c.controls.brake.toFixed(1)} st${c.controls.steer.toFixed(2)}${c.carContact ? ' C' : ''}${c.wallContact ? ' W' : ''} lap${world.race?.cars[k]?.progress.toFixed(2)}${d.state.blueYield ? ' BLUE' : ''}]`; }).join(' '));
+    if (tick / 60 >= f && tick / 60 <= to) console.log(`at t=${(tick / 60).toFixed(2)} ` + drivers.map((d, k) => ({ d, k })).filter(({ d }) => d.state.near >= lo && d.state.near <= hi).map(({ d, k }) => { const c = world.cars[k]!; return `[${k} n${d.state.near} v${Math.hypot(c.vx, c.vy).toFixed(1)} ${d.state.craft}${d.state.passTarget >= 0 ? '/pt' + d.state.passTarget : ''} off${d.state.offset.toFixed(1)} thr${c.controls.throttle.toFixed(1)} brk${c.controls.brake.toFixed(1)} st${c.controls.steer.toFixed(2)}${c.carContact ? ' C' : ''}${c.wallContact ? ' W' : ''} lap${world.race?.cars[k]?.progress.toFixed(2)}${d.state.blueYield ? ' BLUE' : ''}${d.state.plan ? ` PL${d.state.plan.lane}/g${d.state.plan.gi}${d.state.plan.fullBrake ? 'F' : ''}->${d.state.plan.target}` : ''} wr${c.wheels[2].wear.toFixed(2)}]`; }).join(' '));
   }
   // TRACEPAIR=a,b: the chaser a and the car ahead b every 0.5 s (gap on the line, speeds, a's racecraft and pass state).
   if (process.env.TRACEPAIR && tick % 30 === 0 && world.race?.phase === 'racing') {
@@ -115,6 +143,7 @@ for (; tick < maxTicks; tick++) {
     if (st.mistakes > (mistakeSeen[i] ?? 0)) { mistakeSeen[i] = st.mistakes; mistakeAt[i] = tick; }
     if (st.stuckEvents > (stuckSeen[i] ?? 0)) { stuckSeen[i] = st.stuckEvents; console.log(`stuck t=${(tick / 60).toFixed(1)} car ${i} lap ${c.timing.laps + 1} near ${st.near} mode ${st.mode} last mistake ${mistakeAt[i] !== undefined ? `${st.lastMistake} ${((tick - mistakeAt[i]!) / 60).toFixed(1)} s before` : 'none'} wall ${c.wallContact} carContact ${c.carContact} fuel ${c.fuelKg.toFixed(1)} kg tyres ${c.wheels.map((x) => x.wear.toFixed(2)).join("/")} pits ${st.pitStops}`); }
   });
+  drivers.forEach((d, i) => { if (d.state.saving && savingAt[i] === undefined) savingAt[i] = { sec: tick / 60, lap: world.race?.cars[i]?.progress ?? world.cars[i]!.timing.laps, fuel: world.cars[i]!.fuelKg }; });
   if (process.env.PITDBG) drivers.forEach((d, i) => {
     const b = before[i]!, st = d.state, c = world.cars[i]!, ppm = ctx.track.json.pxPerMeter, at = `(${(c.x * ppm).toFixed(0)},${(c.y * ppm).toFixed(0)})`;
     if (st.mode !== b.mode) console.log(`pit t=${(tick / 60).toFixed(1)} car ${i} ${b.mode} -> ${st.mode} ${at} fuel ${c.fuelKg.toFixed(1)}`);
@@ -162,6 +191,25 @@ for (; tick < maxTicks; tick++) {
       const key = a * 100 + b, o = openCatch.get(key), lapA = soloBest[a]!, gapSec = (rc[b]!.progress - rc[a]!.progress) * lapA;
       const between = rc.some((c, k) => k !== a && k !== b && c.progress > rc[a]!.progress && c.progress < rc[b]!.progress);
       if (o) {
+        const sa = drivers[a]!.state, ca = world.cars[a]!, dg = sa.diag;
+        o.ticks++; o.craft[sa.craft] = (o.craft[sa.craft] ?? 0) + 1; o.engine[dg.engineMode] = (o.engine[dg.engineMode] ?? 0) + 1;
+        if (dg.deploy) o.deployAsk++;
+        dg.dz?.forEach((ok, k) => { if (ok) o.dz[k]!++; if (!ok && dg.dz!.every((x, j) => j === k || x)) o.dzOnly[k]!++; });
+        if (ca.ers.deploying) o.deployOn++;
+        if (sa.saving) o.saving++;
+        if (dg.push > 1.0001) o.pushOn++;
+        if (dg.closeUp) o.closeUp++;
+        if (dg.following) o.following++;
+        if (dg.trafficV < dg.profileV - 0.3) o.followCapped++;
+        if (onsetNow[a] !== undefined && sa.mode === 'race') {
+          // The car ahead's onset into the same zone: its nearest onset (on the line) in the last 3 s.
+          const p = onsetNow[a]!, ob = (lastOnset[b] ?? []).map((e) => wrapD(p - e.near)).filter((d) => Math.abs(d) < 20).sort((x, y) => Math.abs(x) - Math.abs(y))[0];
+          if (ob !== undefined) o.vsAhead.push(ob * 2);
+          const solo = soloOnsets[a]!.map((q) => wrapD(p - q)).filter((d) => Math.abs(d) < 20).sort((x, y) => Math.abs(x) - Math.abs(y))[0];
+          if (solo !== undefined) (sa.craft === 'attack' ? o.vsSoloAttack : o.vsSolo).push(solo * 2);
+          const bSolo = soloOnsets[b]!.map((q) => wrapD(p - q)).filter((d) => Math.abs(d) < 20).sort((x, y) => Math.abs(x) - Math.abs(y))[0];
+          if (bSolo !== undefined) o.vsAheadSolo.push(bSolo * 2);
+        }
         const end = (outcome: string) => { o.outcome = outcome; o.tookSec = t - o.atSec; o.tookLaps = o.tookSec / lapA; openCatch.delete(key); };
         if (gapSec < 0) end('passed');
         else if (gapSec > 2.5) end('lost touch');
@@ -173,7 +221,7 @@ for (; tick < maxTicks; tick++) {
       if (world.race!.phase !== 'racing' || rc[a]!.progress < 1 || gapSec <= 0 || gapSec > 1 || between) continue;
       if (soloBest[b]! - lapA < catchPaceSec || world.cars[a]!.inPitLane || world.cars[b]!.inPitLane || rc[a]!.finished || rc[b]!.finished) continue;
       // Already caught this car and lost touch / passed: a new catch only after being properly apart (handled by the 2.5 s rule).
-      const c: Catch = { a, b, atSec: t, atLap: rc[a]!.progress, paceGap: soloBest[b]! - lapA };
+      const c: Catch = { a, b, atSec: t, atLap: rc[a]!.progress, paceGap: soloBest[b]! - lapA, ticks: 0, craft: {}, engine: {}, deployAsk: 0, deployOn: 0, saving: 0, pushOn: 0, closeUp: 0, followCapped: 0, following: 0, vsAhead: [], vsSolo: [], vsSoloAttack: [], vsAheadSolo: [], dz: [0, 0, 0, 0, 0], dzOnly: [0, 0, 0, 0, 0] };
       catches.push(c); openCatch.set(key, c);
     }
   }
@@ -216,6 +264,9 @@ console.log(`car ${contactsLog.summary()}`);
 if (damage !== 'off') console.log(`damage (${damage}): ${world.cars.map((c, i) => { const d = c.damage; const tot = d.frontWing + d.rearWing + d.left + d.right; return tot > 0 ? `car ${i} F${(d.frontWing * 100).toFixed(0)} R${(d.rearWing * 100).toFixed(0)} L${(d.left * 100).toFixed(0)} R${(d.right * 100).toFixed(0)}%` : ''; }).filter(Boolean).join('; ') || 'none'}; repair stops ${drivers.reduce((a, d) => a + d.state.pitStops, 0)}`);
 if (process.env.INCIDENTS) for (const i of contactsLog.incidents) console.log(`incident t=${(i.startTick / 60).toFixed(1)} cars ${i.a}-${i.b} peak ${i.peakMps.toFixed(1)} m/s; b at lon ${i.lon.toFixed(1)} lat ${i.lat.toFixed(1)} in a's frame, speeds ${i.va.toFixed(1)}/${i.vb.toFixed(1)}, heading diff ${i.angDeg.toFixed(0)} deg`);
 if (process.env.CONTACTHIST) console.log(`car contact peaks (m/s): ${histogram(contactsLog.incidents.map((i) => i.peakMps))}\nwall/barrier hit peaks (m/s): ${histogram(contactsLog.wallPeaks)}\nRAW ${JSON.stringify(contactsLog.incidents.map((i) => +i.peakMps.toFixed(2)))}\nWALLRAW ${JSON.stringify(contactsLog.wallPeaks.map((p) => +p.toFixed(2)))}`);
+// Fuel (round 5): when each car started saving (SAVE engine mode, sticky), and what it had left at the end.
+console.log(`tyres at the end (mean front / rear): ${(world.cars.reduce((a, c) => a + c.wheels[0].wear + c.wheels[1].wear, 0) / (2 * cars)).toFixed(2)} / ${(world.cars.reduce((a, c) => a + c.wheels[2].wear + c.wheels[3].wear, 0) / (2 * cars)).toFixed(2)}`);
+console.log(`fuel: ${world.cars.map((c, i) => `${i}:${c.fuelKg.toFixed(1)}kg${savingAt[i] ? ` save@lap${(savingAt[i]!.lap + 1).toFixed(1)}(${savingAt[i]!.fuel.toFixed(1)}kg)` : ''} stops${drivers[i]!.state.pitStops}`).join(' ')}`);
 console.log(`\nstuck events ${stuck}; cars short of ${laps} laps: ${unfinished}; overtakes ${overtakes} (swapped back within 60 s ${swapsBack})`);
 // AI overtaking round 3: the defenders' choices into braking zones, and how often each lost the place there.
 {
@@ -224,6 +275,11 @@ console.log(`\nstuck events ${stuck}; cars short of ${laps} laps: ${unfinished};
 }
 if (catchesOn) {
   for (const o of openCatch.values()) { o.outcome = 'race ended'; o.tookSec = tick / 60 - o.atSec; o.tookLaps = o.tookSec / soloBest[o.a]!; }
+  const pct = (x: number, c: Catch) => `${Math.round((100 * x) / Math.max(1, c.ticks))}%`;
+  const med = (a: number[]) => (a.length ? [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)]!.toFixed(1) : '-');
+  const keys = (r: Record<string, number>, c: Catch) => Object.entries(r).map(([k, v]) => `${k} ${pct(v, c)}`).join(' ');
+  for (const c of catches) console.log(`catchdiag: car ${c.a} on ${c.b} ${c.outcome} ticks ${c.ticks} craft[${keys(c.craft, c)}] engine[${keys(c.engine, c)}] deployAsk ${pct(c.deployAsk, c)} deployOn ${pct(c.deployOn, c)} saving ${pct(c.saving, c)} push ${pct(c.pushOn, c)} closeUp ${pct(c.closeUp, c)} following ${pct(c.following, c)} followCapped ${pct(c.followCapped, c)} brakeVsAhead n${c.vsAhead.length} med ${med(c.vsAhead)} m; vsSolo(attack) n${c.vsSoloAttack.length} med ${med(c.vsSoloAttack)} m; vsSolo(other) n${c.vsSolo.length} med ${med(c.vsSolo)} m`);
+  console.log(`CATCHDIAG ${JSON.stringify(catches.map((c) => ({ a: c.a, b: c.b, out: c.outcome, laps: +c.tookLaps!.toFixed(2), gap: +c.paceGap.toFixed(2), t: c.ticks, craft: c.craft, engine: c.engine, dAsk: c.deployAsk, dOn: c.deployOn, sav: c.saving, push: c.pushOn, cu: c.closeUp, fol: c.following, cap: c.followCapped, vA: c.vsAhead, vS: c.vsSolo, vSA: c.vsSoloAttack, vAS: c.vsAheadSolo, dz: c.dz, dzOnly: c.dzOnly })))}`);
   for (const c of catches) console.log(`catch: car ${c.a} (${c.paceGap.toFixed(2)} s/lap quicker solo) on car ${c.b}, lap ${(c.atLap + 1).toFixed(1)}: ${c.outcome} after ${c.tookLaps!.toFixed(1)} laps`);
   const passed = catches.filter((c) => c.outcome === 'passed'), within3 = passed.filter((c) => c.tookLaps! <= 3);
   console.log(`CATCHES ${catches.length}: passed ${passed.length} (within 3 laps ${within3.length}), lost touch ${catches.filter((c) => c.outcome === 'lost touch').length}, pit ${catches.filter((c) => c.outcome === 'pit').length}, race ended ${catches.filter((c) => c.outcome === 'race ended').length}, traffic ${catches.filter((c) => c.outcome === 'traffic').length}; median laps to pass ${passed.length ? [...passed].sort((x, y) => x.tookLaps! - y.tookLaps!)[Math.floor(passed.length / 2)]!.tookLaps!.toFixed(1) : '-'}`);

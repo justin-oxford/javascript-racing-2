@@ -295,6 +295,9 @@ export interface OvertakingConfig {
   blueBehindM: number;
   /** How much a lapped car lifts on the straight to let it by (fraction of its speed). */
   blueLift: number;
+  /** Round 5: deploy is allowed until this many seconds before a braking point (absent: 3 s, the pull-out window;
+   *  on Oxford that window covered most of every straight, so attackers deployed 0.3% of the time). */
+  deployBrakeSec?: number;
 }
 
 /** Whether the OTHER car has the right of way (the one without it yields when there's no room for both).
