@@ -40,6 +40,8 @@ export interface AiConfig {
   /** resetAfterSec: still in trouble (crawling, reversing out, stuck) this long -> reset to track, same as a player (race.json reset). */
   recovery: { stuckSec: number; reverseSec: number; backwardsDeg: number; resetAfterSec?: number };
   /** fuelLaps: pit with this many laps of fuel left (races, practice); qualiFuelLaps: the same in qualifying (light runs). */
+  /** Plan corner speeds from the worse axle's tyre wear (else the four-wheel mean). Absent = false. */
+  wearAxle?: boolean;
   pits?: { fuelLaps: number; qualiFuelLaps?: number; minWear: number; pitSpeedMarginKph: number; repairDamage?: number; entryCornerMargin?: number; reachLaps?: number };
   /** Pit lane driving: fastLaneM = offset from the pit path away from the boxes when driving through; boxApproachM = distance before its box to pull across into it; laneGapM = sideways clearance (beyond a car width) under which a car ahead is "in our lane"; releaseGapM = how far back up the lane a car must be clear before pulling out of the box; latRateMps = how fast it moves across in the lane. */
   pitLane?: { fastLaneM: number; boxApproachM: number; laneGapM: number; releaseGapM: number; latRateMps: number; creepMps?: number };
@@ -697,7 +699,11 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // (Off the dry line, e.g. passing or running wide, the water where the car actually is counts: on slicks
   // it carried dry-line speed onto a wet patch and went off.)
   const lineWater = Math.max(waterAlong(world, line, Math.max(0, st.near), ctx.weather.ai.lookM), world.surface?.water ? waterAt(world.surface, car.x, car.y) : 0);
-  const tyre = (car.wheels.reduce((a, w) => a + wearGrip(w.wear), 0) / 4) * dmgGrip * compoundGrip(car.compound, ctx.strategy)
+  // Tyre wear: the WORSE axle with ai.json wearAxle (round 4: rears worn to 0.5 while the fronts were at 0.85, the
+  // four-wheel mean planned 16% more than the rears had and cars spun at direction changes late in a stint).
+  const wg = car.wheels.map((w) => wearGrip(w.wear));
+  const wearG = cfg.wearAxle ? Math.min((wg[0]! + wg[1]!) / 2, (wg[2]! + wg[3]!) / 2) : (wg[0]! + wg[1]! + wg[2]! + wg[3]!) / 4;
+  const tyre = wearG * dmgGrip * compoundGrip(car.compound, ctx.strategy)
     * (compoundWaterGrip(car.compound, lineWater, ctx.strategy) / compoundWaterGrip(car.compound, 0, ctx.strategy))
     * (fuelGrip(phys.car.dryMassKg, car.fuelKg, loadK) / fuelGrip(phys.car.dryMassKg, phys.fuel.startKg / 2, loadK));
   const mu = phys.tyres.baseGrip * stats.grip * tyre;
@@ -847,7 +853,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // (On lap one, with the whole field nose to tail, lapOneCloseUntilBrakeSec: closing right up into turn 1 there
   // piled the pack up.)
   const lapOne = !!race && (race.cars[i]?.progress ?? 0) < 1;
-  const closeUp = cfg.racecraft?.enabled && st.craft === 'attack' && !pit && brakeInSec > (lapOne ? ov.lapOneCloseUntilBrakeSec ?? ov.closeUntilBrakeSec : ov.closeUntilBrakeSec);
+  const closeSec = lapOne ? ov.lapOneCloseUntilBrakeSec ?? ov.closeUntilBrakeSec : ov.closeUntilBrakeSec;
+  const closeUp = cfg.racecraft?.enabled && st.craft === 'attack' && !pit && brakeInSec > closeSec;
   // With the prediction (round 3: braking planned from the car ahead's own line and speed), the plain following
   // headway can be shorter (predict.headwaySec): the 0.35 s one made a follower drop back as the speed rose out of
   // every corner (the headway grows with speed), so the car behind lost on every exit what it gained in the corner.

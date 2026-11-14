@@ -58,3 +58,21 @@ describe('AI drivers', () => {
     expect(world.cars[0]!.speed).toBeGreaterThan(10);
   });
 });
+
+describe('tyre wear by axle (AI overtaking round 4)', () => {
+  it('wearAxle: with worn rears under fresh fronts it plans from the rears (slower), never faster than the mean', () => {
+    let w: WorldState = createWorld(ctx, 1);
+    let st = newAiState(7);
+    let slower = 0;
+    for (let t = 0; t < 900; t++) {
+      const worn = { ...w, cars: [{ ...w.cars[0]!, wheels: w.cars[0]!.wheels.map((x, k) => ({ ...x, wear: k < 2 ? 0.9 : 0.45 })) as typeof w.cars[0]['wheels'] }] };
+      const mean = aiDrive(worn, 0, st, line, ctx, hard, cfg);
+      const axle = aiDrive(worn, 0, st, line, ctx, hard, { ...cfg, wearAxle: true });
+      expect(axle.state.lastAllowed).toBeLessThanOrEqual(mean.state.lastAllowed + 1e-9);
+      if (axle.state.lastAllowed < mean.state.lastAllowed - 0.5) slower++;
+      st = mean.state;
+      w = step(worn, [mean.input], ctx);
+    }
+    expect(slower).toBeGreaterThan(60);
+  });
+});
