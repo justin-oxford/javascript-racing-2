@@ -82,3 +82,31 @@ describe('weather', () => {
     expect(b.surface!.water).toEqual(a.surface!.water);
   }, 60_000);
 });
+
+describe('slicks keep to the dry line (Wet weather card)', () => {
+  it('on slicks, an offset onto standing water beside a dry line is held back; on inters, or with the setting absent, it is not', () => {
+    const rl = buildRacingLine(loaded.track)!;
+    const base = createRaceWorld(ctx, [ctx.physics.defaultCar], { laps: 3, seed: 1 });
+    // Flooded (0.8) except a 2 m strip along the racing line.
+    const g = { ...newSurfaceGrid(ctx.track, ctx.evolution) };
+    const water = new Array(g.w * g.h).fill(0.8) as number[];
+    for (let q = 0; q < rl.n; q++) {
+      const cx = Math.floor(rl.x[q]! / g.cellM), cy = Math.floor(rl.y[q]! / g.cellM);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const x = cx + dx, y = cy + dy; if (x >= 0 && y >= 0 && x < g.w && y < g.h && Math.hypot((x + 0.5) * g.cellM - rl.x[q]!, (y + 0.5) * g.cellM - rl.y[q]!) < 2) water[y * g.w + x] = 0; }
+    }
+    const q = 40, hx = rl.x[q + 1]! - rl.x[q]!, hy = rl.y[q + 1]! - rl.y[q]!, heading = Math.atan2(hx, -hy);
+    const at = (compound: 'soft' | 'inter'): WorldState => ({ ...base, race: { ...base.race!, phase: 'racing' }, surface: { ...g, water }, cars: [{ ...base.cars[0]!, x: rl.x[q]!, y: rl.y[q]!, heading, vx: Math.sin(heading) * 30, vy: -Math.cos(heading) * 30, compound }] });
+    const cfg = aiJson as unknown as AiConfig;
+    const held = (w: WorldState, c: SimContextLike) => {
+      const src = aiInputSource(0, () => ({ world: w, ctx: c, line: rl }), () => ({ ...cfg.presets.hard!, mistakesPerMin: 0, noise: 0 }), () => cfg, 1);
+      src.state.offset = 3; src.state.near = q; src.state.mode = 'race';
+      src.read(w.tick);
+      return src.state.slickHeld;
+    };
+    const off = { ...ctx, weather: { ...ctx.weather, ai: { ...ctx.weather.ai, slickOffLineWater: undefined } } } as unknown as SimContextLike;
+    expect(held(at('soft'), ctx)).toBe(1);
+    expect(held(at('inter'), ctx)).toBe(0);
+    expect(held(at('soft'), off)).toBe(0);
+  });
+});
+type SimContextLike = typeof ctx;

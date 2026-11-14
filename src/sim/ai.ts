@@ -416,6 +416,8 @@ export interface AiState {
   trust: number;
   /** Debug: the speed it planned for last tick, m/s. */
   lastAllowed: number;
+  /** Ticks it held a passing / racecraft offset back on slicks to stay on the dry line (Wet weather card). */
+  slickHeld: number;
 }
 
 export function newAiState(seed: number): AiState {
@@ -424,7 +426,7 @@ export function newAiState(seed: number): AiState {
     troubleTicks: 0, resets: 0, saving: false, modeTicks: { save: 0, standard: 0, push: 0 }, deployTicks: 0,
     craft: 'manage', craftHold: 0, craftEval: 0, lineW: [1, 0, 0], craftTicks: { manage: 0, attack: 0, defend: 0, nurse: 0 }, lineChanges: 0, lineTarget: 'neutral', conceding: false, passTarget: -1, passSide: 0, passTries: 0, passesMade: 0, concessions: 0, blueYield: false, blueYields: 0,
     defence: 'none', covering: 0, defAgainst: -1, defAt: 0, defApex: 0, defCovers: 0, defCoverLost: 0, defHolds: 0, defHoldLost: 0,
-    pitWanted: false, pitCall: 'dry', serviced: false, fuelAtLap: -1, fuelPerLap: 0, stuckEvents: 0, mistakes: 0, pitStops: 0, attack: false, launchTick: -1, trust: 1, lastAllowed: 0,
+    pitWanted: false, pitCall: 'dry', serviced: false, fuelAtLap: -1, fuelPerLap: 0, stuckEvents: 0, mistakes: 0, pitStops: 0, attack: false, launchTick: -1, trust: 1, lastAllowed: 0, slickHeld: 0,
   };
 }
 
@@ -1144,7 +1146,18 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   const lineOff = !pit ? craftOffset(st, line, cfg, phys.car.widthM / 2, t) : 0;
   // The two together stay on the road (half a car + margin from the edge at the target point): a passing
   // offset on top of the EXIT line's put attackers on the grass beside the car they were passing.
-  const totalOff = pit ? st.offset : clamp(st.offset + lineOff, -Math.max(0, path.left[t]! - 1.5), Math.max(0, path.right[t]! - 1.5));
+  let totalOff = pit ? st.offset : clamp(st.offset + lineOff, -Math.max(0, path.left[t]! - 1.5), Math.max(0, path.right[t]! - 1.5));
+  // ON SLICKS IN THE WET (Wet weather card): keep to the dry line. Passing, the tow and racecraft lines all move the
+  // target point off the racing line; on slicks, onto standing water there, cars slid off and beached. Take the
+  // largest share of the offset whose target point isn't on water deeper than slickOffLineWater (and deeper than the
+  // line's own by slickOffLineMargin).
+  const wa = ctx.weather.ai;
+  if (!pit && totalOff !== 0 && wa.slickOffLineWater !== undefined && world.surface?.water && car.compound !== 'inter' && car.compound !== 'wet') {
+    const onLine = waterAt(world.surface, path.x[t]!, path.y[t]!), margin = wa.slickOffLineMargin ?? 0.1;
+    const ok = (f: number) => { const w = waterAt(world.surface!, path.x[t]! + nx * totalOff * f, path.y[t]! + ny * totalOff * f); return w <= wa.slickOffLineWater! || w <= onLine + margin; };
+    const f = [1, 0.75, 0.5, 0.25].find(ok) ?? 0;
+    if (f < 1) { totalOff *= f; st.slickHeld++; }
+  }
   const tx = path.x[t]! + nx * totalOff, ty = path.y[t]! + ny * totalOff;
   const err = wrap(Math.atan2(tx - car.x, -(ty - car.y)) - car.heading);
   // The wheel angle that arcs the car onto the target, divided by the lock the car has at this speed.

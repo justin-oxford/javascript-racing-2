@@ -31,6 +31,12 @@ function race() {
     const prev = w;
     w = step(w, ai.map((d) => d.read(w.tick)), ctx);
     log.tick(w);
+    // TRACECAR=car,from,to: that car every 0.25 s (line pt, speed, inputs, offset, water under it and on the line there).
+    if (process.env.TRACECAR && w.tick % 15 === 0) {
+      const [k, f, to] = process.env.TRACECAR.split(',').map(Number) as [number, number, number];
+      const c = w.cars[k]!, d = ai[k]!.state, q = Math.max(0, d.near);
+      if (w.tick / 60 >= f && w.tick / 60 <= to) console.log(`  car ${k} t=${(w.tick / 60).toFixed(2)} near ${d.near} v ${Math.hypot(c.vx, c.vy).toFixed(1)} thr ${c.controls.throttle.toFixed(1)} brk ${c.controls.brake.toFixed(1)} st ${c.controls.steer.toFixed(2)} off ${d.offset.toFixed(1)} held ${d.slickHeld} craft ${d.craft} water car ${waterAt(w.surface, c.x, c.y).toFixed(2)} line ${waterAt(w.surface, line.x[q]!, line.y[q]!).toFixed(2)} dist to line ${Math.hypot(c.x - line.x[q]!, c.y - line.y[q]!).toFixed(1)} m surf ${c.wheels.map((x) => ctx.track.surfaces[x.surface]!.id[0]).join('')} trust ${d.trust.toFixed(3)}`);
+    }
     if (process.env.STUCK) ai.forEach((d, i) => { if (d.state.stuckEvents > (stuckSeen[i] ?? 0)) { stuckSeen[i] = d.state.stuckEvents; const c = w.cars[i]!; console.log(`  stuck t=${(w.tick / 60).toFixed(0)} car ${i} lap ${c.timing.laps} ${c.compound} near ${d.state.near} ${d.state.mode} water here ${waterAt(w.surface, c.x, c.y).toFixed(2)} wall ${c.wallContact} carContact ${c.carContact}`); } });
     w.cars.forEach((c, i) => { if (c.compound !== prev.cars[i]!.compound) stops[i]!.push(`L${c.timing.laps} ${prev.cars[i]!.compound}->${c.compound}`); });
     // PITLOG=1: every pit entry and service (what it had, what it got, the water it saw).

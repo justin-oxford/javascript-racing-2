@@ -31,7 +31,9 @@ export interface WeatherConfig {
   /** Starting water for a Wet session (the track is already wet). */
   wetStartWater: number;
   /** AI tyre calls by the water under its line (averaged over the next lookM). */
-  ai: { interAbove: number; wetAbove: number; slickBelow: number; lookM: number };
+  /** slickOffLineWater (absent: off): on slicks, never steer off the racing line onto water deeper than this (and
+   *  deeper than on the line by slickOffLineMargin, default 0.1): the dry line is the only grip a slick has. */
+  ai: { interAbove: number; wetAbove: number; slickBelow: number; lookM: number; slickOffLineWater?: number; slickOffLineMargin?: number };
 }
 
 /** A seeded number in 0..1 from the session seed and a salt (no RNG state needed: the curve is a pure function). */
