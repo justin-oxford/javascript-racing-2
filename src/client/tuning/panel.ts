@@ -65,6 +65,8 @@ const RANGES: Record<string, [number, number, number]> = {
   'weather.ai.wetAbove': [0, 1, 0.01],
   'weather.ai.slickBelow': [0, 1, 0.01],
   'weather.ai.lookM': [20, 1000, 10],
+  'weather.ai.slickOffLineWater': [0, 1, 0.01],
+  'weather.ai.slickOffLineMargin': [0, 1, 0.01],
   'car.frontAxleFromCentreM': [0.5, 3, 0.005],
   'steering.assistPeakPct': [0.5, 2, 0.01],
   'steering.assistFromKph': [0, 150, 1],
