@@ -10,6 +10,7 @@ import aiJson from '../config/ai.json' with { type: 'json' };
 import driversJson from '../config/drivers.json' with { type: 'json' };
 import { aiInputSource, assignDrivers, buildRacingLine, createRaceWorld, driverPreset, step, type AiConfig, type CarBuild, type DriverDef, type WorldState } from '../src/sim/index.ts';
 import { catalog, defaultTrackIdNode, loadTrackNode, simContextNode } from './load-track-node.ts';
+import { contactLog } from './contact-split.ts';
 
 const args = process.argv.slice(2);
 const opt = (n: string, d: number) => { const i = args.indexOf(`--${n}`); return i >= 0 ? Number(args[i + 1]) : d; };
@@ -32,6 +33,7 @@ function race(seed: number) {
   const order = new Map<number, number>();
   const passes: Array<{ tick: number; passer: number; passed: number }> = [];
   let contacts = 0, contactsAfterMistake = 0;
+  const log = contactLog(ctx);
   const stuckSeen: number[] = [];
   // Wear per lap with the share of it spent within 1 s behind another car.
   const lapWear: Array<Array<{ wear: number; close: number; serviced: boolean }>> = builds.map(() => []);
@@ -41,6 +43,7 @@ function race(seed: number) {
     const prev = w;
     const prevActive = ai.map((d) => !!d.state.mistake?.active);
     w = step(w, ai.map((d) => d.read(w.tick)), ctx);
+    log.tick(w);
     if (w.race!.phase !== 'racing') continue;
     // Counted when the mistake actually happens (armed ones wait for a braking zone / corner / slow exit).
     ai.forEach((d, i) => { if (d.state.mistake?.active && !prevActive[i]) mistakes[i]!.push({ kind: d.state.mistake.kind, tick: w.tick, lap: w.cars[i]!.timing.laps }); });
@@ -81,17 +84,18 @@ function race(seed: number) {
   let repasses = 0;
   passes.forEach((p, k) => { if (passes.slice(k + 1).some((q) => q.passer === p.passed && q.passed === p.passer && q.tick - p.tick > 600)) repasses++; });
   const afterMistake = passes.filter((p) => mistakes[p.passed]!.some((m) => p.tick - m.tick >= 0 && p.tick - m.tick < 240)).length;
-  return { w, ai, lineup, mistakes, lapTimes, passes, repasses, afterMistake, contacts, contactsAfterMistake, lapWear, stuck: ai.reduce((a, d) => a + d.state.stuckEvents, 0), order: w.race!.order.join(',') };
+  log.finish();
+  return { w, ai, lineup, mistakes, lapTimes, passes, repasses, afterMistake, contacts, taps: log.taps, heavy: log.heavy, contactsAfterMistake, lapWear, stuck: ai.reduce((a, d) => a + d.state.stuckEvents, 0), order: w.race!.order.join(',') };
 }
 
 const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s[Math.floor(s.length / 2)] ?? 0; };
 const byKind: Record<string, { n: number; cost: number[] }> = {};
-let tot = { passes: 0, repasses: 0, afterMistake: 0, contacts: 0, stuck: 0 };
+let tot = { passes: 0, repasses: 0, afterMistake: 0, contacts: 0, taps: 0, heavy: 0, stuck: 0 };
 const wearClose: number[] = [], wearClean: number[] = [], closeCare: Array<{ tyres: number; wear: number }> = [];
 const consMistakes: Array<{ cons: number; n: number }> = [];
 for (let seed = first; seed < first + seeds; seed++) {
   const r = race(seed);
-  tot = { passes: tot.passes + r.passes.length, repasses: tot.repasses + r.repasses, afterMistake: tot.afterMistake + r.afterMistake, contacts: tot.contacts + r.contacts, stuck: tot.stuck + r.stuck };
+  tot = { passes: tot.passes + r.passes.length, repasses: tot.repasses + r.repasses, afterMistake: tot.afterMistake + r.afterMistake, contacts: tot.contacts + r.contacts, taps: tot.taps + r.taps, heavy: tot.heavy + r.heavy, stuck: tot.stuck + r.stuck };
   r.mistakes.forEach((ms, i) => {
     consMistakes.push({ cons: r.lineup[i]?.consistency ?? 50, n: ms.length });
     const med = median(r.lapTimes[i]!);
@@ -103,10 +107,10 @@ for (let seed = first; seed < first + seeds; seed++) {
   });
   r.lapWear.forEach((ls, i) => ls.forEach((l, k) => { if (k === 0 || l.serviced) return; (l.close > 0.5 ? wearClose : wearClean).push(l.wear); if (l.close > 0.5) closeCare.push({ tyres: r.lineup[i]?.tyres ?? 50, wear: l.wear }); }));
   const again = race(seed);
-  console.log(`seed ${seed}: passes ${r.passes.length}, re-passes ${r.repasses}, after a mistake ${r.afterMistake}, mistakes ${r.mistakes.reduce((a, m) => a + m.length, 0)}, contacts ${r.contacts} (${r.contactsAfterMistake} within 3 s of a mistake), stuck ${r.stuck}; deterministic ${again.order === r.order && again.w.tick === r.w.tick ? 'yes' : 'NO'}`);
+  console.log(`seed ${seed}: passes ${r.passes.length}, re-passes ${r.repasses}, after a mistake ${r.afterMistake}, mistakes ${r.mistakes.reduce((a, m) => a + m.length, 0)}, contact starts ${r.contacts} (${r.contactsAfterMistake} within 3 s of a mistake), incidents: taps ${r.taps}, heavy hits ${r.heavy}, stuck ${r.stuck}; deterministic ${again.order === r.order && again.w.tick === r.w.tick ? 'yes' : 'NO'}`);
 }
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
-console.log(`\n${seeds} races, ${laps} laps, Equal mode: strict passes ${tot.passes}, re-passes ${tot.repasses}, passes after the passed car's mistake ${tot.afterMistake}, contacts ${tot.contacts} (${(tot.contacts / Math.max(1, tot.passes)).toFixed(2)} per pass), stuck ${tot.stuck}`);
+console.log(`\n${seeds} races, ${laps} laps, Equal mode: strict passes ${tot.passes}, re-passes ${tot.repasses}, passes after the passed car's mistake ${tot.afterMistake}, taps ${tot.taps}, heavy hits ${tot.heavy} (>= ${ctx.damage.thresholdMps} m/s, ${(tot.heavy / Math.max(1, tot.passes)).toFixed(2)} per pass), contact starts ${tot.contacts} (${(tot.contacts / Math.max(1, tot.passes)).toFixed(2)} per pass), stuck ${tot.stuck}`);
 for (const [k, v] of Object.entries(byKind)) console.log(`  mistake ${k.padEnd(10)}: ${v.n}, lap time lost: median ${median(v.cost).toFixed(2)} s, mean ${mean(v.cost).toFixed(2)} s`);
 const lo = consMistakes.filter((c) => c.cons < 60), hi = consMistakes.filter((c) => c.cons >= 75);
 console.log(`  mistakes per race: CONSISTENCY < 60 ${mean(lo.map((c) => c.n)).toFixed(2)}, >= 75 ${mean(hi.map((c) => c.n)).toFixed(2)}`);

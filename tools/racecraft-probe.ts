@@ -9,6 +9,7 @@ import aiJson from '../config/ai.json' with { type: 'json' };
 import driversJson from '../config/drivers.json' with { type: 'json' };
 import { aiInputSource, assignDrivers, driverPreset, type DriverDef, buildRacingLine, buildStats, cornersOf, createRaceWorld, keepGoodExits, lineOffsets, offsetPath, offsetsFromPoints, speedProfile, step, type AiConfig, type CarBuild, type WorldState } from '../src/sim/index.ts';
 import { catalog, defaultTrackIdNode, loadTrackNode, simContextNode } from './load-track-node.ts';
+import { contactLog } from './contact-split.ts';
 
 const args = process.argv.slice(2);
 const opt = (n: string, d: string) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1]! : d; };
@@ -54,10 +55,12 @@ function race(on: boolean) {
   const presets = builds.map((_, i) => driverPreset(cfg.presets[cfg.defaultPreset]!, lineup[i], cfg.skill?.spread ?? 0));
   const ai = builds.map((_, i) => aiInputSource(i, () => ({ world: w, ctx, line }), () => presets[i]!, () => c, seed * 1000 + i));
   let contacts = 0, invalid = 0, swaps = 0;
+  const log = contactLog(ctx);
   let order = w.race!.order.join(',');
   for (let t = 0; t < 60 * 60 * 30 && w.race!.phase !== 'results'; t++) {
     const prev = w;
     w = step(w, ai.map((d) => d.read(w.tick)), ctx);
+    log.tick(w);
     w.cars.forEach((car, i) => { if (car.carContact && !prev.cars[i]!.carContact) contacts++; });
     for (const e of w.events) if (e.type === 'lap' && e.invalid) invalid++;
     if (w.race!.phase === 'racing') { const o = w.race!.order.join(','); if (o !== order) { const a = order.split(','), b = o.split(','); for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) { swaps++; break; } order = o; } }
@@ -66,12 +69,13 @@ function race(on: boolean) {
   const tot = modes.manage + modes.attack + modes.defend + modes.nurse || 1;
   const leader = w.race!.order[0]!;
   const lm = ai[leader]!.state.craftTicks, lt = lm.manage + lm.attack + lm.defend + lm.nurse || 1;
-  return { w, contacts, invalid, swaps, stuck: ai.reduce((a, d) => a + d.state.stuckEvents, 0), modes, tot, lineChanges: ai.reduce((a, d) => a + d.state.lineChanges, 0), leaderManage: lm.manage / lt };
+  log.finish();
+  return { w, contacts, split: log.summary(), invalid, swaps, stuck: ai.reduce((a, d) => a + d.state.stuckEvents, 0), modes, tot, lineChanges: ai.reduce((a, d) => a + d.state.lineChanges, 0), leaderManage: lm.manage / lt };
 }
 for (const on of [false, true]) {
   const r = race(on);
   const pct = (x: number) => `${((100 * x) / r.tot).toFixed(0)}%`;
-  console.log(`\nRACE ${laps} laps, 10 AI, racecraft ${on ? 'ON ' : 'OFF'}: position changes ${r.swaps}, car contacts ${r.contacts}, invalid laps ${r.invalid}, stuck ${r.stuck}`);
+  console.log(`\nRACE ${laps} laps, 10 AI, racecraft ${on ? 'ON ' : 'OFF'}: position changes ${r.swaps}, car ${r.split}, invalid laps ${r.invalid}, stuck ${r.stuck}`);
   if (on) console.log(`  time in mode: manage ${pct(r.modes.manage)}, attack ${pct(r.modes.attack)}, defend ${pct(r.modes.defend)}, nurse ${pct(r.modes.nurse)}; line changes ${r.lineChanges}; the winner spent ${(r.leaderManage * 100).toFixed(0)}% in MANAGE`);
 }
 const a = race(true).w, b = race(true).w;

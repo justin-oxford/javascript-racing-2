@@ -7,6 +7,7 @@ import aiJson from '../config/ai.json' with { type: 'json' };
 import driversJson from '../config/drivers.json' with { type: 'json' };
 import { aiInputSource, assignDrivers, driverPreset, type DriverDef, buildRacingLine, buildStats, createRaceWorld, createWorld, raceResults, step, type AiConfig, type CarBuild, type WorldState } from '../src/sim/index.ts';
 import { catalog, defaultTrackIdNode, loadTrackNode, simContextNode } from './load-track-node.ts';
+import { contactLog, histogram } from './contact-split.ts';
 
 const args = process.argv.slice(2);
 const opt = (name: string, def: string) => {
@@ -34,13 +35,16 @@ const equal = args.includes('--equal');
 const builds: CarBuild[] = Array.from({ length: cars }, (_, i) => ({ ...ctx.physics.defaultCar, team: catalog.teams[i % catalog.teams.length]!.id, ...(equal ? { equalise: ctx.race.equalise } : {}) }));
 const lineup = args.includes('--no-roster') ? [] : assignDrivers((driversJson as { drivers: DriverDef[] }).drivers, cars, seed);
 const race = args.includes('--race');
-let world: WorldState = race ? createRaceWorld(ctx, builds, { laps, seed }) : createWorld(ctx, builds);
+// --damage visual|realistic: the race setup's Damage setting (default Off); prints the damage each car ends with.
+const damage = opt('damage', 'off') as 'off' | 'visual' | 'realistic';
+let world: WorldState = race ? createRaceWorld(ctx, builds, { laps, seed, settings: { damage } }) : createWorld(ctx, builds);
 if (race && world.race?.sharedBoxes) console.warn(`warning: ${ctx.track.boxes.length} pit box(es) for ${cars} cars: shared round-robin`);
 const presets = builds.map((_, i) => driverPreset(preset, lineup[i], cfg.skill?.spread ?? 0));
 const drivers = builds.map((_, i) => aiInputSource(i, () => ({ world, ctx, line }), () => presets[i]!, () => cfg, seed * 1000 + i));
 
 interface Stat { laps: number[]; invalid: number; walls: number; contacts: number; barriers: number }
 const stats: Stat[] = builds.map(() => ({ laps: [], invalid: 0, walls: 0, contacts: 0, barriers: 0 }));
+const contactsLog = contactLog(ctx);
 const maxTicks = 60 * 60 * 30; // 30 simulated minutes safety cap
 const t0 = performance.now();
 let tick = 0;
@@ -56,6 +60,7 @@ for (; tick < maxTicks; tick++) {
   const prev = world;
   const before = process.env.PITDBG ? drivers.map((d) => ({ mode: d.state.mode, serviced: d.state.serviced, stuck: d.state.stuckEvents, stops: d.state.pitStops })) : [];
   world = step(world, drivers.map((d) => d.read(world.tick)), ctx);
+  contactsLog.tick(world);
   if (process.env.PITDBG) drivers.forEach((d, i) => {
     const b = before[i]!, st = d.state, c = world.cars[i]!, ppm = ctx.track.json.pxPerMeter, at = `(${(c.x * ppm).toFixed(0)},${(c.y * ppm).toFixed(0)})`;
     if (st.mode !== b.mode) console.log(`pit t=${(tick / 60).toFixed(1)} car ${i} ${b.mode} -> ${st.mode} ${at} fuel ${c.fuelKg.toFixed(1)}`);
@@ -130,6 +135,11 @@ const rows = world.cars.map((c, i) => {
 for (const r of rows) console.log(r.line);
 const stuck = drivers.reduce((a, d) => a + d.state.stuckEvents, 0);
 const unfinished = world.cars.filter((c) => c.timing.laps < laps).length;
+contactsLog.finish();
+console.log(`car ${contactsLog.summary()}`);
+if (damage !== 'off') console.log(`damage (${damage}): ${world.cars.map((c, i) => { const d = c.damage; const tot = d.frontWing + d.rearWing + d.left + d.right; return tot > 0 ? `car ${i} F${(d.frontWing * 100).toFixed(0)} R${(d.rearWing * 100).toFixed(0)} L${(d.left * 100).toFixed(0)} R${(d.right * 100).toFixed(0)}%` : ''; }).filter(Boolean).join('; ') || 'none'}; repair stops ${drivers.reduce((a, d) => a + d.state.pitStops, 0)}`);
+if (process.env.INCIDENTS) for (const i of contactsLog.incidents) console.log(`incident t=${(i.startTick / 60).toFixed(1)} cars ${i.a}-${i.b} peak ${i.peakMps.toFixed(1)} m/s; b at lon ${i.lon.toFixed(1)} lat ${i.lat.toFixed(1)} in a's frame, speeds ${i.va.toFixed(1)}/${i.vb.toFixed(1)}, heading diff ${i.angDeg.toFixed(0)} deg`);
+if (process.env.CONTACTHIST) console.log(`car contact peaks (m/s): ${histogram(contactsLog.incidents.map((i) => i.peakMps))}\nwall/barrier hit peaks (m/s): ${histogram(contactsLog.wallPeaks)}\nRAW ${JSON.stringify(contactsLog.incidents.map((i) => +i.peakMps.toFixed(2)))}\nWALLRAW ${JSON.stringify(contactsLog.wallPeaks.map((p) => +p.toFixed(2)))}`);
 console.log(`\nstuck events ${stuck}; cars short of ${laps} laps: ${unfinished}; overtakes ${overtakes}`);
 // AI overtaking round 3: the defenders' choices into braking zones, and how often each lost the place there.
 {

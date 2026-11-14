@@ -8,6 +8,7 @@
 import aiJson from '../config/ai.json' with { type: 'json' };
 import { aiInputSource, buildRacingLine, createWorld, driverPreset, step, type AiConfig, type DriverStats, type WorldState } from '../src/sim/index.ts';
 import { defaultTrackIdNode, loadTrackNode, simContextNode } from './load-track-node.ts';
+import { contactLog } from './contact-split.ts';
 
 const args = process.argv.slice(2);
 const opt = (n: string, d: number) => { const i = args.indexOf(`--${n}`); return i >= 0 ? Number(args[i + 1]) : d; };
@@ -37,10 +38,12 @@ function duel(attacker: DriverStats, defender: DriverStats, gapM: number, v: num
     if (n >= 0) lastNear[i] = n;
     return lapsDone[i]! * line.n + Math.max(0, n);
   };
+  const log = contactLog(ctx);
   let contacts = 0, ahead = false, firstPassSec = -1, sumGap = 0, nGap = 0;
   for (let t = 0; t < 60 * 40 * laps && w.cars[0]!.timing.laps < laps; t++) {
     const prev = w;
     w = step(w, ai.map((d) => d.read(w.tick)), ctx);
+    log.tick(w);
     if (w.cars[1]!.carContact && !prev.cars[1]!.carContact) {
       contacts++;
       if (process.env.HITS) {
@@ -56,7 +59,8 @@ function duel(attacker: DriverStats, defender: DriverStats, gapM: number, v: num
   }
   if (process.env.WEAR) console.log(`wear after ${laps} laps: defender ${(100 - w.cars[0]!.wheels.reduce((x, h) => x + h.wear, 0) * 25).toFixed(2)}% used, attacker (following) ${(100 - w.cars[1]!.wheels.reduce((x, h) => x + h.wear, 0) * 25).toFixed(2)}% used; laps ${w.cars[0]!.timing.laps}/${w.cars[1]!.timing.laps}`);
   const d = ai[0]!.state;
-  return { ahead, firstPassSec, contacts, avgGap: sumGap / Math.max(1, nGap), tries: ai[1]!.state.passTries, made: ai[1]!.state.passesMade, conceded: d.concessions, cover: d.defCovers, coverLost: d.defCoverLost, hold: d.defHolds, holdLost: d.defHoldLost };
+  log.finish();
+  return { ahead, firstPassSec, contacts, taps: log.taps, heavy: log.heavy, avgGap: sumGap / Math.max(1, nGap), tries: ai[1]!.state.passTries, made: ai[1]!.state.passesMade, conceded: d.concessions, cover: d.defCovers, coverLost: d.defCoverLost, hold: d.defHolds, holdLost: d.defHoldLost };
 }
 
 const avg = { pace: 50, aggression: 50, racecraft: 50, consistency: 80, tyres: 50 };
@@ -70,12 +74,12 @@ if (args.includes('--care')) {
   process.exit(0);
 }
 for (const [label, aggr, defAggr] of [['low aggression ', 25, 50], ['high aggression', 90, 50], ['high aggr vs a conceding defender', 90, 10]] as const) {
-  const t = { ahead: 0, passed: 0, runs: 0, contacts: 0, tries: 0, made: 0, conceded: 0, gap: 0, cover: 0, coverLost: 0, hold: 0, holdLost: 0 };
+  const t = { ahead: 0, passed: 0, runs: 0, contacts: 0, taps: 0, heavy: 0, tries: 0, made: 0, conceded: 0, gap: 0, cover: 0, coverLost: 0, hold: 0, holdLost: 0 };
   for (const gap of [8, 12, 16]) for (const v of [30, 40]) {
     const r = duel({ ...avg, pace: 85, aggression: aggr }, { ...avg, pace: 40, aggression: defAggr }, gap, v);
     t.runs++; if (r.ahead) t.ahead++; if (r.firstPassSec >= 0) t.passed++;
-    t.contacts += r.contacts; t.tries += r.tries; t.made += r.made; t.conceded += r.conceded; t.gap += r.avgGap;
+    t.contacts += r.contacts; t.taps += r.taps; t.heavy += r.heavy; t.tries += r.tries; t.made += r.made; t.conceded += r.conceded; t.gap += r.avgGap;
     t.cover += r.cover; t.coverLost += r.coverLost; t.hold += r.hold; t.holdLost += r.holdLost;
   }
-  console.log(`attacker ${label}: got by in ${t.passed}/${t.runs} duels (ahead at the end in ${t.ahead}); moves committed ${t.tries}, completed ${t.made}; contacts ${t.contacts}; defender conceded ${t.conceded}; average gap ${(t.gap / t.runs).toFixed(1)} m; defender covered ${t.cover} (lost ${t.coverLost}), held ${t.hold} (lost ${t.holdLost})`);
+  console.log(`attacker ${label}: got by in ${t.passed}/${t.runs} duels (ahead at the end in ${t.ahead}); moves committed ${t.tries}, completed ${t.made}; taps ${t.taps}, heavy hits ${t.heavy} (contact starts ${t.contacts}); defender conceded ${t.conceded}; average gap ${(t.gap / t.runs).toFixed(1)} m; defender covered ${t.cover} (lost ${t.coverLost}), held ${t.hold} (lost ${t.holdLost})`);
 }

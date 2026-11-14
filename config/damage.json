@@ -1,7 +1,7 @@
 {
-  "_comment": "Car damage (POLISH card), used when the race setup's Damage setting is Visual (shown, no effect) or Realistic (it costs). A hit's closing speed along the contact normal (m/s) over thresholdMps does damage: (speed - threshold) x perMps x strength x wallMult / barrierMult / carMult, into the zone it landed on (nose -> front wing, tail -> rear wing, sides -> that side's suspension; endZone = how much of each half-length counts as nose/tail). Effects at full damage: frontGripLoss (understeer), rearGripLoss + rearDragLoss, sideGripLoss at that side's two wheels + pullDeg of steering pull toward it. No DNF: the car always keeps going. Pit repair while stopped in the box: a wing takes repair.wingSec whatever the damage, suspension up to repair.suspensionSec.",
-  "thresholdMps": 9,
-  "perMps": 0.06,
+  "_comment": "Car damage (POLISH card), used when the race setup's Damage setting is Visual (shown, no effect) or Realistic (it costs). thresholdMps is the HEAVY HIT threshold, the same split every probe uses (tools/contact-split.ts): a contact whose closing speed along the contact normal (m/s) stays under it is a tap or a rub and never does damage, in any mode (from the race distribution, 2026-11-14: car contacts in traffic peak at up to ~10 m/s, crashes into a spun or sideways car at 15+). A hit over it does damage: (speed - threshold) x perMps x strength x wallMult / barrierMult / carMult, into the zone it landed on (nose -> front wing, tail -> rear wing, sides -> that side's suspension; endZone = how much of each half-length counts as nose/tail). Effects at full damage: frontGripLoss (understeer), rearGripLoss + rearDragLoss, sideGripLoss at that side's two wheels + pullDeg of steering pull toward it. No DNF: the car always keeps going. Pit repair while stopped in the box: a wing takes repair.wingSec whatever the damage, suspension up to repair.suspensionSec.",
+  "thresholdMps": 12,
+  "perMps": 0.1,
   "strength": 1,
   "wallMult": 1,
   "barrierMult": 0.5,

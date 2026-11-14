@@ -81,6 +81,18 @@ describe('car damage', () => {
     expect(wallHit(20, 'realistic').cars[0]!.damage.frontWing).toBe(0);
   });
 
+  it('a firm rear-end tap (10 m/s faster into the gearbox, the firmest seen in races) does no damage to either car, in Realistic', () => {
+    const { spawn, pxPerMeter: ppm } = ctx.track.json;
+    const f = { x: Math.sin(spawn.heading), y: -Math.cos(spawn.heading) };
+    let w = createWorld(ctx, 2, { damage: 'realistic' });
+    const place = (c: WorldState['cars'][number], back: number, v: number) => ({ ...c, x: spawn.x / ppm - f.x * back, y: spawn.y / ppm - f.y * back, heading: spawn.heading, vx: f.x * v, vy: f.y * v });
+    w = { ...w, cars: [place(w.cars[0]!, 0, 30), place(w.cars[1]!, ctx.physics.car.lengthM + 0.3, 40)] };
+    let touched = false;
+    for (let t = 0; t < 40; t++) { w = run(ctx, w, 1, [{ throttle: 0.6, brake: 0, steer: 0 }, { throttle: 0.6, brake: 0, steer: 0 }]); touched ||= w.cars[1]!.carContact; }
+    expect(touched).toBe(true);
+    for (const c of w.cars) expect(Math.max(c.damage.frontWing, c.damage.rearWing, c.damage.left, c.damage.right)).toBe(0);
+  });
+
   it('the pits repair it, and the stop takes longer for it', () => {
     const box = pitBoxPose(buildRacingLine(ctx.track), 0, ctx.track.json.pxPerMeter)!;
     const stop = (frontWing: number) => {

@@ -6,6 +6,7 @@
 import aiJson from '../config/ai.json' with { type: 'json' };
 import { aiInputSource, buildRacingLine, compoundWaterGrip, createRaceWorld, rainAt, shower, step, waterAt, type AiConfig, type CarBuild, type Compound, type WeatherMode, type WorldState } from '../src/sim/index.ts';
 import { catalog, defaultTrackIdNode, loadTrackNode, simContextNode } from './load-track-node.ts';
+import { contactLog } from './contact-split.ts';
 
 const args = process.argv.slice(2);
 const opt = (n: string, d: string) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1]! : d; };
@@ -22,12 +23,14 @@ function race() {
   const ai = builds.map((_, i) => aiInputSource(i, () => ({ world: w, ctx, line }), () => ({ ...cfg.presets[cfg.defaultPreset]!, mistakesPerMin: 0 }), () => cfg, seed * 100 + i));
   const stops: string[][] = builds.map(() => []);
   const stuckSeen: number[] = [];
+  const log = contactLog(ctx);
   const lapRows: Array<{ lap: number; rain: number; onLine: number; offLine: number; tyres: Record<string, number>; slick: number[]; inter: number[] }> = [];
   const leaderLap = () => Math.max(...w.cars.map((c) => c.timing.laps));
   let row = { lap: 0, rain: 0, onLine: 0, offLine: 0, tyres: {} as Record<string, number>, slick: [] as number[], inter: [] as number[] };
   for (let t = 0; t < 60 * 60 * 40 && w.race!.phase !== 'results'; t++) {
     const prev = w;
     w = step(w, ai.map((d) => d.read(w.tick)), ctx);
+    log.tick(w);
     if (process.env.STUCK) ai.forEach((d, i) => { if (d.state.stuckEvents > (stuckSeen[i] ?? 0)) { stuckSeen[i] = d.state.stuckEvents; const c = w.cars[i]!; console.log(`  stuck t=${(w.tick / 60).toFixed(0)} car ${i} lap ${c.timing.laps} ${c.compound} near ${d.state.near} ${d.state.mode} water here ${waterAt(w.surface, c.x, c.y).toFixed(2)} wall ${c.wallContact} carContact ${c.carContact}`); } });
     w.cars.forEach((c, i) => { if (c.compound !== prev.cars[i]!.compound) stops[i]!.push(`L${c.timing.laps} ${prev.cars[i]!.compound}->${c.compound}`); });
     // PITLOG=1: every pit entry and service (what it had, what it got, the water it saw).
@@ -51,7 +54,8 @@ function race() {
       row = { lap: leaderLap(), rain: 0, onLine: 0, offLine: 0, tyres: {}, slick: [], inter: [] };
     }
   }
-  return { w, ai, stops, lapRows };
+  log.finish();
+  return { w, ai, stops, lapRows, split: log.summary() };
 }
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
@@ -66,4 +70,5 @@ const peak = r.lapRows.reduce((b, x, k) => (x.onLine > r.lapRows[b]!.onLine ? k 
 const gripCross = r.lapRows.findIndex((x, k) => k > peak && compoundWaterGrip('medium' as Compound, x.onLine, ctx.strategy) >= compoundWaterGrip('inter' as Compound, x.onLine, ctx.strategy));
 const timeCross = r.lapRows.findIndex((x, k) => k > peak && x.slick.length && x.inter.length && mean(x.slick) < mean(x.inter));
 console.log(`\ncrossover after the wettest lap (${peak + 1}): by grip on the line's water lap ${gripCross < 0 ? '-' : gripCross + 1}, by lap times lap ${timeCross < 0 ? '-' : timeCross + 1}`);
+console.log(`car ${r.split}`);
 console.log(`finished ${r.w.race!.phase === 'results'}; stuck ${r.ai.reduce((a, d) => a + d.state.stuckEvents, 0)}`);
