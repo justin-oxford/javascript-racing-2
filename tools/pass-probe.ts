@@ -51,11 +51,12 @@ function duel(attacker: DriverStats, defender: DriverStats, gapM: number, v: num
     }
     const gap = (prog(0) - prog(1)) * 2;
     if (process.env.LAPS) for (const e of w.events) if (e.type === 'lap') console.log('lap car', e.car, e.time.toFixed(2), 'wear', w.cars[e.car]!.wheels.map((x) => Math.round(x.wear * 1000) / 10).join('/'), 'deploying', w.cars.map((c) => c.ers.deploying).join('/'), 'batt', w.cars.map((c) => c.ers.batteryKJ.toFixed(0)).join('/'));
-    if (process.env.TRACE && (t % 30 === 0 || (process.env.TRACE === '2' && ai[1]!.state.passTarget >= 0 && t % 5 === 0)) && t < 60 * 45) console.log((t / 60).toFixed(1), 'gap', gap, 'v', w.cars.map((c) => Math.hypot(c.vx, c.vy).toFixed(1)).join('/'), 'craft', ai[1]!.state.craft, 'off', ai[1]!.state.offset.toFixed(2), 'tgt', ai[1]!.state.passTarget, 'near', ai[1]!.state.near, 'brk', ai[1]!.state.lastAllowed.toFixed(1));
+    if (process.env.TRACE && (t % 30 === 0 || (process.env.TRACE === '2' && ai[1]!.state.passTarget >= 0 && t % 5 === 0)) && t < 60 * 45) console.log((t / 60).toFixed(1), 'gap', gap, 'v', w.cars.map((c) => Math.hypot(c.vx, c.vy).toFixed(1)).join('/'), 'craft', ai[1]!.state.craft, 'off', ai[1]!.state.offset.toFixed(2), 'tgt', ai[1]!.state.passTarget, 'near', ai[1]!.state.near, 'brk', ai[1]!.state.lastAllowed.toFixed(1), 'tgap', (gap / Math.max(5, Math.hypot(w.cars[1]!.vx, w.cars[1]!.vy))).toFixed(2), 'defence', ai[0]!.state.defence);
     if (t > 120) { sumGap += gap; nGap++; ahead = gap < -3; if (ahead && firstPassSec < 0) firstPassSec = t / 60; }
   }
   if (process.env.WEAR) console.log(`wear after ${laps} laps: defender ${(100 - w.cars[0]!.wheels.reduce((x, h) => x + h.wear, 0) * 25).toFixed(2)}% used, attacker (following) ${(100 - w.cars[1]!.wheels.reduce((x, h) => x + h.wear, 0) * 25).toFixed(2)}% used; laps ${w.cars[0]!.timing.laps}/${w.cars[1]!.timing.laps}`);
-  return { ahead, firstPassSec, contacts, avgGap: sumGap / Math.max(1, nGap), tries: ai[1]!.state.passTries, made: ai[1]!.state.passesMade, conceded: ai[0]!.state.concessions };
+  const d = ai[0]!.state;
+  return { ahead, firstPassSec, contacts, avgGap: sumGap / Math.max(1, nGap), tries: ai[1]!.state.passTries, made: ai[1]!.state.passesMade, conceded: d.concessions, cover: d.defCovers, coverLost: d.defCoverLost, hold: d.defHolds, holdLost: d.defHoldLost };
 }
 
 const avg = { pace: 50, aggression: 50, racecraft: 50, consistency: 80, tyres: 50 };
@@ -69,11 +70,12 @@ if (args.includes('--care')) {
   process.exit(0);
 }
 for (const [label, aggr, defAggr] of [['low aggression ', 25, 50], ['high aggression', 90, 50], ['high aggr vs a conceding defender', 90, 10]] as const) {
-  const t = { ahead: 0, passed: 0, runs: 0, contacts: 0, tries: 0, made: 0, conceded: 0, gap: 0 };
+  const t = { ahead: 0, passed: 0, runs: 0, contacts: 0, tries: 0, made: 0, conceded: 0, gap: 0, cover: 0, coverLost: 0, hold: 0, holdLost: 0 };
   for (const gap of [8, 12, 16]) for (const v of [30, 40]) {
     const r = duel({ ...avg, pace: 85, aggression: aggr }, { ...avg, pace: 40, aggression: defAggr }, gap, v);
     t.runs++; if (r.ahead) t.ahead++; if (r.firstPassSec >= 0) t.passed++;
     t.contacts += r.contacts; t.tries += r.tries; t.made += r.made; t.conceded += r.conceded; t.gap += r.avgGap;
+    t.cover += r.cover; t.coverLost += r.coverLost; t.hold += r.hold; t.holdLost += r.holdLost;
   }
-  console.log(`attacker ${label}: got by in ${t.passed}/${t.runs} duels (ahead at the end in ${t.ahead}); moves committed ${t.tries}, completed ${t.made}; contacts ${t.contacts}; defender conceded ${t.conceded}; average gap ${(t.gap / t.runs).toFixed(1)} m`);
+  console.log(`attacker ${label}: got by in ${t.passed}/${t.runs} duels (ahead at the end in ${t.ahead}); moves committed ${t.tries}, completed ${t.made}; contacts ${t.contacts}; defender conceded ${t.conceded}; average gap ${(t.gap / t.runs).toFixed(1)} m; defender covered ${t.cover} (lost ${t.coverLost}), held ${t.hold} (lost ${t.holdLost})`);
 }

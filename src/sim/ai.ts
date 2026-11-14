@@ -5,7 +5,7 @@
 // in that state, so the server (card 07) runs it unchanged and replays stay exact.
 import { buildStats } from './car-config';
 import { damageGrip, isDamaged } from './damage';
-import { blueFlag, chooseMode, concedes, keepGoodExits, lineFor, LINE_IDS, lineOffsets, offsetPath, offsetsFromPoints, otherHasRightOfWay, type CraftMode, type LineId, type OvertakingConfig, type RacecraftConfig } from './racecraft';
+import { blueFlag, chooseMode, concedes, coverChance, keepGoodExits, lineFor, LINE_IDS, lineOffsets, offsetPath, offsetsFromPoints, otherHasRightOfWay, type CraftMode, type DefenceConfig, type LineId, type OvertakingConfig, type RacecraftConfig } from './racecraft';
 import { speedProfile, transferGripFactor } from './line-optimizer';
 import { aiCompound, compoundGrip, compoundWaterGrip, consumableScale, FUEL_TO_END, fuelGrip, stopDone, type Compound, type PitPlan } from './strategy';
 import { waterAt } from './weather';
@@ -59,6 +59,12 @@ export interface AiConfig {
   fight?: { pushMargin: number; dirtyBackOff?: number };
   /** AI overtaking card: pulling out of a tow, the overlap rule, conceding, blue flags (racecraft.ts). */
   overtaking?: OvertakingConfig;
+  /** AI overtaking round 3: the defender's cover / hold choice into braking zones (racecraft.ts defenceChoice). */
+  defence?: DefenceConfig;
+  /** AI overtaking round 3: following a car, plan from ITS line and speed (its speed profile on the line it's on,
+   *  x margin, gapM behind it, looking lookSec ahead), so it can run close into a braking zone without running
+   *  into a car that brakes earlier (a defender covering the inside). */
+  predict?: { margin: number; gapM: number; lookSec: number; headwaySec?: number };
 }
 
 const G = 9.81;
@@ -362,6 +368,20 @@ export interface AiState {
   concessions: number;
   blueYield: boolean;
   blueYields: number;
+  /** AI overtaking round 3: this braking zone's defence ('none' = not chosen), against which car, when; counts of
+   *  each choice and of the times it lost the place to that car by the end of the zone. */
+  defence: 'none' | 'cover' | 'hold';
+  /** On the INSIDE line for a cover: 1 = moving over for the coming corner, 2 = through its INSIDE stretch (held
+   *  until that stretch ends, past the apex: switching lines mid-corner moved it across into whoever was there). */
+  covering: 0 | 1 | 2;
+  defAgainst: number;
+  defAt: number;
+  /** The line point of the coming corner's apex when it chose: the choice is settled 30 m past it. */
+  defApex: number;
+  defCovers: number;
+  defCoverLost: number;
+  defHolds: number;
+  defHoldLost: number;
   lineTarget: LineId;
   /** Current sideways offset from the line, metres (+ = right). */
   offset: number;
@@ -397,6 +417,7 @@ export function newAiState(seed: number): AiState {
     mode: 'race', near: -1, brakeInSec: Infinity, lastMistake: '', lastErr: 0, stuckTicks: 0, recoverTicks: 0, offset: 0, mistake: undefined, rng: seed >>> 0 || 1,
     troubleTicks: 0, resets: 0, saving: false, modeTicks: { save: 0, standard: 0, push: 0 }, deployTicks: 0,
     craft: 'manage', craftHold: 0, craftEval: 0, lineW: [1, 0, 0], craftTicks: { manage: 0, attack: 0, defend: 0, nurse: 0 }, lineChanges: 0, lineTarget: 'neutral', conceding: false, passTarget: -1, passSide: 0, passTries: 0, passesMade: 0, concessions: 0, blueYield: false, blueYields: 0,
+    defence: 'none', covering: 0, defAgainst: -1, defAt: 0, defApex: 0, defCovers: 0, defCoverLost: 0, defHolds: 0, defHoldLost: 0,
     pitWanted: false, serviced: false, fuelAtLap: -1, fuelPerLap: 0, stuckEvents: 0, mistakes: 0, pitStops: 0, attack: false, launchTick: -1, trust: 1, lastAllowed: 0,
   };
 }
@@ -447,7 +468,7 @@ const profiles = new WeakMap<AiPath, Map<string, Float64Array>>();
 /** The EXIT and INSIDE lines for a racing line (offsets + their geometry as paths), per racecraft config. */
 const craftLines = new WeakMap<RacingLine, { key: string; offsets: { exit: Float64Array; inside: Float64Array }; paths: [AiPath, AiPath, AiPath] }>();
 function racecraftLines(line: RacingLine, cfg: RacecraftConfig, halfCarM: number, ctx?: SimContext) {
-  const key = JSON.stringify([cfg.insideM, cfg.insideLeadM, cfg.exitStraightM, cfg.exitShiftM, cfg.exitWeight, cfg.exitIterations, cfg.edgeM, halfCarM, ctx?.track.json.racingLineExit?.length ?? 0]);
+  const key = JSON.stringify([cfg.insideM, cfg.insideLeadM, cfg.coverLeadM, cfg.insideSlope, cfg.insideSmooth, cfg.exitStraightM, cfg.exitShiftM, cfg.exitWeight, cfg.exitIterations, cfg.edgeM, halfCarM, ctx?.track.json.racingLineExit?.length ?? 0]);
   let c = craftLines.get(line);
   if (!c || c.key !== key) {
     let offsets = lineOffsets(line, cfg, halfCarM);
@@ -732,6 +753,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   let brakeInSec = Infinity;
   /** LIFT AND COAST: the speed that, coasting on drag alone from here, just meets every target ahead. */
   let coastLimit = Infinity;
+  /** The NEUTRAL and INSIDE lines' speed profiles and today's scale on them (wear, trust): to predict a car ahead. */
+  let profN: Float64Array | undefined, profI: Float64Array | undefined, profScale = 1;
   if (!pit) {
     // ON THE RACING LINE: this car's own speed profile round the whole line (racing line optimizer card),
     // computed once for its build and preset, then scaled by what's changed since: tyre wear (speed goes
@@ -750,6 +773,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     // it) rather than slide on what downforce is left.
     const backOff = 1 - (cfg.fight?.dirtyBackOff ?? 0) * (preset.tyreCare ?? 0.5) * (car.dirtyAir / Math.max(1e-6, ctx.slipstream.dirtyAir.maxDownforceLoss));
     allowed = prof.at(idx(best + ahead)) * Math.sqrt(Math.max(0.05, tyre)) * st.trust * push * backOff;
+    if (cfg.predict) { profN = carProfile(line, car, ctx, preset); profI = rc ? carProfile(rc.paths[2], car, ctx, preset) : undefined; profScale = Math.sqrt(Math.max(0.05, tyre)) * st.trust; }
     for (let q = 1, look = Math.ceil((speed * 6) / SPACING_M); q <= look; q++) if (prof.at(idx(best + q)) < speed * 0.9) { brakeInSec = (q * SPACING_M) / Math.max(1, speed); brakingSoon = brakeInSec <= 3; break; }
     st.brakeInSec = brakeInSec;
     // Coasting decel ~ aero drag (+ a little rolling resistance). Two uses, both short:
@@ -814,8 +838,15 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // closer still), so it's on the car ahead's gearbox at the exit (AI overtaking card).
   const ov = cfg.overtaking ?? OVERTAKING_OFF;
   // (Mirroring the car ahead at a 0.35 s headway out of every corner, it never got a run on it.)
-  const closeUp = cfg.racecraft?.enabled && st.craft === 'attack' && !pit && brakeInSec > ov.closeUntilBrakeSec;
-  const gap = closeUp ? phys.car.lengthM + 1.5 + ov.attackHeadwaySec * (1.5 - (preset.aggression ?? 0.5)) * speed : phys.car.lengthM + 1 + 0.35 * speed;
+  // (On lap one, with the whole field nose to tail, lapOneCloseUntilBrakeSec: closing right up into turn 1 there
+  // piled the pack up.)
+  const lapOne = !!race && (race.cars[i]?.progress ?? 0) < 1;
+  const closeUp = cfg.racecraft?.enabled && st.craft === 'attack' && !pit && brakeInSec > (lapOne ? ov.lapOneCloseUntilBrakeSec ?? ov.closeUntilBrakeSec : ov.closeUntilBrakeSec);
+  // With the prediction (round 3: braking planned from the car ahead's own line and speed), the plain following
+  // headway can be shorter (predict.headwaySec): the 0.35 s one made a follower drop back as the speed rose out of
+  // every corner (the headway grows with speed), so the car behind lost on every exit what it gained in the corner.
+  const followHeadway = cfg.predict?.headwaySec ?? 0.35;
+  const gap = closeUp ? phys.car.lengthM + 1.5 + ov.attackHeadwaySec * (1.5 - (preset.aggression ?? 0.5)) * speed : phys.car.lengthM + 1 + followHeadway * speed;
   // Only start (or keep) a pass where the next ~40 m is fairly straight, not side by side into a braking zone.
   let straightAhead = true;
   for (let q = 0; q < 10; q++) if (Math.abs(path.k[idx(best + q)]!) > 0.03) straightAhead = false;
@@ -866,6 +897,60 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     else if (o.side < nearR) { nearR = o.side; theirsR = theirs; speedR = o.along; }
   });
   if (nearL < 4 || nearR < 4) alongside = nearR <= nearL ? 1 : -1;
+  // THE DEFENDER'S CHOICE (AI overtaking round 3), once per braking zone, decideSec before it, with a car close
+  // behind: COVER the inside (the INSIDE line through this zone: slower, but nobody dives) or HOLD the racing line
+  // (inside open). From its AGGRESSION and RACECRAFT, the gap and closing speed, the attacker's tow / deploy, its
+  // tyres, and a seeded draw. Settled when the zone is behind it: did that car get by?
+  const dc = cfg.defence;
+  if (dc && cfg.racecraft?.enabled && !pit) {
+    // Covering, and a car comes alongside on the inside after all: stop moving over (hold from here).
+    if (st.defence === 'cover' && st.covering === 1 && (nextTurn > 0 ? nearR : nearL) < 4) { st.defence = 'hold'; st.covering = 0; }
+    const pastApex = (best - st.defApex + n) % n;
+    if (st.defence !== 'none' && ((pastApex > 15 && pastApex < n / 2) || world.tick - st.defAt > 10 / TICK_DT)) {
+      const o = others[st.defAgainst], rc = race?.cars;
+      // Lost = that car is now ahead (in the race's own running order when racing).
+      const lost = rc ? (rc[st.defAgainst]?.progress ?? 0) > (rc[i]?.progress ?? 0) : !!o && Number.isFinite(o.ahead) && o.ahead > 0;
+      if (lost && st.defence === 'cover') st.defCoverLost++;
+      if (lost && st.defence === 'hold') st.defHoldLost++;
+      st.defence = 'none';
+      st.defAgainst = -1;
+    }
+    // Not on lap one: the whole field is nose to tail and side by side, and covering into turn 1 together doubled
+    // lap one's contacts (the pack has nowhere to go).
+    if (st.defence === 'none' && !lapOne && (!race || race.phase === 'racing') && nextTurn !== 0 && brakeInSec <= dc.decideSec && brakeInSec > 0.8) {
+      const fx = Math.sin(car.heading), fy = -Math.cos(car.heading), v = Math.max(5, speed);
+      let bj = -1, bm = Infinity, bLat = 0;
+      world.cars.forEach((c, j) => {
+        if (j === i || c.inPitLane || Math.abs(lapsAhead(j)) >= ov.blueLaps) return;
+        const dx = c.x - car.x, dy = c.y - car.y, lon = dx * fx + dy * fy, lat = -dx * fy + dy * fx;
+        if (lon < -1 && -lon < dc.gapSec * v && Math.abs(lat) < 4 && -lon < bm) { bm = -lon; bj = j; bLat = lat; }
+      });
+      // Not with a car alongside on the inside (moving across onto it is a crash: lap one's pack covered into
+      // turn 1 together and piled up).
+      const insideTaken = (nextTurn > 0 ? nearR : nearL) < 4;
+      if (bj >= 0 && !insideTaken) {
+        const c = world.cars[bj]!;
+        // Already pulled out to the inside: too late to cover (moving across onto it is what crashes).
+        const tooLate = bLat * nextTurn > phys.car.widthM * 0.75;
+        const p = coverChance({ aggression: aggr, racecraft: preset.racecraft ?? 0.5, gapSec: bm / v, closingMps: c.vx * fx + c.vy * fy - speed, tow: c.tow > 0.05 || c.ers.deploying, tyreUsed: 1 - tyre }, dc);
+        const [r, nextRng] = rand(st.rng);
+        st.rng = nextRng;
+        st.defence = !tooLate && r < p ? 'cover' : 'hold';
+        st.defAgainst = bj;
+        st.defAt = world.tick;
+        // The apex of the coming corner: its tightest point within ~160 m.
+        let q0 = 0;
+        while (q0 < 80 && Math.abs(path.k[idx(best + q0)]!) <= 0.02) q0++;
+        let apex = q0, kMax = 0;
+        for (let q = q0; q < q0 + 60 && Math.abs(path.k[idx(best + q)]!) > 0.01; q++) if (Math.abs(path.k[idx(best + q)]!) > kMax) { kMax = Math.abs(path.k[idx(best + q)]!); apex = q; }
+        st.defApex = idx(best + apex);
+        if (st.defence === 'cover') { st.defCovers++; st.covering = 1; }
+        else st.defHolds++;
+      }
+    }
+  }
+  /** A car ahead covering the inside of the coming corner (on the INSIDE line, toward the inside by coverDetectM). */
+  const coveringAhead = (o: { side: number }) => !!dc && nextTurn !== 0 && (o.side + crossErr) * nextTurn >= dc.coverDetectM;
   // CONCEDING: a car overlapped on our inside into a braking zone; a low-aggression driver lifts and lets it
   // go rather than turning in on it.
   const conceding = !pit && others.some((o) => !!o && concedes(aggr, brakingSoon, o.ahead, o.side, nextTurn, phys.car.widthM, ov));
@@ -936,7 +1021,10 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     if (ttc > 2 && ahead > gap * 1.5 && (closing * closing) / (2 * brakeA(speed) * 0.8) < ahead - gap - 5) continue;
     // Pass on the INSIDE of the next corner if there's room (that's where a pass sticks), else the free side.
     const sides = nextTurn ? [nextTurn, -nextTurn] : side >= 0 ? [-1, 1] : [1, -1];
-    let passSide = committed ? st.passSide : pit || !straightAhead ? undefined
+    // ...unless it's covering that inside (round 3): then the CUTBACK, stay on our own line, carry the speed through
+    // the apex behind it and get the better exit (diving at a covered inside, or round the outside, is no pass).
+    const covered = !committed && coveringAhead(o);
+    let passSide = committed ? st.passSide : pit || !straightAhead || covered ? undefined
       : sides.find((sd) => sd !== alongside && (sd > 0 ? path.right[best]! : path.left[best]!) > preset.overtakeOffsetM + 0.5);
     // In a tow: stay tucked in and let it pull us up; pull out when the braking point is near (before the
     // braking zone), not the moment we're close. More aggressive drivers pull out earlier (AI overtaking card).
@@ -961,18 +1049,51 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     // Too close: ease off toward the car ahead's speed, but don't stop dead just for being a bit close.
     const floor = ahead > phys.car.lengthM + 0.5 ? Math.max(0, otherFwd) * 0.7 : 0;
     allowed = Math.min(allowed, Math.max(creep, floor, otherFwd + (ahead - hold) * 0.8));
+    // PLAN FROM ITS LINE AND SPEED (round 3; round 1 rear-ended defenders on the slower INSIDE line): still in line
+    // (or following, not pulled out), never be faster than the car ahead will be, a gap behind it, along its own
+    // speed profile on the line it's actually on (INSIDE if it's covering), from what it's doing now on.
+    const pr = cfg.predict;
+    // Pulled out but not yet overlapped, with the road on that side narrowing to under a car width within ~1 s (the
+    // apex coming: the racing line takes the inside there): it'll be back in line before it's alongside, so it
+    // brakes for the car ahead now (diving in like that ran into its rear corner).
+    let squeezeSoon = false;
+    if (pr && passSide !== undefined && ahead > ov.overlapM) {
+      let room = Infinity;
+      for (let q = 1, look = Math.ceil(Math.max(12, speed) / SPACING_M); q <= look; q++) room = Math.min(room, passSide > 0 ? path.right[idx(best + q)]! : path.left[idx(best + q)]!);
+      squeezeSoon = room - 1.5 < needSide;
+    }
+    if (pr && profN && (passSide === undefined || Math.abs(side) < 2.2 || squeezeSoon)) {
+      const onInside = coveringAhead(o) && !!profI, pL = best + Math.round(ahead / SPACING_M), a = brakeA(speed), g = phys.car.lengthM + pr.gapM;
+      let vCap = Infinity;
+      for (let k = 0, K = Math.ceil((Math.max(10, speed) * pr.lookSec) / SPACING_M); k <= K; k++) {
+        const q = idx(pL + k);
+        const vL = (onInside ? Math.min(profN[q]!, profI![q]!) : profN[q]!) * profScale * pr.margin;
+        const d = ahead + k * SPACING_M - g;
+        vCap = Math.min(vCap, d <= 0 ? vL : Math.sqrt(vL * vL + 2 * a * d));
+      }
+      allowed = Math.min(allowed, vCap);
+    }
   }
   st.attack = attack;
   // Room for an offset lane over the road AHEAD (the next ~2 s, at least 40 m), not just here: a car
   // carrying a lane offset into a hairpin runs off the outside. (Half a car width + a little margin.)
   let maxR = Math.max(0, path.right[best]! - 1.5), maxL = Math.max(0, path.left[best]! - 1.5);
   // (A wide mistake looks only ~0.6 s ahead: with the 2 s look the room clamp kept it on the line.)
-  for (let q = 1, look = Math.ceil((mistakeNow === 'wide' ? Math.max(12, speed * 0.6) : Math.max(40, speed * 2)) / SPACING_M); q <= look; q++) {
+  // A committed pass looks only commitLookSec ahead (round 2/3): on the inside into a braking zone the 2 s look
+  // reached the apex, where the racing line itself touches the edge, so the attacker could never pull out of the
+  // car ahead's wake at all; it tapers back in as the apex comes.
+  const roomLookM = mistakeNow === 'wide' ? Math.max(12, speed * 0.6) : st.passTarget >= 0 && ov.commitLookSec !== undefined ? Math.max(12, speed * ov.commitLookSec) : Math.max(40, speed * 2);
+  for (let q = 1, look = Math.ceil(roomLookM / SPACING_M); q <= look; q++) {
     const j = idx(best + q);
     maxR = Math.min(maxR, Math.max(0, path.right[j]! - 1.5));
     maxL = Math.min(maxL, Math.max(0, path.left[j]! - 1.5));
   }
   const needIn = st.offset > maxR + 0.3 ? -1 : st.offset < -maxL - 0.3 ? 1 : 0; // must move back toward the line
+  // LEAVING ROOM (overlap rule, round 2/3): a car overlapped on our INSIDE for the coming corner has the apex; we
+  // take a line a car width + sideGapM wide of the racing line rather than turn in on it (the racing line itself
+  // goes to the apex, so following it squeezed the attacker into us). Not for a lapped car.
+  if (ov.leaveRoom && !pit && nextTurn !== 0 && others.some((o, oi) => !!o && Math.abs(o.ahead) <= ov.overlapM && Math.sign(o.side) === nextTurn
+    && Math.abs(o.side) < needSide + 2 && lapsAhead(oi) > -ov.blueLaps)) wantOffset = -nextTurn * needSide;
   // Never move toward a car that's alongside on that side.
   if (wantOffset > st.offset && nearR < 4) wantOffset = st.offset;
   if (wantOffset < st.offset && nearL < 4) wantOffset = st.offset;
@@ -1092,7 +1213,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   }
   // RACECRAFT (racecraft.ts): every evalSec, the mode from the race situation (held at least holdSec), the
   // line it wants just ahead, and the blend moving toward it with distance travelled.
-  if (cfg.racecraft?.enabled && !pit) updateCraft(st, world, i, line, cfg.racecraft, others, speed, phys.car.widthM / 2, best);
+  if (cfg.racecraft?.enabled && !pit) updateCraft(st, world, i, line, cfg.racecraft, others, speed, phys.car.widthM / 2, best, nearL, nearR);
   // ENGINE MODE + DEPLOY (ers.ts): SAVE when it's saving fuel to reach the flag; PUSH and deploy down a
   // straight while ATTACKING (racecraft) and closing on the car ahead, or DEFENDING with one close behind.
   const racing = !race || race.phase === 'racing';
@@ -1133,7 +1254,7 @@ function craftOffset(st: AiState, line: RacingLine, cfg: AiConfig, halfCarM: num
 }
 
 /** Racecraft for one tick: re-evaluate the mode now and then, pick the line ahead, move the blend. */
-function updateCraft(st: AiState, world: WorldState, i: number, line: RacingLine, cfg: RacecraftConfig, others: ReadonlyArray<{ ahead: number; side: number; along: number } | undefined>, speed: number, halfCarM: number, best: number): void {
+function updateCraft(st: AiState, world: WorldState, i: number, line: RacingLine, cfg: RacecraftConfig, others: ReadonlyArray<{ ahead: number; side: number; along: number } | undefined>, speed: number, halfCarM: number, best: number, roomL = Infinity, roomR = Infinity): void {
   const car = world.cars[i]!;
   st.craftTicks = { ...st.craftTicks, [st.craft]: st.craftTicks[st.craft] + 1 };
   if (st.craftHold > 0) st.craftHold--;
@@ -1157,9 +1278,16 @@ function updateCraft(st: AiState, world: WorldState, i: number, line: RacingLine
   }
   // The line the mode wants ~40 m ahead (so a change starts before the corner it's for).
   const o = craftLines.get(line)?.offsets ?? racecraftLines(line, cfg, halfCarM).offsets;
-  const target = lineFor(st.craft, (best + 20) % line.n, o);
+  if (st.covering === 1 && o.inside[best] !== 0) st.covering = 2;
+  if (st.covering === 2 && o.inside[best] === 0) st.covering = 0;
+  const target = lineFor(st.craft, (best + 20) % line.n, o, st.covering > 0);
   if (target !== st.lineTarget) { st.lineTarget = target; st.lineChanges++; }
-  const ti = LINE_IDS.indexOf(target), stepW = Math.min(1, cfg.blendPerM * speed * TICK_DT);
+  const ti = LINE_IDS.indexOf(target);
+  // Never blend sideways into a car alongside (the line change waits): the lateral move the blend makes ~40 m on.
+  const q = (best + 20) % line.n, offOf = (w: readonly number[]) => w[1]! * o.exit[q]! + w[2]! * o.inside[q]!;
+  const towards = [o.exit[q]!, o.inside[q]!, 0][ti === 1 ? 0 : ti === 2 ? 1 : 2]! - offOf(st.lineW);
+  const blocked = (towards > 0.05 && roomR < 4) || (towards < -0.05 && roomL < 4);
+  const stepW = blocked ? 0 : Math.min(1, cfg.blendPerM * speed * TICK_DT);
   const w = st.lineW.map((x, l) => (l === ti ? Math.min(1, x + stepW) : Math.max(0, x - stepW))) as [number, number, number];
   const sum = w[0] + w[1] + w[2] || 1;
   st.lineW = [w[0] / sum, w[1] / sum, w[2] / sum];

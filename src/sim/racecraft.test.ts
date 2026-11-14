@@ -9,8 +9,8 @@ import slipstreamJson from '../../tools/fixtures/slipstream-baseline.json';
 import raceJson from '../../config/race.json';
 import { catalog, loadTrackNode, simContextNode } from '../../tools/load-track-node';
 import {
-  aiInputSource, blueFlag, buildRacingLine, buildStats, chooseMode, computeExitLine, offsetPath, offsetsFromPoints, concedes, cornersOf, createRaceWorld, keepGoodExits, lineFor, lineOffsets,
-  otherHasRightOfWay, step, type AiConfig, type PhysicsConfig, type RaceConfig, type SimContext, type WorldState,
+  aiInputSource, blueFlag, buildRacingLine, buildStats, chooseMode, computeExitLine, coverChance, limitSlope, speedProfile, offsetPath, offsetsFromPoints, concedes, cornersOf, createRaceWorld, keepGoodExits, lineFor, lineOffsets,
+  otherHasRightOfWay, step, type AiConfig, type DefenceConfig, type PhysicsConfig, type RaceConfig, type SimContext, type WorldState,
 } from './index';
 
 const loaded = loadTrackNode('oxford');
@@ -57,6 +57,48 @@ describe('racecraft lines', () => {
     expect(lineFor('attack', 10, o)).toBe('neutral'); // no EXIT there: the racing line (INSIDE is slower)
     o.exit[10] = 1;
     expect(lineFor('attack', 10, o)).toBe('exit');
+  });
+});
+
+describe('the defender choice (AI overtaking round 3)', () => {
+  const dc = (aiJson as unknown as { defence: DefenceConfig }).defence;
+  const base = { aggression: 0.5, racecraft: 0.5, gapSec: 0.5, closingMps: 1, tow: false, tyreUsed: 0.2 };
+
+  it('covers more when aggressive or under threat, less on worn tyres; good racecraft reads the threat sharper', () => {
+    const p = (o: Partial<typeof base>) => coverChance({ ...base, ...o }, dc);
+    expect(p({ aggression: 0.9 })).toBeGreaterThan(p({ aggression: 0.1 }));
+    expect(p({ gapSec: 0.1, closingMps: 4, tow: true })).toBeGreaterThan(p({ gapSec: 0.9, closingMps: 0 }));
+    expect(p({ tyreUsed: 0.8 })).toBeLessThan(p({ tyreUsed: 0 }));
+    const big = { gapSec: 0.1, closingMps: 4, tow: true }, none = { gapSec: 0.95, closingMps: -2 };
+    expect(p({ racecraft: 0.9, ...big }) - p({ racecraft: 0.9, ...none })).toBeGreaterThan(p({ racecraft: 0.1, ...big }) - p({ racecraft: 0.1, ...none }));
+    for (const o of [{}, { aggression: 1, ...big }, { aggression: 0, ...none, tyreUsed: 1 }]) { expect(p(o)).toBeGreaterThan(0); expect(p(o)).toBeLessThan(1); }
+  });
+
+  it('a covering defender takes the INSIDE line where there is one', () => {
+    const o = lineOffsets(line, cfg, ctx.physics.car.widthM / 2);
+    const q = o.inside.findIndex((v) => v !== 0);
+    expect(lineFor('defend', q, o, true)).toBe('inside');
+    expect(lineFor('defend', q, o, false)).toBe('neutral');
+  });
+
+  it('limitSlope: neighbours differ by at most the step, values only shrink, a side change goes through 0', () => {
+    const off = Float64Array.from([0, 0, 3, 3, 3, -3, -3, 0, 0, 0]);
+    const was = Float64Array.from(off);
+    limitSlope(off, 1);
+    for (let q = 0; q < off.length; q++) {
+      expect(Math.abs(off[q]! - off[(q + 1) % off.length]!)).toBeLessThanOrEqual(1 + 1e-9);
+      expect(Math.abs(off[q]!)).toBeLessThanOrEqual(Math.abs(was[q]!) + 1e-9);
+      expect(Math.sign(off[q]!) === 0 || Math.sign(off[q]!) === Math.sign(was[q]!)).toBe(true);
+    }
+  });
+
+  it('the INSIDE line costs time but is a real line (no kinks): a lap on it within 8% of the racing line', () => {
+    const st = buildStats(ctx.physics.defaultCar, ctx.catalog), opt = { cornerMargin: 1, brakeMargin: 1, fuelKg: 30 };
+    const o = lineOffsets(line, cfg, ctx.physics.car.widthM / 2), p = offsetPath(line, o.inside);
+    const lap = (v: ArrayLike<number>) => { let t = 0; for (let q = 0; q < v.length; q++) t += 2 / v[q]!; return t; };
+    const tN = lap(speedProfile(line.x, line.y, ctx.physics, st, opt)), tI = lap(speedProfile(p.x, p.y, ctx.physics, st, opt));
+    expect(tI).toBeGreaterThan(tN);
+    expect(tI).toBeLessThan(tN * 1.08); // unlimited, it was 39 s against 27 s
   });
 });
 

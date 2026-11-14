@@ -66,7 +66,17 @@ for (; tick < maxTicks; tick++) {
     const p = prev.cars[i]!, s = stats[i]!;
     if (c.wallContact && !p.wallContact) s.walls++;
     if (c.barrierContact && !p.barrierContact) s.barriers++;
-    if (c.carContact && !p.carContact) s.contacts++;
+    if (c.carContact && !p.carContact) {
+      s.contacts++;
+      // HITS=1: who with (nearest car), where in its frame, and both drivers' racecraft state.
+      if (process.env.HITS) {
+        let j = -1, bd = Infinity;
+        world.cars.forEach((o, k) => { const d = Math.hypot(o.x - c.x, o.y - c.y); if (k !== i && d < bd) { bd = d; j = k; } });
+        const o = world.cars[j]!, fx = Math.sin(c.heading), fy = -Math.cos(c.heading), lon = (o.x - c.x) * fx + (o.y - c.y) * fy, lat = -(o.x - c.x) * fy + (o.y - c.y) * fx;
+        const st = (k: number) => { const a = drivers[k]!.state; return `${a.craft}/${a.defence}/w${a.lineW.map((x) => x.toFixed(1)).join(',')}/off${a.offset.toFixed(1)}/pt${a.passTarget}/${a.mode}${world.cars[k]!.inPitLane ? "-lane" : ""}/m${a.lastMistake}${a.mistake ? "!" : ""}/v${Math.hypot(world.cars[k]!.vx, world.cars[k]!.vy).toFixed(0)}`; };
+        console.log(`hit t=${(tick / 60).toFixed(1)} car ${i} [${st(i)}] with ${j} [${st(j)}] near ${drivers[i]!.state.near} lon ${lon.toFixed(1)} lat ${lat.toFixed(1)}`);
+      }
+    }
   });
   if (race && (world.race!.phase === 'racing' || world.race!.phase === 'finishing')) {
     const r = world.race!;
@@ -121,6 +131,11 @@ for (const r of rows) console.log(r.line);
 const stuck = drivers.reduce((a, d) => a + d.state.stuckEvents, 0);
 const unfinished = world.cars.filter((c) => c.timing.laps < laps).length;
 console.log(`\nstuck events ${stuck}; cars short of ${laps} laps: ${unfinished}; overtakes ${overtakes}`);
+// AI overtaking round 3: the defenders' choices into braking zones, and how often each lost the place there.
+{
+  const sum = (k: 'defCovers' | 'defCoverLost' | 'defHolds' | 'defHoldLost') => drivers.reduce((x, d) => x + d.state[k], 0);
+  console.log(`defence: covered ${sum('defCovers')} (lost the place ${sum('defCoverLost')}), held the line ${sum('defHolds')} (lost the place ${sum('defHoldLost')})`);
+}
 if (race && lineup.length) {
   // How well the finishing order follows PACE (Spearman rank correlation, 1 = exactly).
   const fin = world.race!.order, n = fin.length;

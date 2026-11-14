@@ -43,6 +43,13 @@ export interface RacecraftConfig {
   /** INSIDE: how far toward the inside (m), starting insideLeadM before the corner. */
   insideM: number;
   insideLeadM: number;
+  /** COVERING (AI overtaking round 3): the INSIDE line starts this far before the corner (ramping in over
+   *  insideLeadM), so a defender covering the inside is there through the braking zone. Absent: insideLeadM. */
+  coverLeadM?: number;
+  /** The INSIDE line moves sideways at most this many metres per metre along (absent: no limit). */
+  insideSlope?: number;
+  /** ...then this many passes of a 5-point average round off its corners. */
+  insideSmooth?: number;
   /** EXIT: only for corners followed by at least exitStraightM of straight; re-optimised through the corner and
    *  exitShiftM past it with the exit's curvature weighted exitWeight x the entry's (a later apex). */
   exitStraightM: number;
@@ -54,6 +61,8 @@ export interface RacecraftConfig {
   /** ATTACK within attackGapSec of the car ahead (closing, or in its tow); DEFEND with a car within defendGapSec behind, closing. */
   attackGapSec: number;
   defendGapSec: number;
+  /** ...and stays ATTACKING within attackStayGapSec of it, closing or not (absent: 0). */
+  attackStayGapSec?: number;
   /** NURSE when the average tyre is below this (raw wear) or any damage zone is past nurseDamage. */
   nurseWear: number;
   nurseDamage: number;
@@ -72,6 +81,22 @@ const wrap = (q: number, n: number) => ((q % n) + n) % n;
 /** 0..1..0 bump: 0 at a, rising to 1 at b, 1 until c, back to 0 at d (indices along the loop, a<=b<=c<=d unwrapped). */
 const bump = (i: number, a: number, b: number, c: number, d: number) => (i < a || i > d ? 0 : i < b ? (i - a) / Math.max(1, b - a) : i <= c ? 1 : (d - i) / Math.max(1, d - c));
 
+/** Shrink offsets (never grow them: they stay inside the road) until neighbouring points differ by at most maxStep
+ *  metres, round the loop; changing side passes through 0. The INSIDE line's room collapses to nothing at most apexes
+ *  (the racing line touches the inside there) and corners' lead-ins overlap: unlimited, its offset jumped 2.5 m in a
+ *  few metres, and on the kinks its speed profile fell to 6 m/s (a 37 s lap against 27 s, AI overtaking round 3). */
+export function limitSlope(off: Float64Array, maxStep: number): void {
+  const n = off.length;
+  if (!Number.isFinite(maxStep) || n < 3) return;
+  for (let pass = 0; pass < 4; pass++) for (const dir of [1, -1]) {
+    for (let k = 0; k < 2 * n; k++) {
+      const q = dir > 0 ? k % n : (2 * n - 1 - k) % n, prev = off[(q - dir + n) % n]!, v = off[q]!;
+      const cap = Math.sign(v) === Math.sign(prev) || prev === 0 ? Math.abs(prev) + maxStep : Math.max(0, maxStep - Math.abs(prev));
+      if (Math.abs(v) > cap) off[q] = Math.sign(v) * cap;
+    }
+  }
+}
+
 /** Lateral offsets (m, + = right) for EXIT and INSIDE, point for point on the neutral line. */
 export function lineOffsets(line: LinePath, cfg: RacecraftConfig, halfCarM: number): { exit: Float64Array; inside: Float64Array } {
   const n = line.n, step = 2, corners = cornersOf(line);
@@ -85,8 +110,9 @@ export function lineOffsets(line: LinePath, cfg: RacecraftConfig, halfCarM: numb
     const len = wrap(c.to - c.from, n), side = c.dir === 'R' ? 1 : -1;
     // INSIDE: ramp in over insideLeadM before the corner, hold to the apex, out by the corner's end.
     const lead = Math.round(cfg.insideLeadM / step), apexAt = wrap(c.apex - c.from, n);
-    for (let j = -lead; j <= len + 3; j++) {
-      const q = wrap(c.from + j, n), w = bump(j, -lead, 0, apexAt, len + 3);
+    const cover = Math.max(lead, Math.round((cfg.coverLeadM ?? cfg.insideLeadM) / step));
+    for (let j = -cover; j <= len + 3; j++) {
+      const q = wrap(c.from + j, n), w = bump(j, -cover, -cover + lead, apexAt, len + 3);
       if (owner[q] !== -1 && owner[q] !== ci) continue; // another corner's body
       const v = side * Math.min(cfg.insideM, room(q, side)) * w;
       if (owner[q] === ci || Math.abs(v) > Math.abs(inside[q]!)) inside[q] = v;
@@ -114,6 +140,18 @@ export function lineOffsets(line: LinePath, cfg: RacecraftConfig, halfCarM: numb
     }
     for (let j = 0; j < m; j++) if (Math.abs(d[j]!) > Math.abs(exit[qs[j]!]!)) exit[qs[j]!] = d[j]!;
   });
+  limitSlope(inside, (cfg.insideSlope ?? Infinity) * step);
+  // ...and rounded off (a few passes of a 5-point average, kept inside the road): the slope limit's corners are
+  // curvature spikes of their own.
+  if (cfg.insideSlope !== undefined) for (let pass = 0; pass < (cfg.insideSmooth ?? 0); pass++) {
+    const src = Float64Array.from(inside);
+    for (let q = 0; q < n; q++) {
+      let v = 0;
+      for (let d = -2; d <= 2; d++) v += src[wrap(q + d, n)]!;
+      v /= 5;
+      inside[q] = v > 0 ? Math.min(v, room(q, 1)) : Math.max(v, -room(q, -1));
+    }
+  }
   return { exit, inside };
 }
 
@@ -238,11 +276,17 @@ export interface OvertakingConfig {
   attackHeadwaySec: number;
   /** ...except within this many seconds of a braking point (the full headway into braking zones). */
   closeUntilBrakeSec: number;
+  /** ...on lap one (the whole field nose to tail; absent: closeUntilBrakeSec). */
+  lapOneCloseUntilBrakeSec?: number;
   /** ATTACKING, following: plan braking at this fraction of its braking (0.8 when merely following). */
   attackFollowBrake: number;
   /** Pulled out and closing within commitM: the move is on (it keeps that side until past, or aborts if the car
    *  gets more than commitM away, or it isn't alongside, within 1.5 car lengths, by the corner). */
   commitM: number;
+  /** A committed move looks this many seconds ahead for room (absent: the usual 2 s). */
+  commitLookSec?: number;
+  /** A car with another overlapped on its inside for the coming corner takes a line a car width + gap wide of it. */
+  leaveRoom?: boolean;
   /** A defender with aggression below this lifts and lets an overlapped car on the inside go. */
   concedeBelow: number;
   /** BLUE FLAGS: a car this many laps or more ahead in the race always has the right of way, and once it's
@@ -276,8 +320,10 @@ export function blueFlag(raceLapsAhead: number, ahead: number, side: number, wid
   return raceLapsAhead >= cfg.blueLaps && ahead >= -cfg.blueBehindM && ahead <= cfg.overlapM && Math.abs(side) >= widthM;
 }
 
-/** Which line a mode wants at line point q: ATTACK takes EXIT where there is one (onto a straight), else the racing line. */
-export function lineFor(mode: CraftMode, q: number, offsets: { exit: Float64Array; inside: Float64Array }): LineId {
+/** Which line a mode wants at line point q: ATTACK takes EXIT where there is one (onto a straight), else the racing line.
+ *  A defender that chose to COVER the inside into this braking zone (defenceChoice) takes INSIDE. */
+export function lineFor(mode: CraftMode, q: number, offsets: { exit: Float64Array; inside: Float64Array }, cover = false): LineId {
+  if (cover && offsets.inside[q] !== 0) return 'inside';
   // ATTACK takes EXIT where there is one, else stays on the racing line: the INSIDE line is the slower way
   // round, and taking it into every corner while attacking just dropped the attacker back (AI overtaking card).
   if (mode === 'attack') return offsets.exit[q] !== 0 ? 'exit' : 'neutral';
@@ -290,6 +336,55 @@ export function lineFor(mode: CraftMode, q: number, offsets: { exit: Float64Arra
 export function chooseMode(s: { aheadGapSec: number; aheadClosing: boolean; inTow: boolean; behindGapSec: number; behindClosing: boolean; wear: number; damage: number }, cfg: RacecraftConfig): CraftMode {
   if (s.wear < cfg.nurseWear || s.damage > cfg.nurseDamage) return 'nurse';
   if (s.behindGapSec < cfg.defendGapSec && s.behindClosing) return 'defend';
-  if ((s.aheadGapSec < cfg.attackGapSec && s.aheadClosing) || s.inTow) return 'attack';
+  // (Round 3: also while right behind it, closing or not: in and out of ATTACK with every speed change, the
+  // close-up never lasted through a corner.)
+  if ((s.aheadGapSec < cfg.attackGapSec && (s.aheadClosing || s.aheadGapSec < (cfg.attackStayGapSec ?? 0))) || s.inTow) return 'attack';
   return 'manage';
+}
+
+/** AI overtaking round 3 (config/ai.json "defence"): the defender's choice into each braking zone.
+ *  COVER the inside (one move before the braking zone: the INSIDE line, slower through the corner; the attacker's
+ *  answer is the cutback) or HOLD the racing line (the inside stays open: a close attacker dives). */
+export interface DefenceConfig {
+  /** Decide this many seconds before the braking point, against the nearest car within gapSec behind. */
+  decideSec: number;
+  gapSec: number;
+  /** The chance to cover, as a logistic: bias + aggrW x (aggression - 0.5) + threatW x (1 + craftW x (racecraft -
+   *  0.5)) x (threat - 0.5) - tyreW x tyre used. threat (0..1): how close (gap), how fast it's closing (closingRefMps
+   *  = all of it), and whether it has the tow or is deploying. */
+  bias: number;
+  aggrW: number;
+  threatW: number;
+  craftW: number;
+  tyreW: number;
+  closingRefMps: number;
+  /** A car ahead is on the INSIDE line (covering) once this far toward the corner's inside (m). */
+  coverDetectM: number;
+}
+
+export interface DefenceSituation {
+  /** The defender's AGGRESSION and RACECRAFT, 0..1. */
+  aggression: number;
+  racecraft: number;
+  /** The attacker: seconds behind, closing speed (m/s), in the tow or deploying. */
+  gapSec: number;
+  closingMps: number;
+  tow: boolean;
+  /** The defender's tyres: fraction used (0 new .. 1 gone). */
+  tyreUsed: number;
+}
+
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+/** How threatening the attacker is, 0..1: half from the gap, 0.3 from its closing speed, 0.2 the tow / deploy. */
+export function defenceThreat(s: DefenceSituation, cfg: DefenceConfig): number {
+  return 0.5 * clamp01(1 - s.gapSec / cfg.gapSec) + 0.3 * clamp01(s.closingMps / cfg.closingRefMps) + (s.tow ? 0.2 : 0);
+}
+
+/** The chance the defender covers the inside (vs holding the racing line). Aggressive drivers cover more; good
+ *  racecraft covers when the threat is real and holds when it isn't (a sharper response to the threat); worn
+ *  tyres make covering (the slower line, every lap) less attractive. The draw against it is seeded noise. */
+export function coverChance(s: DefenceSituation, cfg: DefenceConfig): number {
+  const z = cfg.bias + cfg.aggrW * (s.aggression - 0.5) + cfg.threatW * (1 + cfg.craftW * (s.racecraft - 0.5)) * (defenceThreat(s, cfg) - 0.5) - cfg.tyreW * s.tyreUsed;
+  return 1 / (1 + Math.exp(-z));
 }
