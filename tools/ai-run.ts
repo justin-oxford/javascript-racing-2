@@ -45,6 +45,7 @@ const drivers = builds.map((_, i) => aiInputSource(i, () => ({ world, ctx, line 
 interface Stat { laps: number[]; invalid: number; walls: number; contacts: number; barriers: number }
 const stats: Stat[] = builds.map(() => ({ laps: [], invalid: 0, walls: 0, contacts: 0, barriers: 0 }));
 const contactsLog = contactLog(ctx);
+const mistakeSeen: number[] = [], mistakeAt: number[] = [], stuckSeen: number[] = [];
 const maxTicks = 60 * 60 * 30; // 30 simulated minutes safety cap
 const t0 = performance.now();
 let tick = 0;
@@ -61,6 +62,12 @@ for (; tick < maxTicks; tick++) {
   const before = process.env.PITDBG ? drivers.map((d) => ({ mode: d.state.mode, serviced: d.state.serviced, stuck: d.state.stuckEvents, stops: d.state.pitStops })) : [];
   world = step(world, drivers.map((d) => d.read(world.tick)), ctx);
   contactsLog.tick(world);
+  // STUCK=1: each stuck event with its lap, where, and the car's last mistake (how long before).
+  if (process.env.STUCK) drivers.forEach((d, i) => {
+    const st = d.state, c = world.cars[i]!;
+    if (st.mistakes > (mistakeSeen[i] ?? 0)) { mistakeSeen[i] = st.mistakes; mistakeAt[i] = tick; }
+    if (st.stuckEvents > (stuckSeen[i] ?? 0)) { stuckSeen[i] = st.stuckEvents; console.log(`stuck t=${(tick / 60).toFixed(1)} car ${i} lap ${c.timing.laps + 1} near ${st.near} mode ${st.mode} last mistake ${mistakeAt[i] !== undefined ? `${st.lastMistake} ${((tick - mistakeAt[i]!) / 60).toFixed(1)} s before` : 'none'} wall ${c.wallContact} carContact ${c.carContact}`); }
+  });
   if (process.env.PITDBG) drivers.forEach((d, i) => {
     const b = before[i]!, st = d.state, c = world.cars[i]!, ppm = ctx.track.json.pxPerMeter, at = `(${(c.x * ppm).toFixed(0)},${(c.y * ppm).toFixed(0)})`;
     if (st.mode !== b.mode) console.log(`pit t=${(tick / 60).toFixed(1)} car ${i} ${b.mode} -> ${st.mode} ${at} fuel ${c.fuelKg.toFixed(1)}`);

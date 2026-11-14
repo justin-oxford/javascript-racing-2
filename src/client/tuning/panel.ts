@@ -71,6 +71,8 @@ const RANGES: Record<string, [number, number, number]> = {
   'steering.assistFullKph': [0, 250, 1],
   'steering.lockDeg': [5, 45, 0.5],
   'steering.lockFalloffKph': [20, 600, 5],
+  'steering.lowSpeedLockDeg': [0, 30, 0.5],
+  'steering.lowSpeedLockToKph': [10, 250, 5],
   'input.steerRate': [0.5, 30, 0.1],
   'input.steerReturnRate': [0.5, 30, 0.1],
   'input.throttleRate': [0.5, 30, 0.1],

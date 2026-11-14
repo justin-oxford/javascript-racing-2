@@ -36,10 +36,12 @@ export interface PhysicsConfig {
    */
   tyres: { baseGrip: number; lateralGrip: number; lateralStiffness: number; frontGrip: number; rearGrip: number; peakSlipDeg: number; falloff: number; falloffSlip: number; lowSpeedMps: number; /** Fuel weight (Race strategy card): grip x (dry mass / mass)^loadSensitivity. Absent = 0. */ loadSensitivity?: number; /** Across an axle: a tyre's grip x (its load / the axle's mean)^-transferSensitivity, so load transfer costs grip (suspension balance). Absent = 0. */ transferSensitivity?: number };
   /**
-   * Mechanical lock shrinks with speed (lockFalloffKph). assist: full lock = peak slip (x assistPeakPct)
-   * relative to the front axle's travel, blending in between assistFromKph and assistFullKph.
+   * Mechanical lock shrinks with speed (lockFalloffKph), plus lowSpeedLockDeg more at a standstill, fading
+   * linearly to none by lowSpeedLockToKph (low-speed maneuverability card; absent = none). assist: full lock =
+   * peak slip (x assistPeakPct) relative to the front axle's travel, blending in between assistFromKph and
+   * assistFullKph.
    */
-  steering: { lockDeg: number; lockFalloffKph: number; assist: boolean; assistPeakPct: number; assistFromKph: number; assistFullKph: number };
+  steering: { lockDeg: number; lockFalloffKph: number; lowSpeedLockDeg?: number; lowSpeedLockToKph?: number; assist: boolean; assistPeakPct: number; assistFromKph: number; assistFullKph: number };
   /** Traction assist: drive limited so a driven tyre's combined slip stays at assistPeakPct of its peak. */
   traction: { assist: boolean; assistPeakPct: number };
   /** Ramp rates, full scale per second. */
@@ -226,4 +228,12 @@ export function buildStats(build: CarBuild, catalog: CarCatalog): Stats {
     out[s] = v;
   }
   return out;
+}
+
+/** Mechanical steering lock at a speed (m/s), radians: lockDeg / (1 + kph / lockFalloffKph), plus the extra
+ *  low-speed lock (lowSpeedLockDeg at a standstill, fading linearly to nothing by lowSpeedLockToKph). */
+export function mechLockRad(speedMps: number, st: PhysicsConfig['steering']): number {
+  const kph = Math.abs(speedMps) * 3.6;
+  const extra = st.lowSpeedLockDeg && st.lowSpeedLockToKph ? st.lowSpeedLockDeg * Math.max(0, 1 - kph / st.lowSpeedLockToKph) : 0;
+  return ((st.lockDeg / (1 + kph / st.lockFalloffKph) + extra) * Math.PI) / 180;
 }

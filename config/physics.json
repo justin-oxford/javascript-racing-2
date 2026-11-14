@@ -1,5 +1,5 @@
 {
-  "_comment": "Car physics, absolute values in metres, seconds, newtons, kg. Team x spec x setup multipliers (teams.json, specs.json) scale engine/topSpeed/brakes/drag/downforce/grip. Tune live with the panel (T in dev), then Save.",
+  "_comment": "Car physics, absolute values in metres, seconds, newtons, kg. Team x spec x setup multipliers (teams.json, specs.json) scale engine/topSpeed/brakes/drag/downforce/grip. steering: mechanical lock = lockDeg / (1 + kph / lockFalloffKph), plus lowSpeedLockDeg more at a standstill fading linearly to none by lowSpeedLockToKph (low-speed maneuverability card, 2026-11-14: below ~70 kph the lock, not grip, was the limit); the assist then holds the wheels at peak slip from assistFromKph, fully by assistFullKph. Tune live with the panel (T in dev), then Save.",
   "car": {
     "dryMassKg": 798,
     "lengthM": 5.6,
@@ -36,6 +36,8 @@
   "steering": {
     "lockDeg": 24,
     "lockFalloffKph": 135,
+    "lowSpeedLockDeg": 16,
+    "lowSpeedLockToKph": 110,
     "assist": true,
     "assistPeakPct": 1,
     "assistFromKph": 36,

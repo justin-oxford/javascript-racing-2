@@ -10,7 +10,7 @@
 //    point that's too close to an edge back in, so the line can never cost a lap (all four wheels off).
 // 4. SPEED PROFILE: max corner speed from curvature and the car's grip (03b tyres), then a backward
 //    pass (braking, friction circle) and a forward pass (acceleration).
-import type { PhysicsConfig, Stats } from './car-config';
+import { mechLockRad, type PhysicsConfig, type Stats } from './car-config';
 import type { Point, SimTrack } from './track';
 import { surfaceAt } from './track';
 import { offsetPath, optimizeExitOffsets, type LinePath } from './racecraft';
@@ -264,12 +264,15 @@ export function speedProfile(x: ArrayLike<number>, y: ArrayLike<number>, physics
   // A car gets round a little tighter than pure geometry (tyre slip, some rotation): half a peak slip
   // angle of allowance. Without this the AI arrives at grip speed and simply can't turn tight enough.
   // Floor of 6 m/s: tighter than the lock allows at all, it can still crawl round on slip and rotation.
-  const lockRad = (physics.steering.lockDeg * Math.PI) / 180;
   const slipAllow = ((t.peakSlipDeg * Math.PI) / 180) * 0.5;
+  // The fastest speed whose lock (mechLockRad, falling with speed) still reaches `need` (bisection).
   const lockV = (kk: number) => {
     const need = c.wheelbaseM * Math.abs(kk) - slipAllow;
-    if (need <= 1e-6) return vTop;
-    return Math.max(6, need >= lockRad ? 0 : (physics.steering.lockFalloffKph / 3.6) * (lockRad / need - 1));
+    if (need <= 1e-6 || mechLockRad(vTop, physics.steering) >= need) return vTop;
+    if (mechLockRad(0, physics.steering) <= need) return 6;
+    let lo = 0, hi = vTop;
+    for (let it = 0; it < 40; it++) { const mid = (lo + hi) / 2; if (mechLockRad(mid, physics.steering) >= need) lo = mid; else hi = mid; }
+    return Math.max(6, lo);
   };
   const corner = (kk: number) => {
     const den = Math.abs(kk) - muLat * G * kAero;

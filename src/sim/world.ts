@@ -4,7 +4,7 @@ import { applyHits, damageDrag, damageGrip, damagePull, isDamaged, NO_DAMAGE, re
 import { applyResets, newRejoin, trackRejoin } from './rejoin';
 import { rainAt, startWater, updateWater, waterAt, type WeatherConfig } from './weather';
 import { compoundWaterGrip, compoundGrip, compoundWear, consumableScale, defaultPitPlan, fuelGrip, startStop, stopFuelTarget, validPitPlan, type StrategyConfig } from './strategy';
-import { bodyOffsetM, buildStats, setupEffects, type CarCatalog, type PhysicsConfig } from './car-config';
+import { bodyOffsetM, buildStats, mechLockRad, setupEffects, type CarCatalog, type PhysicsConfig } from './car-config';
 import { applyCarForce, prepareCache, readStateFromWorld, setCarMass, stepWorld, type PhysicsCache } from './planck-cache';
 import type { SimTrack, WallChain } from './track';
 import { boxAt, surfaceAt } from './track';
@@ -88,7 +88,7 @@ export function wheelPositions(pose: Pose, cfg: PhysicsConfig): Wheels<{ x: numb
 export function steerLimit(car: Pick<CarState, 'x' | 'y' | 'heading' | 'vx' | 'vy' | 'angVel'>, dir: number, cfg: PhysicsConfig): number {
   const st = cfg.steering;
   const speed = Math.hypot(car.vx, car.vy);
-  const mech = ((st.lockDeg * Math.PI) / 180) / (1 + speed / KPH / st.lockFalloffKph);
+  const mech = mechLockRad(speed, st);
   const blend = st.assist ? clamp((speed / KPH - st.assistFromKph) / Math.max(1, st.assistFullKph - st.assistFromKph), 0, 1) : 0;
   if (blend <= 0) return mech;
   // Front axle velocity in the car's frame: v + omega x r at the axle (r = a forward of the CG).
