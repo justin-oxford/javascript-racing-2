@@ -3,7 +3,8 @@
 import type { CarState, SurfaceDef } from '../../sim';
 import type vfxJson from '../../../config/vfx.json';
 
-export type VfxConfig = typeof vfxJson;
+/** (spray is optional: the frozen test baseline predates it; without it there's no spray.) */
+export type VfxConfig = Omit<typeof vfxJson, 'spray'> & { spray?: (typeof vfxJson)['spray'] };
 
 export interface WheelFx {
   /** 0..~1.5 each; at most one of slide/lockup/spin is non-zero. */

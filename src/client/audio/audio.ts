@@ -32,7 +32,9 @@ export class GameAudio {
   private noise!: AudioBuffer;
   private samples = new Map<string, AudioBuffer>();
   private eng!: { oscs: OscillatorNode[]; sample?: AudioBufferSourceNode; filter: BiquadFilterNode; gain: GainNode; limiterDepth: GainNode };
-  private loops = {} as Record<'squeal' | 'lockup' | 'wheelspin' | 'kerb' | 'gravel' | 'grass', Loop>;
+  private loops = {} as Record<'squeal' | 'lockup' | 'wheelspin' | 'kerb' | 'gravel' | 'grass' | 'hiss', Loop>;
+  /** Wet weather: rain on the car (not a tyre sound: its own loop on the engine bus, ducked by nothing). */
+  private rainLoop?: GainNode;
   private kerbLfo!: OscillatorNode;
   private squealOsc: OscillatorNode | undefined;
   private hit = {} as Record<'wall' | 'barrier' | 'car', { filter: BiquadFilterNode; gain: GainNode; last: number }>;
@@ -264,6 +266,30 @@ export class GameAudio {
       const n = this.noiseSource();
       n.connect(this.filter('lowpass', 170, 0.7)).connect(out);
     });
+    // Tyre hiss on standing water (Wet weather card): a wide, airy band of noise, louder with water and speed.
+    const wx = this.cfg.weather;
+    if (!wx) return;
+    mk('hiss', (out) => {
+      const n = this.noiseSource();
+      n.connect(this.filter('bandpass', wx.hissHz, 0.6)).connect(this.filter('highpass', 900, 0.7)).connect(out);
+    });
+    // Rain: a soft, high wash with a slow wobble (drops on the bodywork), level from the rain intensity.
+    {
+      const out = this.gain(0);
+      out.connect(this.bus.engine);
+      if (!this.sampleLoop('rain', out)) {
+        const n = this.noiseSource();
+        const bp = this.filter('bandpass', wx.rainHz, 0.4);
+        const wob = this.gain(0.8);
+        const lfo = ctx.createOscillator();
+        lfo.frequency.value = 3.1;
+        const depth = this.gain(0.2);
+        lfo.connect(depth).connect(wob.gain);
+        lfo.start();
+        n.connect(bp).connect(wob).connect(out);
+      }
+      this.rainLoop = out;
+    }
   }
 
   private buildOneShots(): void {
@@ -376,6 +402,8 @@ export class GameAudio {
     if (this.kerbLfo) set(this.kerbLfo.frequency, Math.max(1, t.kerbPulseHz));
     set(this.loops.gravel.out.gain, t.gravel * sc.gravelGain);
     set(this.loops.grass.out.gain, t.grass * sc.grassGain);
+    if (this.loops.hiss && this.cfg.weather) set(this.loops.hiss.out.gain, t.hiss * this.cfg.weather.hissGain);
+    if (this.rainLoop && this.cfg.weather) set(this.rainLoop.gain, t.rain * this.cfg.weather.rainGain);
 
     for (const i of t.impacts) this.impact(i.kind, i.strength);
     if (t.pitBeep) this.beep();

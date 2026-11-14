@@ -2,7 +2,7 @@
 // tick, never feeds anything back. Particles are a fixed pool (struct of arrays); at the cap new ones
 // are dropped, never the frame.
 import type { CarState, PhysicsConfig, SimTrack, WorldState } from '../../sim';
-import { bodyOffsetM, wheelPositions } from '../../sim';
+import { bodyOffsetM, waterAt, wheelPositions } from '../../sim';
 import { wheelFx, type VfxConfig } from './triggers';
 
 export type VfxQuality = 'off' | 'low' | 'high';
@@ -25,8 +25,8 @@ function saveQuality(q: VfxQuality): void {
   }
 }
 
-const enum Kind { Smoke, Grass, Gravel, Stone, Spark }
-const COLOURS = ['220,220,220', '96,112,58', '186,166,116', '92,84,72', '255,196,80'];
+const enum Kind { Smoke, Grass, Gravel, Stone, Spark, Spray }
+const COLOURS = ['220,220,220', '96,112,58', '186,166,116', '92,84,72', '255,196,80', '214,222,230'];
 const SPARK = `rgb(${COLOURS[4]})`;
 const FILLS = COLOURS.map((c) => `rgb(${c})`);
 
@@ -185,6 +185,8 @@ export class Vfx {
         // Torn turf on grass.
         if (fx.offTrack === 'grass') this.mark(a, b, ppm, c.skid.widthM * 1.2, `rgba(70,52,28,${c.dust.turfAlpha * fx.offIntensity * l.skidOpacity})`, this.skidsCtx);
         this.emitWheel(ci, w, car, b, fx);
+        // SPRAY (Wet weather card): the rear tyres throw standing water up behind the car at speed.
+        if (w >= 2) this.emitSpray(ci, w, car, b, waterAt(curr.surface, b.x, b.y));
       }
       this.emitSparks(ci, car, track, physics);
     });
@@ -225,6 +227,19 @@ export class Vfx {
       for (let n = this.howMany(`${ci}:${w}:g`, d.stonesPerSec * fx.offIntensity); n > 0; n--)
         // Stones fly backward off the tyre.
         this.emit(Kind.Stone, at.x, at.y, -car.vx * 0.25 + rnd() * 3, -car.vy * 0.25 + rnd() * 3, 0.35 + Math.random() * 0.3, 0.12, 0, 1);
+  }
+
+  /** Spray from a rear wheel on standing water: more with more water and speed, trailing the car. */
+  private emitSpray(ci: number, w: number, car: CarState, at: { x: number; y: number }, water: number): void {
+    const s = this.cfg.spray;
+    if (!s || water < s.minWater) return;
+    const kph = Math.abs(car.speed) * 3.6;
+    if (kph < s.minKph) return;
+    const k = Math.min(1, (kph - s.minKph) / Math.max(1, s.fullKph - s.minKph)) * Math.min(1, water);
+    const rnd = () => (Math.random() - 0.5) * 2;
+    for (let n = this.howMany(`${ci}:${w}:w`, s.ratePerSec * k); n > 0; n--)
+      this.emit(Kind.Spray, at.x, at.y, car.vx * s.drift + rnd() * s.spreadMps, car.vy * s.drift + rnd() * s.spreadMps,
+        s.lifetimeSec * (0.7 + Math.random() * 0.6), s.sizeM * (0.6 + Math.random() * 0.6), s.growthPerSec, s.opacity * (0.5 + 0.5 * k));
   }
 
   /** Wall/barrier contact at speed: short streaks at the car corner touching the wall. */

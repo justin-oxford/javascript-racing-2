@@ -1,4 +1,4 @@
-import { aiStartCompound, computeExitLine, rainAt, shower, consumableScale, defaultPitPlan, offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type CarSetup, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { aiStartCompound, computeExitLine, rainAt, waterAt, wheelPositions, shower, consumableScale, defaultPitPlan, offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type CarSetup, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -706,7 +706,10 @@ async function main(): Promise<void> {
       vfx.onTick(prev, curr, ctx.track, physics);
       const me = curr.cars[0], was = prev.cars[0];
       if (me && was) {
-        audio.update(soundTargets(was, me, audioConfig, vfxConfig, physics, rules, surfaces, topSpeedKph(physics, buildStats(me.build, ctx.catalog).topSpeed)));
+        // Wet weather: the rain now and the standing water under the wheels (rain sound, tyre hiss).
+        const wet = curr.surface?.water ? wheelPositions(me, physics).reduce((a, p) => a + waterAt(curr.surface, p.x, p.y), 0) / 4 : 0;
+        const rainNow = rainAt(curr.tick * TICK_DT, curr.settings?.weather, curr.settings?.weatherSeed ?? 0, ctx.weather);
+        audio.update(soundTargets(was, me, audioConfig, vfxConfig, physics, rules, surfaces, topSpeedKph(physics, buildStats(me.build, ctx.catalog).topSpeed), { rain: rainNow, water: wet }));
         // Wind: grows with speed; tucked into a tow it drops and darkens (slipstream.json wind).
         const wd = slipstream.wind, sp = Math.min(1, (Math.abs(me.speed) * 3.6) / wd.fullKph), tuck = me.tow / Math.max(0.01, slipstream.tow.maxDragReduction);
         audio.setWind(wd.gain * sp * sp * (1 - wd.towDuck * tuck), wd.baseHz * (0.6 + 0.6 * sp) * (1 - wd.towHzDrop * tuck));

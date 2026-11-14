@@ -10,6 +10,7 @@ import contactJson from '../../../tools/fixtures/contact-baseline.json';
 import raceJson from '../../../config/race.json';
 import { describe, expect, it } from 'vitest';
 import audio from '../../../tools/fixtures/audio-baseline.json';
+import audioLive from '../../../config/audio.json';
 // Frozen baseline, not live config: these behaviours must not change while Justin tunes.
 import physicsJson from '../../../tools/fixtures/physics-baseline.json';
 import rules from '../../../config/rules.json';
@@ -136,5 +137,22 @@ describe('sound targets from the sim', () => {
     const open = arena(30, 800, { x: 15, y: 795, heading: 0 });
     const r = run(open, 120, (w) => ({ throttle: w.tick < 90 ? 1 : 0, brake: 0, steer: 0 }));
     expect(r.out.some((t) => t.engine.lift)).toBe(true);
+  });
+
+  it('wet weather: rain follows the rain intensity; tyre hiss needs both standing water and speed', () => {
+    const open = arena(30, 800, { x: 15, y: 795, heading: 0 });
+    const r = run(open, 150, () => ({ throttle: 1, brake: 0, steer: 0 }));
+    const [a, b] = [r.worlds[r.worlds.length - 2]!.cars[0]!, r.worlds[r.worlds.length - 1]!.cars[0]!];
+    const top = topSpeedKph(open.physics, buildStats(open.physics.defaultCar, catalog).topSpeed);
+    const at = (wx: { rain: number; water: number }, prev = a, car = b) => soundTargets(prev, car, audioLive, vfx, open.physics, rules, surfaces, top, wx);
+    expect(Math.abs(b.speed) * 3.6).toBeGreaterThan(audioLive.weather.hissMinKph + 20);
+    expect(at({ rain: 0.6, water: 0 }).rain).toBeCloseTo(0.6);
+    expect(at({ rain: 0.6, water: 0 }).hiss).toBe(0); // dry track: no hiss
+    const wet = at({ rain: 0, water: 0.8 }).hiss;
+    expect(wet).toBeGreaterThan(0);
+    expect(at({ rain: 0, water: 0.3 }).hiss).toBeLessThan(wet); // less water, less hiss
+    const still = r.worlds[0]!.cars[0]!;
+    expect(at({ rain: 0, water: 0.8 }, still, still).hiss).toBe(0); // standing still: none
+    expect(soundTargets(a, b, audio, vfx, open.physics, rules, surfaces, top, { rain: 1, water: 1 }).hiss).toBe(0); // no weather config (the baseline): silent
   });
 });

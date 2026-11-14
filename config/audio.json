@@ -1,5 +1,5 @@
 {
-  "_comment": "Sound (client only). files: set a path (relative to the site root, e.g. assets/audio/engine.ogg) to replace a synthesized placeholder with a sample; null = synth. Tune live on the panel (T).",
+  "_comment": "Sound (client only). files: set a path (relative to the site root, e.g. assets/audio/engine.ogg) to replace a synthesized placeholder with a sample; null = synth. weather (Wet weather card): rain = soft hiss band-passed at rainHz, rainGain x the rain intensity; tyre hiss on water = noise at hissHz, hissGain x the water under the wheels x speed (from hissMinKph, full at hissFullKph). Tune live on the panel (T).",
   "files": {
     "engine": null,
     "squeal": null,
@@ -10,7 +10,9 @@
     "grass": null,
     "wall": null,
     "barrier": null,
-    "carBump": null
+    "carBump": null,
+    "rain": null,
+    "hiss": null
   },
   "sampleBaseRpm": { "engine": 10000 },
   "engine": {
@@ -44,6 +46,7 @@
     "carGain": 0.6,
     "cooldownSec": 0.15
   },
+  "weather": { "rainGain": 0.3, "rainHz": 4200, "hissGain": 0.55, "hissHz": 2400, "hissMinKph": 15, "hissFullKph": 180 },
   "pit": { "beepHz": 1320, "beepGain": 0.3 },
   "defaultVolumes": { "master": 0.8, "engine": 0.7, "tyres": 0.8, "impacts": 0.9, "ui": 0.6 }
 }

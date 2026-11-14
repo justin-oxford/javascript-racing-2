@@ -5,7 +5,8 @@ import type { CarState, PhysicsConfig, Rules, SurfaceDef } from '../../sim';
 import type audioJson from '../../../config/audio.json';
 import { wheelFx, type VfxConfig } from '../vfx/triggers';
 
-export type AudioConfig = typeof audioJson;
+/** (weather is optional: the frozen test baseline predates it; without it there's no rain or hiss.) */
+export type AudioConfig = Omit<typeof audioJson, 'weather' | 'files'> & { weather?: (typeof audioJson)['weather']; files: Partial<(typeof audioJson)['files']> };
 
 /**
  * Virtual gearbox for audio only (the physics has none). Gear top speeds spread up to the car's top
@@ -37,6 +38,9 @@ export interface SoundTargets {
   /** One-shots that start this tick. strength 0..1. */
   impacts: Array<{ kind: 'wall' | 'barrier' | 'car'; strength: number }>;
   pitBeep: boolean;
+  /** Wet weather card: rain on the car (0..1) and the tyres' hiss on standing water (0..1). */
+  rain: number;
+  hiss: number;
 }
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -50,6 +54,8 @@ export function soundTargets(
   rules: Rules,
   surfaces: readonly SurfaceDef[],
   topKph: number,
+  /** Wet weather: the rain intensity now and the mean standing water under the four wheels (0..1). */
+  weather: { rain: number; water: number } = { rain: 0, water: 0 },
 ): SoundTargets {
   const kph = Math.abs(car.speed) * 3.6;
   const fx = ([0, 1, 2, 3] as const).map((w) => wheelFx(prev, car, w, vfx, surfaces, physics.tyres.peakSlipDeg));
@@ -83,6 +89,8 @@ export function soundTargets(
     grass: on('grass') * moving,
     impacts: impacts.filter((i) => i.strength > 0),
     pitBeep: car.inPitLane && !prev.inPitLane,
+    rain: clamp01(weather.rain),
+    hiss: cfg.weather ? clamp01(weather.water) * clamp01((kph - cfg.weather.hissMinKph) / Math.max(1, cfg.weather.hissFullKph - cfg.weather.hissMinKph)) : 0,
   };
 }
 
