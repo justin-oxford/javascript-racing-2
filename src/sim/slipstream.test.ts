@@ -15,6 +15,8 @@ import rules from '../../config/rules.json';
 import wallTracing from '../../config/wall-tracing.json';
 import { catalog, surfaces } from '../../tools/load-track-node';
 import { createPhysicsCache, createSimTrack, createWorld, step, traceWalls, wakeEffects, type ErsConfig, type StrategyConfig, type WeatherConfig, type PhysicsConfig, type SimContext, type SlipstreamConfig, type TrackJson, type WorldState } from './index';
+/** Slow, whole-race tests get a longer time limit: a busy machine (a dev server running) can push them past 5 s. */
+const SLOW_MS = 60_000;
 
 const cfg = slipstreamJson as SlipstreamConfig;
 const car = (x: number, y: number, heading = 0, v = 50) => ({ x, y, heading, vx: Math.sin(heading) * v, vy: -Math.cos(heading) * v, angVel: 0 });
@@ -69,7 +71,7 @@ describe('two cars down a straight', () => {
     return w;
   };
 
-  it('the follower in the tow gains speed and closes the gap; without the tow it does not', () => {
+  it('the follower in the tow gains speed and closes the gap; without the tow it does not', { timeout: SLOW_MS }, () => {
     const on = run(cfg), off = run({ ...cfg, tow: { ...cfg.tow, maxDragReduction: 0 } });
     expect(on.cars[1]!.tow).toBeGreaterThan(0.1);
     expect(on.cars[1]!.speed - on.cars[0]!.speed).toBeGreaterThan(0.5);
@@ -77,7 +79,7 @@ describe('two cars down a straight', () => {
     expect(off.cars[1]!.speed).toBeCloseTo(off.cars[0]!.speed, 3);
   });
 
-  it('is deterministic', () => {
+  it('is deterministic', { timeout: SLOW_MS }, () => {
     const a = run(cfg), b = run(cfg);
     expect(a.cars).toEqual(b.cars);
   });

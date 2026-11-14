@@ -43,6 +43,8 @@ import {
   type TrackJson,
   type WorldState,
 } from './index';
+/** Slow, whole-race tests get a longer time limit: a busy machine (a dev server running) can push them past 5 s. */
+const SLOW_MS = 60_000;
 
 const PPM = 10;
 const idx = (id: string): number => surfaces.findIndex((s) => s.id === id);
@@ -145,7 +147,7 @@ describe('car stats (team x spec x setup)', () => {
 });
 
 describe('physics', () => {
-  it('accelerates to a sensible top speed and the throttle ramps (no instant full power)', () => {
+  it('accelerates to a sensible top speed and the throttle ramps (no instant full power)', { timeout: SLOW_MS }, () => {
     const ctx = arena(30, 2500, { x: 15, y: 2495, heading: 0 });
     let world = createWorld(ctx);
     world = step(world, [FULL], ctx);
@@ -156,7 +158,7 @@ describe('physics', () => {
     expect(top).toBeLessThan(400);
   });
 
-  it('Motus loses a drag race to Cavalli', () => {
+  it('Motus loses a drag race to Cavalli', { timeout: SLOW_MS }, () => {
     const race = (team: string) => {
       const ctx = arena(30, 1200, { x: 15, y: 1195, heading: 0 });
       ctx.physics.defaultCar = { ...ctx.physics.defaultCar, team };

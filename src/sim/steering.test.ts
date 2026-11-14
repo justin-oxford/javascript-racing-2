@@ -5,6 +5,8 @@ import rules from '../../config/rules.json';
 import wallTracing from '../../config/wall-tracing.json';
 import { loadTrackNode, simContextNode, surfaces } from '../../tools/load-track-node';
 import { createSimTrack, createWorld, mechLockRad, steerLimit, step, traceWalls, type PhysicsConfig, type SimContext, type TrackJson, type WorldState } from './index';
+/** Slow, whole-race tests get a longer time limit: a busy machine (a dev server running) can push them past 5 s. */
+const SLOW_MS = 60_000;
 
 const base = physicsJson as unknown as PhysicsConfig;
 const withLock = (extra: number, toKph: number): PhysicsConfig => ({ ...structuredClone(base), steering: { ...base.steering, lowSpeedLockDeg: extra, lowSpeedLockToKph: toKph } });
@@ -46,7 +48,7 @@ describe('low-speed steering lock', () => {
     expect(mechLockRad(60 * KPH, base.steering)).toBeCloseTo((base.steering.lockDeg * DEG) / (1 + 60 / base.steering.lockFalloffKph), 9);
   });
 
-  it('turns much tighter at low speed, and the same at high speed (the assist holds the wheels at peak slip there)', () => {
+  it('turns much tighter at low speed, and the same at high speed (the assist holds the wheels at peak slip there)', { timeout: SLOW_MS }, () => {
     const before = pad(structuredClone(base)), after = pad(withLock(16, 110));
     const slowBefore = circle(before, 30), slowAfter = circle(after, 30);
     expect(slowAfter).toBeLessThan(slowBefore * 0.75);

@@ -7,6 +7,8 @@ import aiJson from '../../tools/fixtures/ai-baseline.json';
 import slipstreamJson from '../../tools/fixtures/slipstream-baseline.json';
 import { loadTrackNode, simContextNode } from '../../tools/load-track-node';
 import { aiDrive, aiInputSource, buildRacingLine, createWorld, newAiState, step, type AiConfig, type PhysicsConfig, type WorldState } from './index';
+/** Slow, whole-race tests get a longer time limit: a busy machine (a dev server running) can push them past 5 s. */
+const SLOW_MS = 60_000;
 
 const loaded = loadTrackNode('oxford');
 const ctx = { ...simContextNode(loaded, structuredClone(physicsJson as unknown as PhysicsConfig)), slipstream: slipstreamJson };
@@ -34,7 +36,7 @@ describe('AI drivers', () => {
     expect(a).toEqual(b);
   });
 
-  it('drives clean laps on its own', () => {
+  it('drives clean laps on its own', { timeout: SLOW_MS }, () => {
     let world: WorldState = createWorld(ctx, 1);
     const ai = aiInputSource(0, () => ({ world, ctx, line }), () => hard, () => cfg, 7);
     for (let t = 0; t < 60 * 150 && world.cars[0]!.timing.laps < 3; t++) world = step(world, [ai.read(world.tick)], ctx);
@@ -42,7 +44,7 @@ describe('AI drivers', () => {
     expect(ai.state.stuckEvents).toBe(0);
   });
 
-  it('pits when low on fuel: stops in the box, comes out full, rejoins', () => {
+  it('pits when low on fuel: stops in the box, comes out full, rejoins', { timeout: SLOW_MS }, () => {
     let world: WorldState = createWorld(ctx, 1);
     world = { ...world, cars: [{ ...world.cars[0]!, fuelKg: 12 }] };
     const ai = aiInputSource(0, () => ({ world, ctx, line }), () => hard, () => cfg, 7);

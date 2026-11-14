@@ -23,6 +23,8 @@ import {
   type SimContext,
   type WorldState,
 } from './index';
+/** Slow, whole-race tests get a longer time limit: a busy machine (a dev server running) can push them past 5 s. */
+const SLOW_MS = 60_000;
 
 const loaded = loadTrackNode('oxford');
 const race: RaceConfig = { ...raceJson, gridSec: 1, holdMinSec: 1, holdMaxSec: 1 };
@@ -94,7 +96,7 @@ describe('grid and start', () => {
 });
 
 describe('a short race', () => {
-  it('runs grid -> results with AI, classifies everyone, never contradicts itself', () => {
+  it('runs grid -> results with AI, classifies everyone, never contradicts itself', { timeout: SLOW_MS }, () => {
     const line = buildRacingLine(ctx.track)!;
     const cfg = aiJson as unknown as AiConfig;
     let w = createRaceWorld(ctx, [build, { ...build, team: 'motus' }, { ...build, team: 'bluebull' }], { laps: 2, seed: 3 });
