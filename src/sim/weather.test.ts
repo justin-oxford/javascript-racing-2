@@ -51,6 +51,22 @@ describe('weather', () => {
     expect(compoundWear('inter', st, 0)).toBeGreaterThan(compoundWear('inter', st, 1) * 2);
   });
 
+  it('a changeable race: every car pits for wet-weather tyres and back, and every stop changes tyres (Bugs: 5-7 stops for 4 changes)', () => {
+    const line = buildRacingLine(ctx.track)!, cfg = aiJson as unknown as AiConfig;
+    let w: WorldState = createRaceWorld(ctx, [0, 1, 2, 3].map((i) => ({ ...ctx.physics.defaultCar, team: catalog.teams[i]!.id, compound: 'medium' as const })), { laps: 14, seed: 3, settings: { weather: 'changeable', weatherSeed: 3 } });
+    const ai = [0, 1, 2, 3].map((i) => aiInputSource(i, () => ({ world: w, ctx, line }), () => ({ ...cfg.presets[cfg.defaultPreset]!, mistakesPerMin: 0 }), () => cfg, 50 + i));
+    const changes = [0, 0, 0, 0];
+    for (let t = 0; t < 60 * 60 * 12 && w.race!.phase !== 'results'; t++) {
+      const prev = w;
+      w = step(w, ai.map((d) => d.read(w.tick)), ctx);
+      w.cars.forEach((c, i) => { if (c.compound !== prev.cars[i]!.compound) changes[i]!++; });
+    }
+    ai.forEach((d, i) => {
+      expect(d.state.pitStops).toBeGreaterThanOrEqual(2); // onto wet-weather tyres and back
+      expect(d.state.pitStops).toBe(changes[i]);
+    });
+  }, 240_000);
+
   it('a wet race is deterministic: same seed, same water, same result', () => {
     const line = buildRacingLine(ctx.track)!, cfg = aiJson as unknown as AiConfig;
     const run = () => {

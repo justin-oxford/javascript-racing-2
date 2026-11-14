@@ -395,6 +395,10 @@ export interface AiState {
   rng: number;
   /** Pits: wants to stop next time round; has been serviced this stop; fuel use per lap (measured). */
   pitWanted: boolean;
+  /** WET WEATHER: the tyre the water called for, read on the racing line (frozen once in the pit lane, where
+   *  st.near is a pit-path index: read there, it saw another part of the track's water and came out on the
+   *  tyres it went in on, then pitted again next lap; Bugs card). */
+  pitCall: Compound | 'dry';
   serviced: boolean;
   fuelAtLap: number;
   fuelPerLap: number;
@@ -418,7 +422,7 @@ export function newAiState(seed: number): AiState {
     troubleTicks: 0, resets: 0, saving: false, modeTicks: { save: 0, standard: 0, push: 0 }, deployTicks: 0,
     craft: 'manage', craftHold: 0, craftEval: 0, lineW: [1, 0, 0], craftTicks: { manage: 0, attack: 0, defend: 0, nurse: 0 }, lineChanges: 0, lineTarget: 'neutral', conceding: false, passTarget: -1, passSide: 0, passTries: 0, passesMade: 0, concessions: 0, blueYield: false, blueYields: 0,
     defence: 'none', covering: 0, defAgainst: -1, defAt: 0, defApex: 0, defCovers: 0, defCoverLost: 0, defHolds: 0, defHoldLost: 0,
-    pitWanted: false, serviced: false, fuelAtLap: -1, fuelPerLap: 0, stuckEvents: 0, mistakes: 0, pitStops: 0, attack: false, launchTick: -1, trust: 1, lastAllowed: 0,
+    pitWanted: false, pitCall: 'dry', serviced: false, fuelAtLap: -1, fuelPerLap: 0, stuckEvents: 0, mistakes: 0, pitStops: 0, attack: false, launchTick: -1, trust: 1, lastAllowed: 0,
   };
 }
 
@@ -576,7 +580,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     // stops wanting a stop (latched, it pitted for nothing on the last lap). Elsewhere it stays wanted.
     // WET WEATHER: the wrong tyres for the water under its line -> a stop (slicks in the wet, inters in
     // standing water or on a dry line, wets once it's drying).
-    if (race && line.pit && wrongTyres(car.compound, waterAlong(world, line, Math.max(0, st.near), ctx.weather.ai.lookM), ctx)) want = true;
+    const waterAhead = waterAlong(world, line, Math.max(0, st.near), ctx.weather.ai.lookM);
+    st.pitCall = tyreForWater(car.compound, waterAhead, ctx);
+    if (race && line.pit && wrongTyres(car.compound, waterAhead, ctx)) want = true;
     if (line.pit && want) st.pitWanted = true;
     else if (race && st.fuelPerLap > 0) st.pitWanted = false;
     if (line.pit && st.pitWanted) {
@@ -1232,7 +1238,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   let pitPlan: PitPlan | undefined;
   if (st.pitWanted || st.mode === 'pit') {
     const lapsToGo = race ? Math.max(0, race.laps - (race.cars[i]?.progress ?? car.timing.laps)) : 0;
-    const wetCall = tyreForWater(car.compound, waterAlong(world, line, Math.max(0, st.near), ctx.weather.ai.lookM), ctx);
+    const wetCall = st.mode === 'pit' ? st.pitCall : tyreForWater(car.compound, waterAlong(world, line, Math.max(0, st.near), ctx.weather.ai.lookM), ctx);
     const compound = wetCall === 'dry' ? (race ? aiCompound(lapsToGo, consumableScale(world.settings?.raceLength, race?.laps, ctx.strategy), ctx.strategy) : car.compound) : wetCall;
     // Serviced and waiting to leave the box: ask for nothing more (it used to get a second tyre change).
     pitPlan = st.serviced ? { compound: car.compound, fuelKg: 0, tyres: false, repair: false } : { compound, fuelKg: FUEL_TO_END, tyres: true, repair: isDamaged(car.damage) };

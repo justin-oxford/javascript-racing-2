@@ -30,6 +30,12 @@ function race() {
     w = step(w, ai.map((d) => d.read(w.tick)), ctx);
     if (process.env.STUCK) ai.forEach((d, i) => { if (d.state.stuckEvents > (stuckSeen[i] ?? 0)) { stuckSeen[i] = d.state.stuckEvents; const c = w.cars[i]!; console.log(`  stuck t=${(w.tick / 60).toFixed(0)} car ${i} lap ${c.timing.laps} ${c.compound} near ${d.state.near} ${d.state.mode} water here ${waterAt(w.surface, c.x, c.y).toFixed(2)} wall ${c.wallContact} carContact ${c.carContact}`); } });
     w.cars.forEach((c, i) => { if (c.compound !== prev.cars[i]!.compound) stops[i]!.push(`L${c.timing.laps} ${prev.cars[i]!.compound}->${c.compound}`); });
+    // PITLOG=1: every pit entry and service (what it had, what it got, the water it saw).
+    if (process.env.PITLOG) ai.forEach((d, i) => {
+      const c = w.cars[i]!, p = prev.cars[i]!;
+      if (c.inPitLane && !p.inPitLane) console.log(`  t=${(w.tick / 60).toFixed(0)} car ${i} lap ${c.timing.laps} INTO PITS on ${c.compound} fuel ${c.fuelKg.toFixed(1)} wear ${c.wheels.map((x) => x.wear.toFixed(2)).join('/')} water here ${waterAt(w.surface, c.x, c.y).toFixed(2)}`);
+      if (!c.servicing && p.servicing) console.log(`  t=${(w.tick / 60).toFixed(0)} car ${i} serviced: ${p.compound} -> ${c.compound}, fuel ${c.fuelKg.toFixed(1)}`);
+    });
     for (const e of w.events) if (e.type === 'lap') (['inter', 'wet'].includes(w.cars[e.car]!.compound) ? row.inter : row.slick).push(e.time);
     if (leaderLap() > row.lap) {
       // The water on the racing line, and 4 m to the side of it.
