@@ -1,0 +1,17 @@
+#!/bin/sh
+# Versioned pre-push hook: main deploys to GitHub Pages, so nothing goes up that doesn't typecheck, pass the
+# tests and build (2026-11-13: a commit that didn't build reached the live site). `npm install` points git at
+# this folder (package.json "prepare"); or run: git config core.hooksPath .githooks
+# Emergency only: git push --no-verify
+set -e
+cd "$(git rev-parse --show-toplevel)"
+if ! git diff --quiet HEAD -- || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+  echo "pre-push: note: uncommitted changes in the working tree; these checks run on the working tree, not exactly on what is being pushed."
+fi
+echo "pre-push: typecheck"
+npm run --silent typecheck
+echo "pre-push: tests"
+npx vitest run --silent
+echo "pre-push: build"
+npx vite build --logLevel warn
+echo "pre-push: all good"
