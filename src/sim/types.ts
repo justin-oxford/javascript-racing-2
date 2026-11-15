@@ -1,3 +1,4 @@
+import type { TrailPoint } from './slipstream';
 import type { SurfaceGrid } from './evolution';
 import type { EngineMode, ErsState } from './ers';
 import type { DamageMode, DamageState } from './damage';
@@ -135,8 +136,10 @@ export interface CarState extends Pose {
   carContact: boolean;
   /** Slipstream this tick: fraction of aero drag removed (0 = none). Telemetry + HUD. */
   tow: number;
-  /** Dirty air this tick: fraction of downforce lost following closely through a corner. */
+  /** Dirty air this tick: fraction of downforce lost in another car's wake. */
   dirtyAir: number;
+  /** Wake model card: this car's recent path (oldest first), the trail its wake follows (absent: none yet / old wake). */
+  trail?: readonly TrailPoint[];
   /** Lap/sector timing (see timing.ts). */
   timing: LapTiming;
   /** Reset to track: last on-track point, hold, cooldown, penalty, ghost (rejoin.ts). */

@@ -1,5 +1,5 @@
 // K debug layer (and the editor's overlays): mask, walls, timing lines, racing line, grid, spawn,
-// wheel sample points. Everything in track-pixel space.
+// wheel sample points, each car's wake trail (Wake model card). Everything in track-pixel space.
 import type { PhysicsConfig, Pose, TimingLine, TrackJson, WallChain, WorldState } from '../sim';
 import { wheelPositions } from '../sim';
 import { interpolatePose } from './render';
@@ -115,6 +115,34 @@ export function drawWheels(ctx: CanvasRenderingContext2D, prev: WorldState, curr
       ctx.fill();
       ctx.stroke();
     });
+  });
+  ctx.restore();
+}
+
+/** Wake model card: each car's path trail (the wake a follower can sit in), newest end solid, fading back to its
+ *  end; a car getting tow / dirty air is ringed (thicker = more). */
+export function drawTrails(ctx: CanvasRenderingContext2D, curr: WorldState, physics: PhysicsConfig, pxPerMeter: number, lw: number, sideZeroWidths = 1.5): void {
+  ctx.save();
+  ctx.lineCap = 'round';
+  curr.cars.forEach((car) => {
+    const t = car.trail;
+    if (!t || t.length < 2) return;
+    const n = t.length;
+    for (let k = n - 1; k > 0; k--) {
+      const a = t[k]!, b = t[k - 1]!, age = (n - 1 - k) / Math.max(1, n - 1);
+      // The wake's width (to sideZeroWidths car widths each side), faint; the trail itself, brighter.
+      ctx.strokeStyle = `rgba(80, 200, 255, ${0.12 * (1 - age)})`;
+      ctx.lineWidth = 2 * sideZeroWidths * physics.car.widthM * pxPerMeter;
+      ctx.beginPath(); ctx.moveTo(a.x * pxPerMeter, a.y * pxPerMeter); ctx.lineTo(b.x * pxPerMeter, b.y * pxPerMeter); ctx.stroke();
+      ctx.strokeStyle = `rgba(80, 200, 255, ${0.9 * (1 - age) + 0.1})`;
+      ctx.lineWidth = 2 * lw;
+      ctx.beginPath(); ctx.moveTo(a.x * pxPerMeter, a.y * pxPerMeter); ctx.lineTo(b.x * pxPerMeter, b.y * pxPerMeter); ctx.stroke();
+    }
+    if (car.tow > 0.005 || car.dirtyAir > 0.005) {
+      ctx.strokeStyle = 'rgba(255, 200, 40, 0.9)';
+      ctx.lineWidth = (1 + 6 * Math.min(1, car.tow / 0.3)) * lw;
+      ctx.beginPath(); ctx.arc(car.x * pxPerMeter, car.y * pxPerMeter, physics.car.lengthM * 0.6 * pxPerMeter, 0, Math.PI * 2); ctx.stroke();
+    }
   });
   ctx.restore();
 }

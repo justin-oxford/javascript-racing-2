@@ -9,6 +9,7 @@ import { blueFlag, chooseMode, concedes, coverChance, keepGoodExits, lineFor, LI
 import { speedProfile, transferGripFactor } from './line-optimizer';
 import { planDefence, planMove, type LookaheadConfig, type Plan, type PlanCar } from './lookahead';
 import { aiCompound, compoundGrip, compoundWaterGrip, consumableScale, FUEL_TO_END, fuelGrip, stopDone, type Compound, type PitPlan } from './strategy';
+import { towRange } from './slipstream';
 import { waterAt } from './weather';
 import type { SimTrack } from './track';
 import { surfaceAt } from './track';
@@ -79,6 +80,45 @@ export interface AiConfig {
   predict?: { margin: number; gapM: number; lookSec: number; headwaySec?: number };
   /** Round 7 (scale): following gaps in car lengths for both brains (off when absent or enabled false). */
   follow?: FollowConfig;
+  /** Round 8 (Scale audit card): ai.scale.oxford, every changed TRACK value under one switch (off when absent). */
+  scale?: { oxford?: OxfordScaleConfig };
+}
+
+/** config/ai.json "scale.oxford" (round 8, Scale audit card): TRACK values sized for Oxford, under one switch.
+ *  CAR values are never in here. */
+export interface OxfordScaleConfig {
+  enabled: boolean;
+  /** "section.key": [car lengths, seconds]. A TRACK window in seconds ("within X s", "X s before the braking
+   *  point") becomes car lengths + a small speed term: lengths x L / speed + seconds (speed at least 5 m/s), so the
+   *  distance it covers is lengths x L + seconds x speed. Keys missing from the config are skipped. */
+  windows: Record<string, [number, number]>;
+  /** Hard-coded TRACK values. "Following" (it brakes earlier, ai.ts): centres within followCars car lengths +
+   *  followSec x speed (was 8 m + 1.5 s). A braking zone "soon" (concede, hold alongside, deploy off): within
+   *  brakeSoon [lengths, seconds] (was 3 s). Deploy at a car from deployMinCars car lengths, centres (was 12 m). */
+  followCars: number;
+  followSec: number;
+  brakeSoon: [number, number];
+  deployMinCars: number;
+  /** The following gaps (round 7's follow block) inside the switch. attackOnly: the tight gap into braking zones
+   *  (brakeGapM) and its own braking point (followBrake) only for a car in ATTACK with a real pace advantage: the
+   *  car ahead running at most 1 - paceAdvMin of this car's own speed profile where it is at its limit (corners,
+   *  braking), smoothed over paceTauSec. Everyone else keeps the plain gap and the old following braking. */
+  follow: FollowConfig & { attackOnly?: boolean; paceAdvMin?: number; paceTauSec?: number };
+}
+
+/** A TRACK window in seconds for a car at speed v under the Oxford scale: [lengths, seconds] -> seconds. */
+export const scaleSec = (w: readonly [number, number], lengthM: number, v: number): number => (w[0] * lengthM) / Math.max(5, v) + w[1];
+
+/** cfg with every windows entry of the Oxford scale applied for a car at speed v (shallow copies, cfg untouched). */
+export function oxfordScaled(cfg: AiConfig, sc: OxfordScaleConfig, v: number, lengthM: number): AiConfig {
+  const out: Record<string, unknown> = { ...cfg };
+  for (const [key, w] of Object.entries(sc.windows)) {
+    const [sec, name] = key.split('.') as [string, string];
+    const part = out[sec] as Record<string, unknown> | undefined;
+    if (!part || typeof part[name] !== 'number') continue;
+    out[sec] = { ...part, [name]: scaleSec(w, lengthM, v) };
+  }
+  return out as unknown as AiConfig;
 }
 
 /** config/ai.json "follow" (round 7): following, braking behind a car and going alongside, at Oxford's scale. */
@@ -464,6 +504,9 @@ export interface AiState {
    *  (no close-up from that), and the look-behind defender's last choice. */
   settled?: number;
   attackStay?: boolean;
+  /** Round 8 (Oxford scale): the car ahead's speed / this car's own profile where it's at its limit, smoothed
+   *  (1 = no pace advantage; absent = 1). */
+  pace?: number;
   defPlan?: { cover: boolean; p: number } | undefined;
   /** Start mode (part D): its launch ('good' / 'spin' / 'bog') and whether lap one's start mode has handed over. */
   launch?: 'good' | 'spin' | 'bog';
@@ -603,6 +646,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   }
   const speed = Math.hypot(car.vx, car.vy);
   const phys = ctx.physics;
+  // SCALE AUDIT (round 8): ai.scale.oxford on: the TRACK windows in seconds sized for Oxford at this car's speed.
+  const sc = cfg.scale?.oxford?.enabled ? cfg.scale.oxford : undefined;
+  if (sc) cfg = oxfordScaled(cfg, sc, speed, phys.car.lengthM);
   const pits = cfg.pits ?? { fuelLaps: 2.2, minWear: 0.45, pitSpeedMarginKph: 4 };
   let r: number;
 
@@ -808,15 +854,18 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   };
   const others = world.cars.map((o, oi) => (oi === i ? undefined : rel(o)));
   // ROUND 7 (scale): following gaps in car lengths, a small speed term, AGGRESSION closer (both brains).
-  const fw = cfg.follow?.enabled ? cfg.follow : undefined;
+  // (Round 8, Oxford scale on: its own follow block, the tight gap only for a car in ATTACK with a real pace advantage.)
+  const fw = sc ? sc.follow : cfg.follow?.enabled ? cfg.follow : undefined;
+  const fwTight = !!fw && (!sc?.follow.attackOnly || (st.craft === 'attack' && 1 - (prevState.pace ?? 1) >= (sc.follow.paceAdvMin ?? 0)));
   const aggrMul = fw ? Math.max(0.3, 1 + fw.aggrScale * (0.5 - (preset.aggression ?? 0.5))) : 1;
-  /** The follow switch's bumper-to-bumper gap: into a braking zone (on the gearbox) or the plain one. */
-  const fwBumper = (v: number, zone: boolean) => (fw ? (zone ? fw.brakeGapM : fw.gapLengths * phys.car.lengthM + fw.headwaySec * v) * aggrMul : 0);
-  const following = others.some((o) => !!o && o.ahead > 0 && o.ahead < 8 + speed * 1.5 && Math.abs(o.side) < 2.8);
+  /** The follow switch's bumper-to-bumper gap: into a braking zone (on the gearbox, only when tight) or the plain one. */
+  const fwBumper = (v: number, zone: boolean) => (fw ? (zone && fwTight ? fw.brakeGapM : fw.gapLengths * phys.car.lengthM + fw.headwaySec * v) * aggrMul : 0);
+  const followM = sc ? sc.followCars * phys.car.lengthM + sc.followSec * speed : 8 + speed * 1.5;
+  const following = others.some((o) => !!o && o.ahead > 0 && o.ahead < followM && Math.abs(o.side) < 2.8);
   // Following, it brakes earlier (followBrake, safety); attacking, less so (attackFollowBrake): braking that much
   // earlier gave away every metre it gained in the corners (AI overtaking card).
   const ovb = cfg.overtaking ?? OVERTAKING_OFF;
-  let late = (mistakeNow === 'lateBrake' ? mk.lateBrakeMul : 1) * (following ? (fw && !pit ? fw.followBrake : cfg.racecraft?.enabled && st.craft === 'attack' && !pit ? ovb.attackFollowBrake : 0.8) : 1);
+  let late = (mistakeNow === 'lateBrake' ? mk.lateBrakeMul : 1) * (following ? (fw && fwTight && !pit ? fw.followBrake : cfg.racecraft?.enabled && st.craft === 'attack' && !pit ? ovb.attackFollowBrake : 0.8) : 1);
   /** Braking it plans with at speed v: each axle gives the lesser of its brake share and its grip. */
   const bias = phys.brakes.frontBias, wf = phys.car.weightFront, brakeF = phys.brakes.maxForceN * stats.brakes;
   const brakeA = (v: number) => {
@@ -930,8 +979,24 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     allowed = prof.at(idx(best + ahead)) * Math.sqrt(Math.max(0.05, tyre)) * st.trust * push * backOff;
     diagPush = push;
     if (cfg.predict) { profN = carProfile(line, car, ctx, preset); profI = rc ? carProfile(rc.paths[2], car, ctx, preset) : undefined; profScale = Math.sqrt(Math.max(0.05, tyre)) * st.trust; }
-    for (let q = 1, look = Math.ceil((speed * 6) / SPACING_M); q <= look; q++) if (prof.at(idx(best + q)) < speed * 0.9) { brakeInSec = (q * SPACING_M) / Math.max(1, speed); brakingSoon = brakeInSec <= 3; break; }
+    for (let q = 1, look = Math.ceil((speed * 6) / SPACING_M); q <= look; q++) if (prof.at(idx(best + q)) < speed * 0.9) { brakeInSec = (q * SPACING_M) / Math.max(1, speed); brakingSoon = brakeInSec <= (sc ? scaleSec(sc.brakeSoon, phys.car.lengthM, speed) : 3); break; }
     st.brakeInSec = brakeInSec;
+    // Oxford scale (round 8): this car's pace advantage on the car ahead in line (within 40 m): that car's speed over
+    // this car's own profile where it's near its limit (within 15%: corners, braking), smoothed over paceTauSec;
+    // with nobody ahead it relaxes back to 1 (no advantage).
+    if (sc && profN) {
+      let r: number | undefined, nearest = 40;
+      let any = false;
+      for (const o of others) {
+        if (!o || !(o.ahead > 0) || o.ahead >= nearest || Math.abs(o.side) > phys.car.widthM + 0.5) continue;
+        nearest = o.ahead; any = true; r = undefined;
+        const pv = profN[idx(best + Math.round(o.ahead / SPACING_M))]! * profScale;
+        if (pv > 5 && pv < o.along * 1.15) r = clamp(o.along / pv, 0.7, 1.1);
+      }
+      const k = Math.min(1, TICK_DT / Math.max(TICK_DT, sc.follow.paceTauSec ?? 3)), p0 = st.pace ?? 1;
+      if (r !== undefined) st.pace = p0 + (r - p0) * k;
+      else if (!any) st.pace = p0 + (1 - p0) * k;
+    }
     // Coasting decel ~ aero drag (+ a little rolling resistance). Two uses, both short:
     //  - a SMALL drop ahead (a fast kink, <= coastMaxDropMps): coast down to it instead of braking at all;
     //  - a real braking zone: lift liftBeforeBrakeSec before the braking point, then brake.
@@ -1021,7 +1086,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   const eager = towCfg.aiTowEagerness[presetName ?? ''] ?? towCfg.aiTowEagerness.default ?? 0;
   if (!pit && straightAhead && eager > 0 && !st.mistake) {
     let towBest = Infinity, towSide = 0;
-    for (const o of others) if (o && o.ahead >= towCfg.tow.minRangeM && o.ahead <= towCfg.tow.maxRangeM && Math.abs(o.side) < 4 && o.ahead < towBest) { towBest = o.ahead; towSide = o.side; }
+    const tr = towRange(towCfg, phys.car.lengthM);
+    for (const o of others) if (o && o.ahead >= tr.minM && o.ahead <= tr.maxM && Math.abs(o.side) < 4 && o.ahead < towBest) { towBest = o.ahead; towSide = o.side; }
     if (towBest < Infinity) wantOffset = clamp((crossErr + towSide) * eager, -4, 4);
   }
   // Cars alongside (overlapping lengthwise), tracked on EACH side: 3-wide is fine as long as everyone
@@ -1421,7 +1487,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   const racing = !race || race.phase === 'racing';
   // Deploy only where it helps a pass and doesn't just run it into the gearbox: closing from 12 m up to the
   // tow range. (Deploying once alongside too raised ai-run contacts ~20% over 4 seeds; closing-only ~5%.)
-  const deployTarget = others.some((o) => !!o && ((o.ahead >= 12 && o.ahead <= towCfg.tow.maxRangeM && Math.abs(o.side) < 3.5)));
+  const deployMin = sc ? sc.deployMinCars * phys.car.lengthM : 12, deployMax = towRange(towCfg, phys.car.lengthM).maxM;
+  const deployTarget = others.some((o) => !!o && ((o.ahead >= deployMin && o.ahead <= deployMax && Math.abs(o.side) < 3.5)));
   const craftOk = !cfg.racecraft?.enabled || st.craft === 'attack' || st.craft === 'defend';
   const deployOpen = ov.deployBrakeSec === undefined ? !brakingSoon : brakeInSec > ov.deployBrakeSec;
   const deploy = racing && !pit && craftOk && (deployTarget || st.craft === 'defend') && straightAhead && deployOpen && throttle > 0.9; // not into a braking zone

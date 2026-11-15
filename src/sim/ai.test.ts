@@ -4,9 +4,10 @@
 import { describe, expect, it } from 'vitest';
 import physicsJson from '../../tools/fixtures/physics-baseline.json';
 import aiJson from '../../tools/fixtures/ai-baseline.json';
+import liveAiJson from '../../config/ai.json';
 import slipstreamJson from '../../tools/fixtures/slipstream-baseline.json';
 import { loadTrackNode, simContextNode } from '../../tools/load-track-node';
-import { aiDrive, aiInputSource, buildRacingLine, createWorld, newAiState, step, type AiConfig, type PhysicsConfig, type WorldState } from './index';
+import { aiDrive, aiInputSource, buildRacingLine, createWorld, newAiState, oxfordScaled, scaleSec, step, type AiConfig, type PhysicsConfig, type WorldState } from './index';
 /** Slow, whole-race tests get a longer time limit: a busy machine (a dev server running) can push them past 5 s. */
 const SLOW_MS = 60_000;
 
@@ -76,6 +77,53 @@ describe('tyre wear by axle (AI overtaking round 4)', () => {
       w = step(worn, [mean.input], ctx);
     }
     expect(slower).toBeGreaterThan(60);
+  });
+});
+
+describe('Oxford scale switch (round 8: ai.scale.oxford)', () => {
+  // The live ai.json (its scale block's windows name the live sections).
+  const lcfg = liveAiJson as unknown as AiConfig, live = lcfg.scale!.oxford!, lhard = lcfg.presets.hard!;
+  const on: AiConfig = { ...lcfg, scale: { oxford: { ...live, enabled: true } } };
+  it('turns a TRACK window in seconds into car lengths + a small speed term', () => {
+    const v = 150 / 3.6, L = ctx.physics.car.lengthM;
+    const s = oxfordScaled(lcfg, { ...live, enabled: true }, v, L);
+    const [a, b] = live.windows['racecraft.attackGapSec']!;
+    expect(s.racecraft!.attackGapSec * v).toBeCloseTo(a * L + b * v, 9);
+    expect(scaleSec([2, 0.25], L, 0)).toBeCloseTo((2 * L) / 5 + 0.25, 9); // speed floored at 5 m/s
+    expect(lcfg.racecraft!.attackGapSec).toBe(1); // the config itself is untouched
+  });
+  it('switched off (enabled false) drives exactly as without the block, both brains, for a whole duel', { timeout: SLOW_MS }, () => {
+    const race = (c: AiConfig) => {
+      let w: WorldState = createWorld(ctx, 2);
+      const ds = [0, 1].map((i) => aiInputSource(i, () => ({ world: w, ctx, line }), () => lhard, () => c, 5 + i));
+      for (let t = 0; t < 60 * 15; t++) w = step(w, ds.map((d) => d.read(w.tick)), ctx);
+      return w;
+    };
+    for (const brain of ['rules', 'lookahead'] as const) {
+      const base = { ...lcfg, brain } as AiConfig;
+      const { scale: _drop, ...without } = base;
+      expect(race({ ...base, scale: { oxford: { ...live, enabled: false } } })).toEqual(race(without as AiConfig));
+    }
+  });
+  it('a car in a train (no pace advantage) keeps about a car length; a clearly quicker one sees its advantage', { timeout: SLOW_MS }, () => {
+    const duel = (lead: typeof lhard) => {
+      let w: WorldState = createWorld(ctx, 2);
+      const ds = [aiInputSource(0, () => ({ world: w, ctx, line }), () => lead, () => on, 1), aiInputSource(1, () => ({ world: w, ctx, line }), () => ({ ...lhard, mistakesPerMin: 0 }), () => on, 2)];
+      const gaps: number[] = [];
+      for (let t = 0; t < 60 * 40; t++) {
+        w = step(w, ds.map((d) => d.read(w.tick)), ctx);
+        const a = w.cars[1]!, b = w.cars[0]!, hx = Math.sin(a.heading), hy = -Math.cos(a.heading);
+        const lon = (b.x - a.x) * hx + (b.y - a.y) * hy, lat = -(b.x - a.x) * hy + (b.y - a.y) * hx;
+        if (t > 600 && lon > 0 && lon < 40 && Math.abs(lat) < 2.2) gaps.push(lon - ctx.physics.car.lengthM);
+      }
+      gaps.sort((x, y) => x - y);
+      return { median: gaps[Math.floor(gaps.length / 2)] ?? Infinity, pace: ds[1]!.state.pace ?? 1 };
+    };
+    const train = duel({ ...lhard, mistakesPerMin: 0 });
+    expect(train.median).toBeGreaterThan(0.8 * ctx.physics.car.lengthM);
+    expect(1 - train.pace).toBeLessThan(live.follow.paceAdvMin!);
+    const quicker = duel({ ...lhard, cornerMargin: lhard.cornerMargin * 0.9, brakeMargin: lhard.brakeMargin * 0.9, mistakesPerMin: 0 });
+    expect(1 - quicker.pace).toBeGreaterThan(live.follow.paceAdvMin!);
   });
 });
 

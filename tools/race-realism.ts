@@ -123,7 +123,7 @@ function runRace(job: Job, builds: CarBuild[], presets: AiPreset[], grid: number
   const fCfg: AiConfig = { ...cfg, brain: 'rules' };
   // (No dirty-air tyre wear on the formation lap: behind a safety car it costs nothing; at 13x wear, one lap in line
   // took 7% off the follower's rears before the duel began.)
-  const fCtx: SimContext = { ...ctx, slipstream: { ...ctx.slipstream, dirtyAir: { ...ctx.slipstream.dirtyAir, wearMul: 0 } } };
+  const fCtx: SimContext = ctx; // (round 8: no dirty-air wear multiplier any more, so the formation lap needs no override)
   const drivers: Drivers = builds.map((_, i) => aiInputSource(i, () => ({ world: w, ctx, line }), () => (form() ? formPre(i) : presets[i]!), () => (form() && i === fm!.attacker ? fCfg : cfg), job.seed * 1000 + i));
   const log = contactLog(ctx);
   const passes: PassEv[] = [], stuck: StuckEv[] = [], lapping: { lapper: number; tick: number; lap: number }[] = [];

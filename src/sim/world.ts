@@ -10,7 +10,7 @@ import type { SimTrack, WallChain } from './track';
 import { boxAt, surfaceAt } from './track';
 import { newQualiState, qualiHolds, retireQualiCar, updateQuali } from './quali';
 import { gridOrder, newRaceState, raceHolds, updateRace, type RaceConfig } from './race';
-import { wakeEffects, type SlipstreamConfig } from './slipstream';
+import { trailOn, updateTrail, wakeEffects, type SlipstreamConfig } from './slipstream';
 import { newTiming, updateTiming, type TimingEvent } from './timing';
 import type { CarBuild, CarInput, CarState, ContactConfig, Pose, Rules, SessionSettings, SimEvent, WheelState, Wheels, WorldState } from './types';
 import { NEUTRAL_INPUT } from './types';
@@ -495,11 +495,9 @@ function updateConsumables(car: CarState, forces: Wheels<WheelForces>, ctx: SimC
   // Practice (ownBox -1): any box. Race: only the car's own box; someone else's does nothing.
   const service = car.inPitBox && kph < cfg.fuel.pitServiceMaxKph && (ownBox < 0 || car.pitBox === ownBox);
   // Tyre pressure (setup), the compound, and race-length scaling.
-  // ...and dirty air (Race noise card: following closely through corners costs tyre, not just downforce).
-  const dirtyWear = 1 + (ctx.slipstream.dirtyAir.wearMul ?? 0) * (car.dirtyAir / Math.max(1e-6, ctx.slipstream.dirtyAir.maxDownforceLoss));
   // (Inters and wets overheat on a dry track: the water under the car decides how much.)
   const waterHere = surface ? waterAt(surface, car.x, car.y) : 0;
-  const wearMul = setupEffects(car.build.setup, ctx.catalog).wear * compoundWear(car.compound, ctx.strategy, waterHere) * scale * dirtyWear;
+  const wearMul = setupEffects(car.build.setup, ctx.catalog).wear * compoundWear(car.compound, ctx.strategy, waterHere) * scale;
 
   const wheels = car.wheels.map((wheel, w) => {
     let dw = cfg.wear.cornerPerSec * v4 * (Math.abs(forces[w]!.lat) / quarterWeight); // by actual lateral load
@@ -593,7 +591,7 @@ export function step(world0: WorldState, inputs: readonly CarInput[], ctx: SimCo
   // In qualifying, cars waiting to leave the pit lane (and retired ones) are held the same way.
   const raceHeld = raceHolds(world.race);
   const controls = world.cars.map((car, i) => rampControls(car.controls, raceHeld || resets.held[i] || qualiHolds(world.quali, i, world.tick) ? NEUTRAL_INPUT : (inputs[i] ?? NEUTRAL_INPUT), ctx.physics, dt));
-  const wake = wakeEffects(world.cars, ctx.physics.car.widthM, ctx.slipstream);
+  const wake = wakeEffects(world.cars, ctx.physics.car.widthM, ctx.slipstream, ctx.physics.car.lengthM);
   const damageMode = world.settings?.damage ?? 'off';
   // Race length (Race strategy card): fuel burn and tyre wear scaled up for a short race, if set.
   const scale = consumableScale(world.settings?.raceLength, world.race?.laps, ctx.strategy);
@@ -624,6 +622,8 @@ export function step(world0: WorldState, inputs: readonly CarInput[], ctx: SimCo
       pitBox: pitBoxUnder(b, ctx),
       tow: wake.tow[i]!,
       dirtyAir: wake.dirtyAir[i]!,
+      // Wake model card: the car's path trail (plain state; the wake is rebuilt from it every tick).
+      ...(trailOn(ctx.slipstream) ? { trail: updateTrail(car.trail, b.x, b.y, Math.hypot(b.vx, b.vy), ctx.slipstream.trail, ctx.physics.car.lengthM) } : {}),
     };
     const timingEvents: TimingEvent[] = [];
     const timing = updateTiming(

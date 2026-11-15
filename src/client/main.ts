@@ -1,5 +1,5 @@
 import { aiStartCompound, computeExitLine, rainAt, waterAt, wheelPositions, shower, consumableScale, defaultPitPlan, offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type CarSetup, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
-import { drawMask, drawTrackData, drawWalls, drawWheels } from './debug-draw';
+import { drawMask, drawTrackData, drawTrails, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
 import { startLoop } from './loop';
@@ -790,6 +790,7 @@ async function main(): Promise<void> {
             drawWalls(c, mask.walls, lw);
             if (!editor) drawTrackData(c, json, lw);
             drawWheels(c, prev, curr, alpha, physics, json.pxPerMeter, lw);
+            if (debug) drawTrails(c, curr, physics, json.pxPerMeter, lw, slipstream.trail?.sideZeroWidths);
           }
           // Race: outline your own pit box while you're in the pit lane.
           const me = curr.cars[0], myBox = curr.race?.cars[0]?.box ?? -1;
