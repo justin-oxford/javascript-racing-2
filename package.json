@@ -37,7 +37,8 @@
     "optimize-exit-line": "tsx tools/optimize-exit-line.ts",
     "noise-probe": "tsx tools/noise-probe.ts",
     "weather-probe": "tsx tools/weather-probe.ts",
-    "turn-probe": "tsx tools/turn-probe.ts"
+    "turn-probe": "tsx tools/turn-probe.ts",
+    "race-realism": "tsx tools/race-realism.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
