@@ -5,7 +5,7 @@
 // Usage: npm run race-realism -- [--brain rules|lookahead|rules,lookahead] [--seeds 20] [--quick] [--jobs 15]
 //          [--tests reverse,pacegrid,long,ladder,defence,split,start] [--set ai.lookahead.x=1 ...] [--out file.json]
 //   --quick: fewer seeds and laps (for a fast look while working; the report uses the full run).
-//   --set: as ai-run (a config number or word for this run, every worker).
+//   --set: as ai-run (a config number or word for this run, every worker; "unset" removes the key).
 // Worker mode (internal): --worker '<job json>' prints one RESULT line.
 //
 // "Pace" = each car's solo lap (alone, its own driver, no mistakes, best of laps 2-3), measured headless, so it is team
@@ -54,7 +54,8 @@ let ctxCache: { id: string; ctx: SimContext; line: RacingLine; cfg: AiConfig } |
 function setup(job: Job) {
   if (ctxCache?.id === job.track) return ctxCache;
   const loaded = loadTrackNode(job.track), ctx = simContextNode(loaded), cfg = structuredClone(aiJson) as unknown as AiConfig;
-  const setPath = (root: Record<string, unknown>, path: string[], value: number | string) => { let o = root; for (const k of path.slice(0, -1)) o = (o[k] ??= {}) as Record<string, unknown>; o[path.at(-1)!] = value; };
+  // (value "unset" removes the key: a round-6 switch back to off.)
+  const setPath = (root: Record<string, unknown>, path: string[], value: number | string) => { let o = root; for (const k of path.slice(0, -1)) o = (o[k] ??= {}) as Record<string, unknown>; if (value === 'unset') delete o[path.at(-1)!]; else o[path.at(-1)!] = value; };
   for (const s of SETS) {
     const [path, v] = s.split('=') as [string, string];
     const [sec, ...rest] = path.split('.');
@@ -131,11 +132,16 @@ function runRace(job: Job, builds: CarBuild[], presets: AiPreset[], grid: number
   // Duel (defence quality): the defender's lateral moves away from the line per straight, early brakes.
   const dq = { straights: 0, multiMove: 0, unthreatMoves: 0, threatMoves: 0, earlyBrakes: 0, earlyBrakeHits: 0, defLapsClose: [] as number[], defLapsAll: [] as number[], closeLaps: 0, lapsCounted: 0 };
   let dMoves = 0, dAnchor = 0, dDir = 0, dLastBrake = -1e9, dEarlyAt = -1e9, dThreat = false;
+  let closeLaps = 0, lapsCounted = 0;
   const maxTicks = TICK * (o.maxSec ?? job.laps * 60 + 300);
   for (let tick = 0; tick < maxTicks; tick++) {
     w = step(w, drivers.map((d) => d.read(w.tick)), ctx);
     log.tick(w);
-    const r = w.race!;
+    const r = w.race!, r0 = r;
+    for (const e of w.events) if (e.type === 'lap' && o.duel && e.car === o.duel.defender && e.lap > 1) {
+      const A = o.duel.attacker, gapM = (r0.cars[e.car]!.progress - r0.cars[A]!.progress) * L, v = Math.max(5, Math.hypot(w.cars[e.car]!.vx, w.cars[e.car]!.vy));
+      lapsCounted++; if (gapM > 0 && gapM / v < 1) closeLaps++;
+    }
     for (const e of w.events) if (e.type === 'lap') {
       laps[e.car]!.push({ time: e.invalid ? NaN : e.time, lap: e.lap, pit: pitThisLap[e.car]!, lapped: lappedThisLap[e.car]! });
       pitThisLap[e.car] = false; lappedThisLap[e.car] = 0;
@@ -149,7 +155,7 @@ function runRace(job: Job, builds: CarBuild[], presets: AiPreset[], grid: number
       if (c.carContact) contactTick[i] = tick;
       if (st.stuckEvents > stuckSeen[i]!) {
         stuckSeen[i] = st.stuckEvents;
-        const cause = prog[i]! < 1 ? 'lap 1' : tick - lastMistakeTick[i]! < TICK * 8 ? `after ${st.lastMistake}` : tick - contactTick[i]! < TICK * 3 ? 'car contact' : c.wallContact ? 'wall' : 'none';
+        const cause = prog[i]! < 1 ? 'lap 1' : tick - lastMistakeTick[i]! < TICK * 8 ? `after ${st.lastMistake || 'a recovery'}` : tick - contactTick[i]! < TICK * 3 ? 'car contact' : c.wallContact ? 'wall' : 'none';
         stuck.push({ car: i, tick, cause });
       }
       if (posAtLap1[i]! < 0 && prog[i]! >= 1) posAtLap1[i] = r.order.indexOf(i);
@@ -237,7 +243,7 @@ function runRace(job: Job, builds: CarBuild[], presets: AiPreset[], grid: number
   // Heavy hits inside a cluster of 3+ cars.
   const heavyInc = log.incidents.filter((i) => i.peakMps >= log.thresholdMps);
   const clusterHeavy = heavyInc.filter((inc) => { const s = snaps.reduce((b, x) => (Math.abs(x.tick - inc.startTick) < Math.abs(b.tick - inc.startTick) ? x : b), snaps[0]!); const pa = s.p[inc.a]!; return s.p.filter((p) => Math.abs(p - pa) * L < 15).length >= 3; }).length;
-  return { w, drivers, passes, stuck, lapping, laps, posAtLap1, t1Abreast, heavy: heavyInc.length, taps: log.taps, clusterHeavy, incidents: log.incidents, dq };
+  return { w, drivers, passes, stuck, lapping, laps, posAtLap1, t1Abreast, closeLaps, lapsCounted, heavy: heavyInc.length, taps: log.taps, clusterHeavy, incidents: log.incidents, dq };
 }
 
 /** Race metrics every test reports. */
@@ -305,7 +311,7 @@ function runJob(job: Job): Record<string, unknown> {
       const lap = (f: number) => soloPace(ctx, line, cfg, build, { ...slow(f), mistakesPerMin: 0 }, 7).best;
       const l0 = lap(1);
       let f = 1;
-      if (gap > 0) { let lo = 0.85, hi = 1; for (let k = 0; k < 9; k++) { const mid = (lo + hi) / 2; if (lap(mid) - l0 > gap) lo = mid; else hi = mid; } f = (lo + hi) / 2; }
+      if (gap > 0) { let lo = 0.6, hi = 1; for (let k = 0; k < 9; k++) { const mid = (lo + hi) / 2; if (lap(mid) - l0 > gap) lo = mid; else hi = mid; } f = (lo + hi) / 2; }
       const realGap = lap(f) - l0;
       const defPreset = slow(f), defSolo = soloPace(ctx, line, cfg, build, defPreset, job.seed * 1000 + 1, job.laps);
       // Car 0 attacker (slot 2), car 1 defender (pole).
@@ -314,11 +320,12 @@ function runJob(job: Job): Record<string, unknown> {
       const after1 = res.passes.filter((p) => p.lap >= 1 && p.lap < 6 && p.winner === 0);
       const startSwap = res.posAtLap1[0] === 0;
       const defLaps = res.laps[1]!.filter((l) => l.lap > 1 && Number.isFinite(l.time)).map((l) => l.time);
+      const closeShare = res.closeLaps / Math.max(1, res.lapsCounted);
       return {
         ...common(res), gap: realGap, f, startSwap,
         passedIn5: !startSwap && after1.length > 0, passes: res.passes.filter((p) => p.lap >= 1).length,
         passCauses: res.passes.filter((p) => p.lap >= 1).map((p) => p.cause),
-        defCost: median(defLaps) - median(defSolo.laps.filter((_, k) => k >= 0)), finalAhead: prog(0) > prog(1),
+        closeShare, defCost: median(defLaps) - median(defSolo.laps.filter((_, k) => k >= 0)), finalAhead: prog(0) > prog(1),
         dq: res.dq,
       };
     }
@@ -427,8 +434,8 @@ function jobsFor(brain: string, seeds: number, quick: boolean, tests: Set<string
   }
   if (tests.has('pacegrid')) for (const seed of S(seeds)) J.push({ test: 'pacegrid', seed, brain, track: 'oxford', laps: raceLaps, cars: 10 });
   if (tests.has('long')) for (const seed of S(quick ? 2 : 8)) J.push({ test: 'long', seed, brain, track: 'oxford', laps: quick ? 30 : 100, cars: 10 });
-  if (tests.has('ladder')) for (const gap of [0.2, 0.5, 1, 2]) for (const seed of S(seeds)) J.push({ test: 'ladder', seed, brain, track: 'oxford', laps: 7, cars: 2, p: { gap } });
-  if (tests.has('defence')) for (const seed of S(seeds)) J.push({ test: 'defence', seed, brain, track: 'oxford', laps: 11, cars: 2, p: { gap: 0 } });
+  if (tests.has('ladder')) for (const gap of [0.2, 0.5, 1, 2]) for (const seed of S(seeds * 2)) J.push({ test: 'ladder', seed, brain, track: 'oxford', laps: 7, cars: 2, p: { gap } });
+  if (tests.has('defence')) for (const seed of S(seeds * 2)) J.push({ test: 'defence', seed, brain, track: 'oxford', laps: 11, cars: 2, p: { gap: 0 } });
   if (tests.has('split')) for (const wide of [1, 0]) for (const seed of S(seeds)) J.push({ test: 'split', seed, brain, track: 'oxford', laps: 1, cars: 3, p: { wide } });
   if (tests.has('start')) {
     for (const seed of S(seeds)) J.push({ test: 'start', seed: seed + 100, brain, track: 'oxford', laps: 3, cars: 10 });
@@ -517,6 +524,7 @@ function summarise(results: { job: Job; out: Record<string, unknown> | undefined
     const causes = df.flatMap((o) => o.passCauses as string[]), mist = causes.filter((c) => c === 'mistake' || c === 'pit').length / Math.max(1, causes.length);
     add('5. Equal-car defence', 'races with a pass (10 laps)', 'rare (≤ 30%)', `${pct(withPass)} (n ${df.length}; causes: ${count(causes)})`, verdict(withPass <= 0.3));
     add('5. Equal-car defence', 'passes after a mistake / pit', 'mostly (≥ 50%)', causes.length ? pct(mist) : 'no passes', causes.length ? verdict(mist >= 0.5) : 'PASS');
+    add('5. Equal-car defence', 'laps with the attacker within 1 s at the line', 'the setup (most laps)', spread(df.map((o) => o.closeShare as number), pct), 'INFO');
     add('5. Equal-car defence', "defender's lap time vs its solo (s)", 'measurable (≥ +0.05 s)', spread(df.map((o) => o.defCost as number), f2), verdict(median(df.map((o) => o.defCost as number)) >= 0.05));
   }
   // 6. Defence quality (all duels).

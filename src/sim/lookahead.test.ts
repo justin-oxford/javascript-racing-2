@@ -7,7 +7,7 @@ import slipstreamJson from '../../tools/fixtures/slipstream-baseline.json';
 import raceJson from '../../config/race.json';
 import { catalog, loadTrackNode, simContextNode } from '../../tools/load-track-node';
 import { aiInputSource, buildRacingLine, createRaceWorld, step, type AiConfig, type PhysicsConfig, type RaceConfig, type SimContext } from './index';
-import { planMove, type LookaheadConfig, type PlanCar, type PlanInput } from './lookahead';
+import { planDefence, planMove, type LookaheadConfig, type PlanCar, type PlanInput } from './lookahead';
 
 /** Slow, whole-race tests get a longer time limit: a busy machine (a dev server running) can push them past 5 s. */
 const SLOW_MS = 60_000;
@@ -44,6 +44,43 @@ describe('look-ahead planner', () => {
     const a = planMove(inp, cfg)!, b = planMove(inp, cfg)!;
     expect(b).toEqual(a);
     expect(planMove(inp, cfg, a)).toMatchObject({ lane: a.lane, gi: a.gi, fullBrake: a.fullBrake });
+  });
+});
+
+describe('look-ahead round 6', () => {
+  it('safety beats hysteresis: a held lane that a car is predicted to move into is dropped', () => {
+    // Pulled out right past a slower car; a third car alongside-ahead on the right drifts across into that lane.
+    const base = straight(45, [{ ahead: 10, side: 0, along: 38 }], 70);
+    const held = planMove(base, cfg)!;
+    expect(held.lane).not.toBe(0);
+    const side = Math.sign(held.offset);
+    const closing: PlanInput = { ...base, others: [{ ahead: 10, side: 0, along: 38 }, { ahead: 4, side: side * 5, along: 40, across: -side * 4 }] };
+    const next = planMove(closing, cfg, held)!;
+    expect(next.lane === held.lane && next.gi === held.gi && next.fullBrake === held.fullBrake).toBe(false);
+  });
+
+  it('predicts an unsettled (spun) car ahead as slow to get going: no tight gap behind it', () => {
+    const p = planMove(straight(30, [{ ahead: 20, side: 0, along: 2, hazard: true }], 60), cfg)!;
+    expect(p.gi === 0 || p.lane !== 0).toBe(true);
+  });
+
+  it('start mode: given lanes across the road, it moves only when that gains something', () => {
+    // Nobody in the way two lanes over: it stays in its own lane rather than cross the road.
+    const own: PlanInput = { ...straight(20, [{ ahead: 30, side: 0, along: 25 }]), lat: 0, laneOffsets: [0, -4.6, -2.3, 2.3, 4.6], moveCostM: 0.5 };
+    expect(planMove(own, cfg)!.offset).toBe(0);
+    // A slow car right ahead in its lane: it pulls out (one lane, the cheaper move) to get by.
+    const blocked: PlanInput = { ...own, others: [{ ahead: 8, side: 0, along: 5 }] };
+    expect(Math.abs(planMove(blocked, cfg)!.offset)).toBeGreaterThan(1);
+  });
+
+  it('look-behind: covers when the attacker will be alongside at turn-in, holds when it will not', () => {
+    const d = cfg.defend!;
+    const close = planDefence({ behindM: 7, closingMps: 3, brakeInSec: 1.5, speed: 45, overlapM: 3.5, aggression: 0.5, insideLossSec: 0.05, tow: true }, d);
+    const far = planDefence({ behindM: 30, closingMps: 0.5, brakeInSec: 1.5, speed: 45, overlapM: 3.5, aggression: 0.5, insideLossSec: 0.05, tow: false }, d);
+    expect(close.cover).toBe(true);
+    expect(far.cover).toBe(false);
+    // A very costly inside line: holds even when threatened (keeps the place for the least time lost).
+    expect(planDefence({ behindM: 7, closingMps: 3, brakeInSec: 1.5, speed: 45, overlapM: 3.5, aggression: 0.5, insideLossSec: 1, tow: true }, d).cover).toBe(false);
   });
 });
 

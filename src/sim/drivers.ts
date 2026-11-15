@@ -40,6 +40,7 @@ export function driverPreset(p: AiPreset, d: DriverStats | undefined, spread: nu
     mistakesPerMin: Math.max(0, p.mistakesPerMin * (1 - 0.8 * cons)),
     noise: Math.max(0, p.noise * (1 - 0.6 * cons)),
     aggression: d.aggression / 100,
+    consistency: d.consistency / 100,
     racecraft: d.racecraft / 100,
     tyreCare: d.tyres / 100,
   };

@@ -7,7 +7,7 @@ import { buildStats } from './car-config';
 import { damageGrip, isDamaged } from './damage';
 import { blueFlag, chooseMode, concedes, coverChance, keepGoodExits, lineFor, LINE_IDS, lineOffsets, offsetPath, offsetsFromPoints, otherHasRightOfWay, type CraftMode, type DefenceConfig, type LineId, type OvertakingConfig, type RacecraftConfig } from './racecraft';
 import { speedProfile, transferGripFactor } from './line-optimizer';
-import { planMove, type LookaheadConfig, type Plan } from './lookahead';
+import { planDefence, planMove, type LookaheadConfig, type Plan, type PlanCar } from './lookahead';
 import { aiCompound, compoundGrip, compoundWaterGrip, consumableScale, FUEL_TO_END, fuelGrip, stopDone, type Compound, type PitPlan } from './strategy';
 import { waterAt } from './weather';
 import type { SimTrack } from './track';
@@ -31,6 +31,8 @@ export interface AiPreset {
   aggression?: number;
   racecraft?: number;
   tyreCare?: number;
+  /** Driver CONSISTENCY 0..1 (roster), for the start mode's launches. */
+  consistency?: number;
 }
 
 export interface AiConfig {
@@ -433,6 +435,14 @@ export interface AiState {
   /** The look-ahead brain's current choice (undefined: none, the rules drive) and ticks to its next look. */
   plan?: Plan | undefined;
   planTicks?: number;
+  /** Round 6: ticks the car has been settled (for the planner after a mistake / spin), ATTACK held only by the stay gap
+   *  (no close-up from that), and the look-behind defender's last choice. */
+  settled?: number;
+  attackStay?: boolean;
+  defPlan?: { cover: boolean; p: number } | undefined;
+  /** Start mode (part D): its launch ('good' / 'spin' / 'bog') and whether lap one's start mode has handed over. */
+  launch?: 'good' | 'spin' | 'bog';
+  startDone?: boolean;
   diag: { push: number; late: number; closeUp: boolean; following: boolean; profileV: number; trafficV: number; engineMode: 'save' | 'standard' | 'push'; deploy: boolean;
     /** Deploy's conditions this tick: racecraft mode allows it, a car 12 m..tow range ahead, straight ahead, no braking zone within 3 s, throttle > 0.9. */
     dz?: [boolean, boolean, boolean, boolean, boolean] };
@@ -556,6 +566,13 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
       st.rng = next;
       const s0 = cfg.start ?? { reactionMinSec: 0.2, reactionMaxSec: 0.2 };
       st.launchTick = race.phaseTick + Math.round((s0.reactionMinSec + r0 * (s0.reactionMaxSec - s0.reactionMinSec)) / TICK_DT);
+      // START MODE (look-ahead brain, round 6 part D): a seeded launch from CONSISTENCY: good, wheelspin or bogging.
+      const sc = cfg.brain === 'lookahead' ? cfg.lookahead?.start : undefined;
+      if (sc) {
+        const [r1, n1] = rand(st.rng), [r2, n2] = rand(n1);
+        st.rng = n2;
+        st.launch = r1 < sc.badChance * (1.5 - (preset.consistency ?? 0.5)) * 2 ? (r2 < 0.5 ? 'spin' : 'bog') : 'good';
+      }
     }
     if (world.tick < st.launchTick) return { input: { throttle: 0, brake: 0, steer: 0 }, state: st };
   }
@@ -744,15 +761,22 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // Other cars in the path's frame: distance ahead ALONG the line and lateral offset from us across
   // it. (In our own heading's frame a car on the line round a bend looks off to the side.)
   const relSteps = Math.ceil(Math.max(preset.trafficConeM, (speed * speed) / 8 + 30) / SPACING_M);
-  const rel = (other: CarState) => {
+  const rel = (other: CarState, back = 4): PlanCar => {
     let bq = -1, bd = Infinity;
-    for (let d = -4; d <= relSteps; d++) {
+    for (let d = -back; d <= relSteps; d++) {
       if (!path.closed && (best + d < 0 || best + d > n - 1)) continue;
       const q = idx(best + d), v = (path.x[q]! - other.x) ** 2 + (path.y[q]! - other.y) ** 2;
       if (v < bd) { bd = v; bq = d; }
     }
-    if (bq < -3 || bd > 12 * 12) return { ahead: -Infinity, side: 0, along: 0 };
+    if (bq < -(back - 1) || bd > 12 * 12) return { ahead: -Infinity, side: 0, along: 0 };
     const tg = tangent(best + bq);
+    if (back > 4) {
+      // (Planner only.) Its sideways speed across the line, and whether it's unsettled: slow, or pointing well off it.
+      const ov = Math.hypot(other.vx, other.vy), hd = Math.abs(wrap(other.heading - Math.atan2(tg.x, -tg.y)));
+      const proj = (other.x - path.x[idx(best + bq)]!) * tg.x + (other.y - path.y[idx(best + bq)]!) * tg.y;
+      const ownProj = (car.x - path.x[best]!) * tangent(best).x + (car.y - path.y[best]!) * tangent(best).y;
+      return { ahead: bq * SPACING_M + proj - ownProj, side: lateral(best + bq, other.x, other.y) - crossErr, along: other.vx * tg.x + other.vy * tg.y, across: other.vx * -tg.y + other.vy * tg.x, hazard: ov < 4 || hd > 0.5 };
+    }
     const proj = (other.x - path.x[idx(best + bq)]!) * tg.x + (other.y - path.y[idx(best + bq)]!) * tg.y;
     const ownProj = (car.x - path.x[best]!) * tangent(best).x + (car.y - path.y[best]!) * tangent(best).y;
     return { ahead: bq * SPACING_M + proj - ownProj, side: lateral(best + bq, other.x, other.y) - crossErr, along: other.vx * tg.x + other.vy * tg.y };
@@ -774,10 +798,47 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // and whether to brake at the full limit (lookahead.ts); the code below drives it. Not in the pit lane, nor during
   // a mistake or on lap one (no start manners in the model: the rules drive lap one).
   const la = cfg.brain === 'lookahead' ? cfg.lookahead : undefined;
-  if (la && !pit && !st.mistake && (!race || (race.phase === 'racing' && (race.cars[i]?.progress ?? 0) >= 1))) {
+  // Round 6: settled after a mistake / spin / recovery (settleSec pointing along the line and moving) before it plans.
+  if (la?.settleSec !== undefined) {
+    const unsettled = !!st.mistake || st.recoverTicks > 0 || st.stuckTicks > 0 || speed < 3 || Math.abs(wrap(car.heading - pathHeading)) > (la.settleHeadingRad ?? 0.35);
+    st.settled = unsettled ? 0 : (st.settled ?? 0) + 1;
+  }
+  const settledOk = la?.settleSec === undefined || (st.settled ?? 0) >= la.settleSec / TICK_DT;
+  /** Crossovers (part C): if the nearest car ahead in its lane is covering the inside of the coming corner and a straight
+   *  of minStraightM follows it, the exit speed an outside entry on the EXIT line buys over that INSIDE line x gainSec. */
+  const cutbackFor = (cb: { gainSec: number; minStraightM: number }): { cutback?: { side: number; gainM: number } } => {
+    const dcfg = cfg.defence, rcfg = cfg.racecraft;
+    if (!dcfg || !rcfg?.enabled) return {};
+    let q0 = 0; while (q0 < 80 && Math.abs(path.k[idx(best + q0)]!) <= 0.02) q0++;
+    if (q0 >= 80) return {};
+    const turn = Math.sign(path.k[idx(best + q0)]!);
+    let tb: PlanCar | undefined;
+    for (const o of others) if (o && o.ahead > 0 && o.ahead < (la?.rangeM ?? 40) && Math.abs(o.side) < 3 && (!tb || o.ahead < tb.ahead)) tb = o;
+    if (!tb || (tb.side + crossErr) * turn < dcfg.coverDetectM) return {};
+    let qe = q0; while (qe < q0 + 80 && Math.abs(path.k[idx(best + qe)]!) > 0.01) qe++;
+    let qs = qe; while (qs < qe + 200 && Math.abs(path.k[idx(best + qs)]!) < 0.006) qs++;
+    if ((qs - qe) * SPACING_M < cb.minStraightM) return {};
+    const rcl = racecraftLines(line, rcfg, phys.car.widthM / 2, ctx), pN = carProfile(line, car, ctx, preset), pE = carProfile(rcl.paths[1], car, ctx, preset), pI = carProfile(rcl.paths[2], car, ctx, preset);
+    const j = idx(best + qe + 5), gain = Math.max(0, pE[j]! - Math.min(pN[j]!, pI[j]!));
+    return { cutback: { side: -turn, gainM: gain * cb.gainSec } };
+  };
+  // START MODE (part D): lap one from lights out, until the first braking zone is close, the field has spread round it,
+  // or lap one ends; then the rules settle turn one.
+  const sm = la?.start, prog0 = race?.cars[i]?.progress ?? 0;
+  let startMode = false;
+  if (sm && race?.phase === 'racing' && !st.startDone && !pit) {
+    let near = false, brakeSoon = false;
+    for (const o of others) if (o && Number.isFinite(o.ahead) && Math.abs(o.ahead) < sm.spreadM) near = true;
+    const pf0 = carProfile(line, car, ctx, preset);
+    for (let q = 1, look = Math.ceil((Math.max(10, speed) * sm.untilBrakeSec) / SPACING_M); q <= look; q++) if (pf0[idx(best + q)]! < speed * 0.9) { brakeSoon = true; break; }
+    if (prog0 >= 1 || (world.tick - st.launchTick > 30 && (!near || brakeSoon))) st.startDone = true;
+    else startMode = true;
+  }
+  if (la && !pit && !st.mistake && settledOk && (!race || startMode || (race.phase === 'racing' && (race.cars[i]?.progress ?? 0) >= 1))) {
     st.planTicks = (st.planTicks ?? 0) - 1;
     if (st.planTicks <= 0) {
-      st.planTicks = Math.max(1, Math.round(la.evalSec / TICK_DT));
+      const react = la.craftReact ? 1.5 - (preset.racecraft ?? 0.5) : 1;
+      st.planTicks = Math.max(1, Math.round((la.evalSec * react) / TICK_DT));
       const pf = carProfile(line, car, ctx, preset), pScale = Math.sqrt(Math.max(0.05, tyre)) * st.trust;
       const bF = brakeA(speed);
       st.plan = planMove({
@@ -785,12 +846,20 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
         profile: (q) => pf[idx(best + q)]! * pScale, k: (q) => path.k[idx(best + q)]!, roomR: (q) => path.right[idx(best + q)]!, roomL: (q) => path.left[idx(best + q)]!,
         spacingM: SPACING_M, brakeFollow: bF, brakeFull: bF / Math.max(0.1, late), accel: Math.max(1.5, 9 - speed * 0.12),
         safeGapM: phys.car.lengthM + 1 + (cfg.predict?.headwaySec ?? 0.35) * speed, lengthM: phys.car.lengthM, widthM: phys.car.widthM,
-        aggression: preset.aggression ?? 0.5, others,
-      }, la, st.plan);
+        aggression: preset.aggression ?? 0.5,
+        // (Round 6: every nearby car, behind too, with its sideways drift and whether it's unsettled.)
+        others: la.behindM !== undefined ? world.cars.map((o, oi) => (oi === i ? undefined : rel(o, Math.ceil(la.behindM! / SPACING_M) + 2))) : others,
+        // Crossover option (part C): the car ahead covering the inside of a corner before a long straight.
+        ...(la.cutback && !startMode ? cutbackFor(la.cutback) : {}),
+        // Start mode: lanes across the whole road (and where it is now), a cost for each metre moved across.
+        ...(startMode && sm ? { laneOffsets: startLanes(path.left[best]!, path.right[best]!, crossErr, sm.laneStepM), moveCostM: sm.moveCostM } : {}),
+      }, react !== 1 ? { ...la, reactSec: la.reactSec * react } : la, st.plan);
     }
   } else if (st.plan || st.planTicks) { st.plan = undefined; st.planTicks = 0; }
   const plan = st.plan;
   if (plan?.fullBrake && mistakeNow !== 'lateBrake') late = 1;
+  // Start mode, lap one into turn one: AGGRESSION brakes later, caution earlier.
+  if (sm && race && prog0 < 1) late *= 1 + sm.aggrBrake * ((preset.aggression ?? 0.5) - 0.5);
   const pitV = (ctx.rules.pitSpeedLimitKph - pits.pitSpeedMarginKph) / 3.6;
   /** Speed limit at a path point: corner speed, the pit limiter in the lane, a stop at the box. */
   const pointV = (q: number) => {
@@ -899,7 +968,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   // piled the pack up.)
   const lapOne = !!race && (race.cars[i]?.progress ?? 0) < 1;
   const closeSec = lapOne ? ov.lapOneCloseUntilBrakeSec ?? ov.closeUntilBrakeSec : ov.closeUntilBrakeSec;
-  const closeUp = cfg.racecraft?.enabled && st.craft === 'attack' && !pit && brakeInSec > closeSec;
+  // (Round 6: ATTACK held only by the look-ahead's stay gap is margins and deploy, never a close-up attempt.)
+  const closeUp = cfg.racecraft?.enabled && st.craft === 'attack' && !st.attackStay && !pit && brakeInSec > closeSec;
   // With the prediction (round 3: braking planned from the car ahead's own line and speed), the plain following
   // headway can be shorter (predict.headwaySec): the 0.35 s one made a follower drop back as the speed rose out of
   // every corner (the headway grows with speed), so the car behind lost on every exit what it gained in the corner.
@@ -995,6 +1065,16 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
         const [r, nextRng] = rand(st.rng);
         st.rng = nextRng;
         st.defence = !tooLate && r < p ? 'cover' : 'hold';
+        // LOOK-BEHIND (look-ahead brain, round 6 part B): predict the attacker to the braking point instead of a draw:
+        // cover only if holding would likely lose the place, and covering costs less than that (the INSIDE line's time).
+        const dp = la?.defend;
+        if (dp && profN && profI) {
+          let loss = 0;
+          for (let q = 0; q < 100; q++) { const j = idx(best + q), vN = profN[j]! * profScale, vI = Math.min(profN[j]!, profI[j]!) * profScale; loss += SPACING_M * (1 / Math.max(1, vI) - 1 / Math.max(1, vN)); }
+          const plan = planDefence({ behindM: bm, closingMps: c.vx * fx + c.vy * fy - speed, brakeInSec, speed, overlapM: ov.overlapM, aggression: aggr, insideLossSec: loss, tow: c.tow > 0.05 || c.ers.deploying }, dp);
+          st.defence = !tooLate && plan.cover ? 'cover' : 'hold';
+          st.defPlan = { cover: st.defence === 'cover', p: plan.holdLoseP };
+        }
         st.defAgainst = bj;
         st.defAt = world.tick;
         // The apex of the coming corner: its tightest point within ~160 m.
@@ -1150,6 +1230,8 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   }
   // The look-ahead brain's lane (the clamps below still keep it off a car alongside and on the road).
   if (plan && mistakeNow !== 'wide') wantOffset = plan.offset;
+  // Start mode with nothing to plan around: hold its lane (no diving onto the racing line early).
+  else if (startMode && mistakeNow !== 'wide') wantOffset = st.offset;
   const needIn = st.offset > maxR + 0.3 ? -1 : st.offset < -maxL - 0.3 ? 1 : 0; // must move back toward the line
   // LEAVING ROOM (overlap rule, round 2/3): a car overlapped on our INSIDE for the coming corner has the apex; we
   // take a line a car width + sideGapM wide of the racing line rather than turn in on it (the racing line itself
@@ -1262,9 +1344,12 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   const tcSlip = aids.tcSlip * (1 - 0.06 * ((preset.tyreCare ?? 0.5) - 0.5) * 2);
   // A wheelspin mistake: out of a slow corner, traction control off and full throttle.
   // (A half-spin flick goes with a stab of throttle: that's what swaps the rear round.)
-  const spinning = (mistakeNow === 'wheelspin' && speed < mk.wheelspinMaxMps && throttle > 0.3 && !pit) || spinFlick;
+  // Start mode launches: wheelspin (traction control off, full throttle) or bogging, for a moment after lights out.
+  const sinceLaunch = world.tick - st.launchTick, launchWin = !!race && !!sm && !!st.launch && st.launch !== 'good' && sinceLaunch >= 0 && sinceLaunch < (st.launch === 'spin' ? sm.spinSec : sm.bogSec) / TICK_DT;
+  const spinning = (mistakeNow === 'wheelspin' && speed < mk.wheelspinMaxMps && throttle > 0.3 && !pit) || spinFlick || (launchWin && st.launch === 'spin');
   if (spinning) throttle = 1;
   else if (rearUse > tcSlip) throttle *= clamp(1 - (rearUse - tcSlip) / aids.tcRange, 0, 1);
+  if (launchWin && st.launch === 'bog') throttle = Math.min(throttle, sm!.bogThrottle);
   // Facing well off the line at low speed (e.g. after a spin): don't floor it.
   if (Math.abs(err) > 1 && speed < 8) throttle = Math.min(throttle, 0.4);
   // Brake like a driver who knows the car: never press harder than the front tyres can use at this
@@ -1286,7 +1371,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   }
   // RACECRAFT (racecraft.ts): every evalSec, the mode from the race situation (held at least holdSec), the
   // line it wants just ahead, and the blend moving toward it with distance travelled.
-  if (cfg.racecraft?.enabled && !pit) updateCraft(st, world, i, line, cfg.racecraft, others, speed, phys.car.widthM / 2, best, nearL, nearR);
+  if (cfg.racecraft?.enabled && !pit) updateCraft(st, world, i, line, la?.attackStayGapSec !== undefined ? { ...cfg.racecraft, attackStayGapSec: la.attackStayGapSec } : cfg.racecraft, others, speed, phys.car.widthM / 2, best, nearL, nearR);
   // ENGINE MODE + DEPLOY (ers.ts): SAVE when it's saving fuel to reach the flag; PUSH and deploy down a
   // straight while ATTACKING (racecraft) and closing on the car ahead, or DEFENDING with one close behind.
   const racing = !race || race.phase === 'racing';
@@ -1350,6 +1435,10 @@ function updateCraft(st: AiState, world: WorldState, i: number, line: RacingLine
     const dmg = world.settings?.damage === 'realistic' ? Math.max(car.damage.frontWing, car.damage.rearWing, car.damage.left, car.damage.right) : 0;
     const want = chooseMode({ aheadGapSec: aheadM / v, aheadClosing, inTow: car.tow > 0.05, behindGapSec: behindM / v, behindClosing, wear, damage: dmg }, cfg);
     if (want !== st.craft && st.craftHold === 0) { st.craft = want; st.craftHold = Math.round(cfg.holdSec / TICK_DT); }
+    // ATTACK only because it's within the stay gap (not closing, no tow): no close-up from that.
+    // (While the mode's hold timer runs it's still the attack it started as: the close-up as before.)
+    if (st.craft === 'attack') st.attackStay = cfg.attackStayGapSec !== undefined && st.craftHold === 0 && !(aheadM / v < cfg.attackGapSec && aheadClosing) && car.tow <= 0.05;
+    else if (st.attackStay) st.attackStay = false;
   }
   // The line the mode wants ~40 m ahead (so a change starts before the corner it's for).
   const o = craftLines.get(line)?.offsets ?? racecraftLines(line, cfg, halfCarM).offsets;
@@ -1429,4 +1518,11 @@ function tyreForWater(current: Compound, water: number, ctx: SimContext): Compou
 function wrongTyres(current: Compound, water: number, ctx: SimContext): boolean {
   const call = tyreForWater(current, water, ctx);
   return call === 'dry' ? current === 'inter' || current === 'wet' : call !== current;
+}
+
+/** Start mode's lanes: across the whole road at this point (each side's room less 1.5 m), every stepM, and where it is. */
+function startLanes(roomL: number, roomR: number, lat: number, stepM: number): number[] {
+  const out = [lat];
+  for (let o = -Math.max(0, roomL - 1.5); o <= Math.max(0, roomR - 1.5) + 1e-6; o += stepM) out.push(Math.round(o * 10) / 10);
+  return out;
 }
