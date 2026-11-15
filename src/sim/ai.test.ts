@@ -78,3 +78,37 @@ describe('tyre wear by axle (AI overtaking round 4)', () => {
     expect(slower).toBeGreaterThan(60);
   });
 });
+
+describe('following at Oxford scale (round 7: ai.follow)', () => {
+  const follow = { enabled: true, gapLengths: 0.4, headwaySec: 0.04, brakeGapM: 0.75, brakeZoneSec: 1.5, aggrScale: 0.8, followBrake: 1, predictMargin: 0.97, reactSec: 0.15, sideGapM: 0.3, passOffsetM: 2.5 };
+  /** A quicker car (hard) behind a slower one (margins x 0.9) for 40 s: bumper gaps while in line behind it, and contacts. */
+  const duel = (c: AiConfig) => {
+    let w: WorldState = createWorld(ctx, 2);
+    const slow = { ...hard, cornerMargin: hard.cornerMargin * 0.9, brakeMargin: hard.brakeMargin * 0.9, mistakesPerMin: 0 }, fast = { ...hard, mistakesPerMin: 0 };
+    const ds = [aiInputSource(0, () => ({ world: w, ctx, line }), () => slow, () => c, 1), aiInputSource(1, () => ({ world: w, ctx, line }), () => fast, () => c, 2)];
+    const gaps: number[] = [];
+    let hard12 = 0;
+    for (let t = 0; t < 60 * 40; t++) {
+      w = step(w, ds.map((d) => d.read(w.tick)), ctx);
+      const a = w.cars[1]!, b = w.cars[0]!, hx = Math.sin(a.heading), hy = -Math.cos(a.heading);
+      const lon = (b.x - a.x) * hx + (b.y - a.y) * hy, lat = -(b.x - a.x) * hy + (b.y - a.y) * hx;
+      if (t > 600 && lon > 0 && lon < 40 && Math.abs(lat) < 2.2) gaps.push(lon - ctx.physics.car.lengthM);
+      if (a.carContact && Math.hypot(a.vx - b.vx, a.vy - b.vy) >= 12) hard12++;
+    }
+    gaps.sort((x, y) => x - y);
+    return { median: gaps[Math.floor(gaps.length / 2)] ?? Infinity, n: gaps.length, hard12 };
+  };
+  it('follows closer with the switch on (car lengths, not a 0.35 s headway), without heavy hits', { timeout: SLOW_MS }, () => {
+    const off = duel(cfg), on = duel({ ...cfg, follow });
+    expect(on.n).toBeGreaterThan(100);
+    expect(on.median).toBeLessThan(off.median);
+    expect(on.median).toBeLessThan(12);
+    expect(on.hard12).toBe(0);
+  });
+  it('switched off (enabled false) drives exactly as without it', () => {
+    const world = createWorld(ctx, 2);
+    const a = aiDrive(world, 1, newAiState(42), line, ctx, hard, cfg);
+    const b = aiDrive(world, 1, newAiState(42), line, ctx, hard, { ...cfg, follow: { ...follow, enabled: false } });
+    expect(b).toEqual(a);
+  });
+});

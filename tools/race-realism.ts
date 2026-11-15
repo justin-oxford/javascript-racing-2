@@ -7,6 +7,7 @@
 //   --quick: fewer seeds and laps (for a fast look while working; the report uses the full run).
 //   --set: as ai-run (a config number or word for this run, every worker; "unset" removes the key).
 // Worker mode (internal): --worker '<job json>' prints one RESULT line.
+// Debug (worker mode): RRTRACE=1 (duel attacker every 0.25 s, laps RRFROM..RRTO), RRLAP=1 (lap times, wear, modes), RRFORM=1 (formation lap).
 //
 // "Pace" = each car's solo lap (alone, its own driver, no mistakes, best of laps 2-3), measured headless, so it is team
 // stats x driver PACE x setup. Targets are the card's proposals: report against them, don't tune blindly to hit them.
@@ -106,11 +107,24 @@ interface StuckEv { car: number; tick: number; cause: string }
 /**
  * Run a race and record what every test needs. grid[slot] = car. presets per car. Returns the race's events.
  */
-function runRace(job: Job, builds: CarBuild[], presets: AiPreset[], grid: number[] | undefined, o: { maxSec?: number; stopWhen?: (w: WorldState) => boolean; duel?: { attacker: number; defender: number; defOnsets: number[] } } = {}) {
+function runRace(job: Job, builds: CarBuild[], presets: AiPreset[], grid: number[] | undefined, o: { maxSec?: number; stopWhen?: (w: WorldState) => boolean; duel?: { attacker: number; defender: number; defOnsets: number[]; formation?: boolean } } = {}) {
   const { ctx, line, cfg } = setup(job);
   const L = line.length, n = builds.length, turn = turnDirs(line);
   let w: WorldState = createRaceWorld(ctx, builds, { laps: job.laps, seed: job.seed, ...(grid ? { grid } : {}) });
-  const drivers: Drivers = builds.map((_, i) => aiInputSource(i, () => ({ world: w, ctx, line }), () => presets[i]!, () => cfg, job.seed * 1000 + i));
+  // Rolling start (test 5): lap one is a formation lap behind the defender at a safety-car speed (margins x 0.55,
+  // throttle 0.6); the attacker follows in line on the rules (no pass offset, no mistakes). The duel starts at the line.
+  const fm = o.duel?.formation ? o.duel : undefined, form = () => !!fm && (w.race?.cars[fm.defender]?.progress ?? 1) < 1;
+  // (The grid is 2-wide: the attacker starts beside the defender, so it holds back at half throttle until it's in line
+  // behind, a car length and more.)
+  const fPre = presets.map((p, i) => (!fm ? p : i === fm.defender ? { ...p, cornerMargin: p.cornerMargin * 0.55, brakeMargin: p.brakeMargin * 0.55, throttleCap: 0.6, mistakesPerMin: 0 } : { ...p, overtakeOffsetM: 0, mistakesPerMin: 0 }));
+  const fBack = fm ? { ...fPre[fm.attacker]!, throttleCap: 0.4 } : undefined;
+  let fInLine = false;
+  const formPre = (i: number) => { if (!fm || i !== fm.attacker) return fPre[i]!; if (!fInLine && ((w.race?.cars[fm.defender]?.progress ?? 0) - (w.race?.cars[fm.attacker]?.progress ?? 0)) * line.length > ctx.physics.car.lengthM + 1.5) fInLine = true; return fInLine ? fPre[i]! : fBack!; };
+  const fCfg: AiConfig = { ...cfg, brain: 'rules' };
+  // (No dirty-air tyre wear on the formation lap: behind a safety car it costs nothing; at 13x wear, one lap in line
+  // took 7% off the follower's rears before the duel began.)
+  const fCtx: SimContext = { ...ctx, slipstream: { ...ctx.slipstream, dirtyAir: { ...ctx.slipstream.dirtyAir, wearMul: 0 } } };
+  const drivers: Drivers = builds.map((_, i) => aiInputSource(i, () => ({ world: w, ctx, line }), () => (form() ? formPre(i) : presets[i]!), () => (form() && i === fm!.attacker ? fCfg : cfg), job.seed * 1000 + i));
   const log = contactLog(ctx);
   const passes: PassEv[] = [], stuck: StuckEv[] = [], lapping: { lapper: number; tick: number; lap: number }[] = [];
   const pairSign = new Map<number, number>(), lapSign = new Map<number, number>();
@@ -130,23 +144,27 @@ function runRace(job: Job, builds: CarBuild[], presets: AiPreset[], grid: number
   let t1apex = t1q, km = 0; for (let q = t1q; q < t1q + 40 && Math.abs(line.k[q % line.n]!) > 0.01; q++) if (Math.abs(line.k[q % line.n]!) > km) { km = Math.abs(line.k[q % line.n]!); t1apex = q; }
   const t1M = (t1apex * L) / line.n;
   // Duel (defence quality): the defender's lateral moves away from the line per straight, early brakes.
-  const dq = { straights: 0, multiMove: 0, unthreatMoves: 0, threatMoves: 0, earlyBrakes: 0, earlyBrakeHits: 0, defLapsClose: [] as number[], defLapsAll: [] as number[], closeLaps: 0, lapsCounted: 0 };
+  const dq = { straights: 0, multiMove: 0, unthreatMoves: 0, threatMoves: 0, earlyBrakes: 0, earlyBrakeHits: 0, defLapsClose: [] as number[], defLapsAll: [] as number[], closeLaps: 0, lapsCounted: 0, zoneGaps: [] as number[], zoneMin: [] as number[] };
+  let aLastBrake = -1e9, zMin = Infinity, zOpen = false;
   let dMoves = 0, dAnchor = 0, dDir = 0, dLastBrake = -1e9, dEarlyAt = -1e9, dThreat = false;
   let closeLaps = 0, lapsCounted = 0;
   const maxTicks = TICK * (o.maxSec ?? job.laps * 60 + 300);
   for (let tick = 0; tick < maxTicks; tick++) {
-    w = step(w, drivers.map((d) => d.read(w.tick)), ctx);
+    w = step(w, drivers.map((d) => d.read(w.tick)), form() ? fCtx : ctx);
     log.tick(w);
     const r = w.race!, r0 = r;
     for (const e of w.events) if (e.type === 'lap' && o.duel && e.car === o.duel.defender && e.lap > 1) {
       const A = o.duel.attacker, gapM = (r0.cars[e.car]!.progress - r0.cars[A]!.progress) * L, v = Math.max(5, Math.hypot(w.cars[e.car]!.vx, w.cars[e.car]!.vy));
       lapsCounted++; if (gapM > 0 && gapM / v < 1) closeLaps++;
+      if (process.env.RRLAP) console.log(`lap ${e.lap} gapM ${gapM.toFixed(1)} v ${v.toFixed(1)} pD ${r0.cars[e.car]!.progress.toFixed(3)} pA ${r0.cars[A]!.progress.toFixed(3)}`);
     }
     for (const e of w.events) if (e.type === 'lap') {
+      if (process.env.RRLAP) { const st = drivers[e.car]!.state; console.log(`LAP car ${e.car} lap ${e.lap} ${e.time.toFixed(3)} wear ${w.cars[e.car]!.wheels.map((x) => x.wear.toFixed(3)).join(",")} craft ${JSON.stringify(st.craftTicks)} lineChanges ${st.lineChanges} mistakes ${st.mistakes}`); }
       laps[e.car]!.push({ time: e.invalid ? NaN : e.time, lap: e.lap, pit: pitThisLap[e.car]!, lapped: lappedThisLap[e.car]! });
       pitThisLap[e.car] = false; lappedThisLap[e.car] = 0;
     }
     const prog = r.cars.map((c) => c.progress);
+    if (process.env.RRFORM && fm && tick % 60 === 0 && prog[fm.defender]! < 1.3) console.log(`form t ${tick / TICK} pD ${prog[fm.defender]!.toFixed(3)} gap ${((prog[fm.defender]! - prog[fm.attacker]!) * L).toFixed(1)} vD ${Math.hypot(w.cars[fm.defender]!.vx, w.cars[fm.defender]!.vy).toFixed(1)} vA ${Math.hypot(w.cars[fm.attacker]!.vx, w.cars[fm.attacker]!.vy).toFixed(1)} inLine ${fInLine} phase ${r.phase}`);
     for (let i = 0; i < n; i++) {
       const st = drivers[i]!.state, c = w.cars[i]!;
       if (st.mistakes > mistakesSeen[i]!) { mistakesSeen[i] = st.mistakes; lastMistakeTick[i] = tick; }
@@ -234,6 +252,21 @@ function runRace(job: Job, builds: CarBuild[], presets: AiPreset[], grid: number
         else if (away > 1 && dir !== dDir) { dMoves++; dDir = dir; dAnchor = lat; if (threat) dq.threatMoves++; else dq.unthreatMoves++; }
         else if (Math.abs(lat) < Math.abs(dAnchor)) dAnchor = lat; // back toward the line: re-anchor
         if (c.carContact && tick - dEarlyAt < TICK * 2) { dq.earlyBrakeHits++; dEarlyAt = -1e9; }
+        // The attacker's gap into each braking zone (bumper to bumper, along the line) at its brake onset, following in
+        // line (within 40 m, less than a car width + 0.2 m across).
+        // (In the attacker's own frame: along its heading and across it; the line's projection is metres out in corners.)
+        const ca = w.cars[A]!, aBrake = ca.controls.brake > 0.3, hx = Math.sin(ca.heading), hy = -Math.cos(ca.heading);
+        const lonA = (c.x - ca.x) * hx + (c.y - ca.y) * hy, latAD = -(c.x - ca.x) * hy + (c.y - ca.y) * hx, inLineA = lonA > 0 && Math.abs(latAD) < ctx.physics.car.widthM + 0.2;
+        if (aBrake && tick - aLastBrake > TICK * 1.5 && prog[A]! >= 1 && lonA > 0 && lonA < 40) {
+          if (inLineA) { dq.zoneGaps.push(lonA - ctx.physics.car.lengthM); zOpen = true; zMin = Infinity; }
+        }
+        // ...and the closest it gets through that zone (onset to back on the throttle), still behind and in line.
+        if (zOpen) {
+          if (inLineA) zMin = Math.min(zMin, lonA - ctx.physics.car.lengthM);
+          if ((ca.controls.throttle > 0.5 && !aBrake) || lonA <= 0) { if (Number.isFinite(zMin)) dq.zoneMin.push(zMin); zOpen = false; }
+        }
+        if (aBrake) aLastBrake = tick;
+        if (process.env.RRTRACE && tick % 15 === 0 && prog[A]! >= Number(process.env.RRFROM ?? 1) && prog[A]! < Number(process.env.RRTO ?? 4)) { const sa = drivers[A]!.state, dg = sa.diag; console.log(`t ${(tick / TICK).toFixed(2)} q ${sa.near} gap ${(gapM - ctx.physics.car.lengthM).toFixed(1)} vA ${Math.hypot(ca.vx, ca.vy).toFixed(1)} vD ${v.toFixed(1)} prof ${dg.profileV.toFixed(1)} traf ${dg.trafficV.toFixed(1)} late ${dg.late.toFixed(2)} craft ${sa.craft}/${drivers[D]!.state.craft} ers ${ca.ers.deploying ? 'A' : '-'}${c.ers.deploying ? 'D' : '-'} tow ${ca.tow.toFixed(2)} mode ${dg.engineMode}/${drivers[D]!.state.diag.engineMode} brIn ${sa.brakeInSec.toFixed(2)} thr ${ca.controls.throttle.toFixed(2)} brk ${ca.controls.brake.toFixed(2)} dirty ${ca.dirtyAir.toFixed(3)} trust ${sa.trust.toFixed(3)} lat ${(latOf(line, Math.max(0, sa.near), ca.x, ca.y) - lat).toFixed(1)} off ${sa.offset.toFixed(2)} latA ${latOf(line, Math.max(0, sa.near), ca.x, ca.y).toFixed(2)} mk ${sa.mistake?.kind ?? "-"} plan ${sa.passTarget}`); }
       }
     }
     if (o.stopWhen?.(w)) break;
@@ -315,7 +348,7 @@ function runJob(job: Job): Record<string, unknown> {
       const realGap = lap(f) - l0;
       const defPreset = slow(f), defSolo = soloPace(ctx, line, cfg, build, defPreset, job.seed * 1000 + 1, job.laps);
       // Car 0 attacker (slot 2), car 1 defender (pole).
-      const res = runRace(job, [build, build], [base, defPreset], [1, 0], { duel: { attacker: 0, defender: 1, defOnsets: defSolo.onsets } });
+      const res = runRace(job, [build, build], [base, defPreset], [1, 0], { duel: { attacker: 0, defender: 1, defOnsets: defSolo.onsets, formation: job.test === 'defence' } });
       const prog = (k: number) => res.w.race!.cars[k]!.progress;
       const after1 = res.passes.filter((p) => p.lap >= 1 && p.lap < 6 && p.winner === 0);
       const startSwap = res.posAtLap1[0] === 0;
@@ -514,6 +547,12 @@ function summarise(results: { job: Job; out: Record<string, unknown> | undefined
       const s = g.filter((o) => o.passedIn5).length / Math.max(1, g.length);
       share.push(s);
       add('4. Pace-gap ladder', `${gap} s/lap quicker (real ${f2(median(g.map((o) => o.gap as number)))}): passed within 5 laps`, gap === 0.2 ? 'rare (≤ 25%)' : gap === 2 ? 'likely (≥ 60%)' : 'rises with the gap', `${pct(s)} (n ${g.length})`, gap === 0.2 ? verdict(s <= 0.25) : gap === 2 ? verdict(s >= 0.6) : 'INFO');
+    }
+    for (const gap of [0.2, 0.5, 1, 2]) {
+      const g = ld.filter((r) => r.job.p?.gap === gap).map((r) => r.out as O).filter((o) => !o.startSwap), z = g.flatMap((o) => o.dq.zoneGaps as number[]);
+      add('4. Pace-gap ladder', `${gap} s/lap: gap at the brake onset, in line (bumper, m): median [IQR] / min`, 'report', `${spread(z)} / ${f1(Math.min(...z))} (n ${z.length})`, 'INFO');
+      const zm = g.flatMap((o) => o.dq.zoneMin as number[]);
+      add('4. Pace-gap ladder', `${gap} s/lap: closest through the braking zone, in line (bumper, m): median [IQR] / min`, 'report', `${spread(zm)} / ${f1(Math.min(...zm))} (n ${zm.length})`, 'INFO');
     }
     add('4. Pace-gap ladder', 'chance rises with the gap', 'non-decreasing (±10%)', share.map(pct).join(' → '), verdict(share.every((x, k) => k === 0 || x >= share[k - 1]! - 0.1)));
   }
