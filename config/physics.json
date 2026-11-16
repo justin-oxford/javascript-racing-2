@@ -8,7 +8,7 @@
     "frontAxleFromCentreM": 1.535,
     "trackWidthM": 1.6,
     "weightFront": 0.45,
-    "cgHeightM": 0.3,
+    "cgHeightM": 0.15,
     "inertiaScale": 1
   },
   "engine": {
@@ -24,14 +24,14 @@
     "baseGrip": 2.11,
     "lateralGrip": 1.18,
     "lateralStiffness": 0.6,
-    "frontGrip": 1.23,
-    "rearGrip": 1.27,
+    "frontGrip": 1.3,
+    "rearGrip": 1.245,
     "peakSlipDeg": 7,
     "falloff": 0.88,
     "falloffSlip": 3,
     "lowSpeedMps": 3,
     "loadSensitivity": 0.23,
-    "transferSensitivity": 0.2
+    "transferSensitivity": 0.25
   },
   "steering": {
     "lockDeg": 24,
@@ -46,9 +46,9 @@
   "traction": { "assist": true, "assistPeakPct": 0.95 },
   "input": { "steerRate": 5, "steerReturnRate": 8, "throttleRate": 6, "brakeRate": 10 },
   "wear": {
-    "throttlePerSec": 0.005,
+    "throttlePerSec": 0.0003,
     "throttleLowSpeedKph": 60,
-    "brakePerSec": 0.002,
+    "brakePerSec": 0.008,
     "cornerPerSec": 0.001,
     "refSpeedKph": 200
   },

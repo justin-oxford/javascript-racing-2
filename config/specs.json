@@ -23,7 +23,7 @@
     "rearWing": { "rearDownforce": 0.04, "drag": 0.03 },
     "gearing": { "engine": -0.03, "topSpeed": 0.012 },
     "brakeBias": { "frontBias": 0.012 },
-    "balance": { "frontTransfer": 0.025 },
+    "balance": { "frontTransfer": 0.05 },
     "rideHeight": { "downforce": -0.015, "offTrackGrip": 0.05 },
     "tyrePressure": { "grip": -0.008, "wear": -0.12, "peakSlip": -0.035 }
   }

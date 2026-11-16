@@ -1,0 +1,1 @@
+{"id":"oxford","tag":"car2","carLaps":{"rules":798,"lookahead":800},"zones":[{"from":106,"to":110,"n":13,"wall":12,"barrier":0,"stuck":1},{"from":415,"to":420,"n":8,"wall":8,"barrier":0,"stuck":0},{"from":56,"to":63,"n":7,"wall":7,"barrier":0,"stuck":0},{"from":23,"to":28,"n":5,"wall":5,"barrier":0,"stuck":0}]}

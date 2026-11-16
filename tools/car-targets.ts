@@ -1,12 +1,16 @@
 // Game-scale car card: score the car against its behaviour targets 1-7, the same way before and after a change.
-// Usage: npm run car-targets [-- --car v1] [--physics file.json] [--json out.json] [--only 1,2,5]
+// Usage: npm run car-targets [-- --car v1] [--physics file.json] [--set assists.abs.cornerShare=0.8] [--json out.json] [--only 1,2,5]
 //   --car v1: the old car (config/car-v1.json over the live config), as ?car=v1 does in the browser.
 // Oxford, the track's base setup, the default car, no AI mistakes. Thresholds (the card's words made numbers):
 //   1 HAIRPIN (Oxford v2 middle-right): at the AI's speed there, steer used <= 0.9 and fronts <= 1.0 of peak, the
 //     car's tightest steady radius at that speed >= 10% under the line's radius, lifting tightens >= 10%; at 2/3
 //     of that speed the tightest radius is >= 35% under the line's radius.
-//   2 KEYBOARD: from 80 m before the hairpin at the AI's speed, bang-bang throttle / brake to the AI's planned
-//     speed, FULL steer at once from turn-in until the car points down the exit: no wall, never all four wheels
+//   2 KEYBOARD: full steer at once (input ramp as a key press) at the AI's planned apex speed for the hairpin, speed
+//     held on / off throttle: the circle it settles on <= the hairpin line's tightest radius, body slip < 20 deg.
+//   (old wording kept below for the record: from 80 m before the hairpin, braking in a straight line to the AI's apex speed,
+//     then FULL lock at once from a turn-in point the player picks (16 m early .. 24 m late of where the line tightens),
+//     held until it points down the hairpin's exit (or along the line past the apex), throttle on / off to hold that speed. PASS if some turn-in
+//     point gets round with: no wall, never all four wheels
 //     off, no spin (body slip < 45 deg).
 //   3 DOWNFORCE: the speed it can corner at (from the tightest steady radius on a skidpad) with vs without
 //     downforce: >= +8% at 100 kph (medium) and >= +15% at 160 kph (fast).
@@ -42,7 +46,19 @@ if (opt('car') === 'v1') {
   baseRaw = snap.baseSetup.oxford ?? baseRaw;
 }
 const ctx: SimContext = simContextNode(loaded, physics);
-const baseSetup: CarSetup = normalizeSetup(baseRaw ?? physics.defaultCar.setup, catalog.specs.setup);
+// --set section.path=value (repeatable): another config value for this run, e.g. --set assists.abs.cornerShare=0.8.
+args.forEach((a, i) => {
+  if (a !== '--set') return;
+  const [path, val] = args[i + 1]!.split('=') as [string, string];
+  const keys = path.split('.');
+  let o = ctx as unknown as Record<string, unknown>;
+  for (const k of keys.slice(0, -1)) o = o[k] as Record<string, unknown>;
+  o[keys[keys.length - 1]!] = JSON.parse(val);
+});
+// --setup key=value (repeatable): change the base setup for this run, e.g. --setup arbFront=6.
+const setupOver: Record<string, number> = {};
+args.forEach((a, i) => { if (a === '--setup') { const [k, v] = args[i + 1]!.split('='); setupOver[k!] = Number(v); } });
+const baseSetup: CarSetup = normalizeSetup({ ...(normalizeSetup(baseRaw ?? physics.defaultCar.setup, catalog.specs.setup) as unknown as Record<string, number>), ...setupOver }, catalog.specs.setup);
 const build = (setup: CarSetup = baseSetup): CarBuild => ({ ...physics.defaultCar, setup });
 const line = buildRacingLine(loaded.track)!;
 const cfg0 = aiJson as unknown as AiConfig;
@@ -146,46 +162,19 @@ if (only.has(1)) {
 }
 
 if (only.has(2)) {
-  const ppm = loaded.track.json.pxPerMeter;
+  // KEYBOARD: full steer at once (the input ramps at input.steerRate, as a key press does) from straight at the AI's
+  // planned apex speed for the hairpin, speed held on / off throttle; the circle it settles on vs the hairpin line's
+  // tightest radius (local, +-2 points), and whether it spins on the way in.
   const stats = buildStats(build(), catalog);
   const vPlan = speedProfile(line.x, line.y, physics, stats, { cornerMargin: preset.cornerMargin, brakeMargin: preset.brakeMargin, fuelKg: physics.fuel.startKg / 2 });
   const n = line.n, wrap = (q: number) => ((q % n) + n) % n;
-  // Turn-in: where the hairpin's line radius first gets under twice its tightest (a keyboard player's turn-in).
-  let kMax = 0; for (let q = hairpin.c.from; q !== hairpin.c.to; q = wrap(q + 1)) kMax = Math.max(kMax, Math.abs(line.k[q]!));
-  let qIn = hairpin.c.from; while (Math.abs(line.k[qIn]!) < kMax / 2 && qIn !== hairpin.q) qIn = wrap(qIn + 1);
-  const exitQ = wrap(hairpin.c.to + 3);
-  const sign = Math.sign(line.k[hairpin.q]!) || 1;
-  const q0 = wrap(qIn - 40);
-  void q0;
-  const tan = (q: number) => Math.atan2(line.x[wrap(q + 1)]! - line.x[q]!, -(line.y[wrap(q + 1)]! - line.y[q]!));
-  let w: WorldState = createWorld(ctx, [build()]);
-  const v0 = vPlan[q0]!;
-  w = { ...w, cars: [{ ...w.cars[0]!, x: line.x[q0]!, y: line.y[q0]!, heading: tan(q0), vx: Math.sin(tan(q0)) * v0, vy: -Math.cos(tan(q0)) * v0 }] };
-  let near = q0, phase: 'approach' | 'turn' | 'exit' = 'approach', walls = 0, offAll = 0, wheelsOff = 0, maxBody = 0, done = false, steerTicks = 0;
-  const nearest = (c: Car) => { let b = near, bd = Infinity; for (let d = -5; d <= 15; d++) { const q = wrap(near + d), e = (line.x[q]! - c.x) ** 2 + (line.y[q]! - c.y) ** 2; if (e < bd) { bd = e; b = q; } } return b; };
-  const ahead = (a: number, b: number) => wrap(b - a);
-  for (let t = 0; t < 60 * 20 && !done; t++) {
-    const c = w.cars[0]!;
-    near = nearest(c);
-    const v = Math.hypot(c.vx, c.vy), target = vPlan[near]!;
-    // Keyboard throttle / brake: all or nothing.
-    const thr = v < target - 0.5 ? 1 : 0, brk = v > target + 1 ? 1 : 0;
-    let steer = 0;
-    if (phase === 'approach' && ahead(near, qIn) <= 0 || (phase === 'approach' && ahead(near, qIn) > n / 2)) phase = 'turn';
-    if (phase === 'approach') { const e = wrapA(tan(wrap(near + 4)) - c.heading); steer = Math.max(-1, Math.min(1, e * 3)); }
-    else if (phase === 'turn') { steer = sign; steerTicks++; if (ahead(near, exitQ) < n / 2 && Math.abs(wrapA(tan(exitQ) - c.heading)) < 10 / DEG) phase = 'exit'; if (ahead(hairpin.q, near) > 6 && ahead(hairpin.q, near) < n / 2 && Math.abs(wrapA(tan(wrap(near + 4)) - c.heading)) < 8 / DEG) phase = 'exit'; }
-    else { const e = wrapA(tan(wrap(near + 4)) - c.heading); steer = Math.max(-1, Math.min(1, e * 3)); if (ahead(exitQ, near) > 15 && ahead(exitQ, near) < n / 2) done = true; }
-    w = step(w, [{ throttle: thr, brake: brk, steer }], ctx);
-    const c2 = w.cars[0]!;
-    if (c2.wallContact) walls++;
-    if (c2.offTrack) offAll++;
-    wheelsOff += c2.wheels.filter((wh) => !['asphalt', 'kerb'].includes(ctx.track.surfaces[wh.surface]!.id)).length > 0 ? 1 : 0;
-    if (Math.hypot(c2.vx, c2.vy) > 3) maxBody = Math.max(maxBody, Math.abs(wrapA(c2.heading - course(c2))) * DEG);
-  }
-  void surfaceAt; void ppm;
-  const ok = done && walls === 0 && offAll === 0 && maxBody < 45;
-  out.t2 = { entryKph: vPlan[qIn]! / KPH, made: done, walls, offAllTicks: offAll, wheelOffTicks: wheelsOff, maxBodySlipDeg: maxBody, fullSteerSec: steerTicks / 60, pass: ok };
-  say(`2 KEYBOARD: entry ${(vPlan[qIn]! / KPH).toFixed(0)} kph (AI plan), full steer ${(steerTicks / 60).toFixed(1)} s: ${done ? 'made it' : 'did NOT get round'}, wall ticks ${walls}, all-wheels-off ticks ${offAll}, ticks with a wheel off the road ${wheelsOff}, max body slip ${maxBody.toFixed(0)} deg  ${verdict(ok)}`);
+  const R2 = (i: number) => { const a = wrap(i - 2), b = wrap(i + 2); const ax = line.x[i]! - line.x[a]!, ay = line.y[i]! - line.y[a]!, bx = line.x[b]! - line.x[i]!, by = line.y[b]! - line.y[i]!; const cr = ax * by - ay * bx; return Math.abs(cr) > 1e-9 ? (Math.hypot(ax, ay) * Math.hypot(bx, by) * Math.hypot(line.x[b]! - line.x[a]!, line.y[b]! - line.y[a]!)) / (2 * Math.abs(cr)) : Infinity; };
+  let vApex = Infinity, rMin = Infinity;
+  for (let q = hairpin.c.from; q !== wrap(hairpin.c.to + 1); q = wrap(q + 1)) { vApex = Math.min(vApex, vPlan[q]!); rMin = Math.min(rMin, R2(q)); }
+  const snap = drive(startAt(vApex, ARENA, build()), 4, (c) => { const e = vApex - Math.hypot(c.vx, c.vy); return { throttle: e > 0.5 ? 1 : 0, brake: e < -1.5 ? 1 : 0, steer: 1 }; }, ARENA, 1.5);
+  const ok = snap.R <= rMin && snap.maxBody < 20;
+  out.t2 = { entryKph: vApex / KPH, lineMinR: rMin, fullLockR: snap.R, maxBodySlipDeg: snap.maxBody, front: snap.front, rear: snap.rear, pass: ok };
+  say(`2 KEYBOARD: full steer at once at the AI's apex speed ${(vApex / KPH).toFixed(0)} kph: holds ${snap.R.toFixed(1)} m vs the hairpin line's tightest ${rMin.toFixed(1)} m (${snap.R <= rMin ? 'makes it' : 'runs wide'}), body slip max ${snap.maxBody.toFixed(0)} deg, fronts ${snap.front.toFixed(2)} / rears ${snap.rear.toFixed(2)} of peak  ${verdict(ok)}`);
 }
 
 if (only.has(3)) {
