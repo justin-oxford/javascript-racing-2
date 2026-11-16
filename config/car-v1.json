@@ -1,0 +1,227 @@
+{
+  "_comment": "Car v1 (tag car-v1): the car before the Game-scale car card, for ?car=v1. Every CAR section of physics.json, the setup effects in specs.json, and each track's base setup for this car. Applied over the live config for that page load only.",
+  "physics": {
+    "car": {
+      "dryMassKg": 798,
+      "lengthM": 5.6,
+      "widthM": 2,
+      "wheelbaseM": 3.55,
+      "frontAxleFromCentreM": 1.535,
+      "trackWidthM": 1.6,
+      "weightFront": 0.45,
+      "cgHeightM": 0.3,
+      "inertiaScale": 1
+    },
+    "engine": {
+      "powerKW": 750,
+      "topSpeedKph": 340,
+      "maxDriveForceN": 14000,
+      "reverseForceN": 3500,
+      "maxReverseKph": 25
+    },
+    "brakes": {
+      "maxForceN": 47000,
+      "frontBias": 0.6
+    },
+    "aero": {
+      "dragCoef": 0.9,
+      "downforceCoef": 0.0003
+    },
+    "tyres": {
+      "baseGrip": 2.11,
+      "lateralGrip": 1.18,
+      "lateralStiffness": 0.6,
+      "frontGrip": 1.23,
+      "rearGrip": 1.27,
+      "peakSlipDeg": 7,
+      "falloff": 0.88,
+      "falloffSlip": 3,
+      "lowSpeedMps": 3,
+      "loadSensitivity": 0.23,
+      "transferSensitivity": 0.2
+    },
+    "steering": {
+      "lockDeg": 24,
+      "lockFalloffKph": 135,
+      "lowSpeedLockDeg": 16,
+      "lowSpeedLockToKph": 110,
+      "assist": true,
+      "assistPeakPct": 1,
+      "assistFromKph": 36,
+      "assistFullKph": 72
+    },
+    "traction": {
+      "assist": true,
+      "assistPeakPct": 0.95
+    },
+    "input": {
+      "steerRate": 5,
+      "steerReturnRate": 8,
+      "throttleRate": 6,
+      "brakeRate": 10
+    },
+    "wear": {
+      "throttlePerSec": 0.005,
+      "throttleLowSpeedKph": 60,
+      "brakePerSec": 0.002,
+      "cornerPerSec": 0.001,
+      "refSpeedKph": 200
+    }
+  },
+  "specs": {
+    "setup": {
+      "fields": {
+        "frontWingDeg": {
+          "label": "Front wing",
+          "unit": "°",
+          "min": 0,
+          "max": 30,
+          "step": 1,
+          "neutral": 8,
+          "perNotch": 1.5
+        },
+        "rearWingDeg": {
+          "label": "Rear wing",
+          "unit": "°",
+          "min": 0,
+          "max": 30,
+          "step": 1,
+          "neutral": 8,
+          "perNotch": 1.5
+        },
+        "topSpeedKph": {
+          "label": "Gearing (top gear)",
+          "unit": "kph",
+          "min": 240,
+          "max": 340,
+          "step": 2,
+          "neutral": 340,
+          "perNotch": 4.08
+        },
+        "brakeBiasPct": {
+          "label": "Brake bias (front)",
+          "unit": "%",
+          "min": 55,
+          "max": 75,
+          "step": 0.5,
+          "neutral": 60,
+          "perNotch": 1.2
+        },
+        "arbFront": {
+          "label": "Front anti-roll bar",
+          "unit": "clicks",
+          "min": 1,
+          "max": 11,
+          "step": 1,
+          "neutral": 6,
+          "perNotch": 1
+        },
+        "arbRear": {
+          "label": "Rear anti-roll bar",
+          "unit": "clicks",
+          "min": 1,
+          "max": 11,
+          "step": 1,
+          "neutral": 6,
+          "perNotch": 1
+        },
+        "rideFrontMm": {
+          "label": "Ride height front",
+          "unit": "mm",
+          "min": 20,
+          "max": 80,
+          "step": 1,
+          "neutral": 65,
+          "perNotch": 3
+        },
+        "rideRearMm": {
+          "label": "Ride height rear",
+          "unit": "mm",
+          "min": 20,
+          "max": 80,
+          "step": 1,
+          "neutral": 65,
+          "perNotch": 3
+        },
+        "pressurePsi": {
+          "label": "Tyre pressure",
+          "unit": "psi",
+          "min": 16,
+          "max": 28,
+          "step": 0.5,
+          "neutral": 24.5,
+          "perNotch": 0.5
+        }
+      },
+      "frontWing": {
+        "frontDownforce": 0.04,
+        "drag": 0.012
+      },
+      "rearWing": {
+        "rearDownforce": 0.04,
+        "drag": 0.03
+      },
+      "gearing": {
+        "engine": -0.03,
+        "topSpeed": 0.012
+      },
+      "brakeBias": {
+        "frontBias": 0.012
+      },
+      "balance": {
+        "frontTransfer": 0.025
+      },
+      "rideHeight": {
+        "downforce": -0.015,
+        "offTrackGrip": 0.05
+      },
+      "tyrePressure": {
+        "grip": -0.008,
+        "wear": -0.12,
+        "peakSlip": -0.035
+      }
+    },
+    "specs": {
+      "C1": {
+        "name": "C1 Max",
+        "engine": 0.03,
+        "topSpeed": 7.0,
+        "brakes": 0.06,
+        "drag": 0.001,
+        "downforce": 0.03,
+        "grip": 0.05
+      },
+      "C2": {
+        "name": "C2 Mid",
+        "engine": 0.025,
+        "topSpeed": 6.0,
+        "brakes": 0.06,
+        "drag": 0.002,
+        "downforce": 0.03,
+        "grip": 0.04
+      },
+      "C3": {
+        "name": "C3 Min",
+        "engine": 0.023,
+        "topSpeed": 5.0,
+        "brakes": 0.06,
+        "drag": 0.003,
+        "downforce": 0.03,
+        "grip": 0.03
+      }
+    }
+  },
+  "baseSetup": {
+    "oxford": {
+      "frontWingDeg": 19,
+      "rearWingDeg": 30,
+      "topSpeedKph": 280,
+      "brakeBiasPct": 63.5,
+      "arbFront": 8,
+      "arbRear": 4,
+      "rideFrontMm": 44,
+      "rideRearMm": 42,
+      "pressurePsi": 27
+    }
+  }
+}

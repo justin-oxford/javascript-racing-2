@@ -5,6 +5,7 @@
 //   ?watch=1                 the AI drives the player's car too (spectate)
 //   ?race=<laps>             start a quick race at once (with ?ai=N for the field)
 //   ?grid=reverse            that race's grid by pace, fastest car last (pace = each car's own planned lap)
+//   ?car=v1                  the old car (tag car-v1, config/car-v1.json): its physics, setup effects and base setups
 // The active ones show in a badge in the HUD's corner, so screenshots carry them.
 
 export interface UrlSwitches {
@@ -15,6 +16,7 @@ export interface UrlSwitches {
   watch: boolean;
   race?: number;
   grid?: 'reverse';
+  car?: 'v1';
 }
 
 export function parseSwitches(search: string): UrlSwitches {
@@ -29,6 +31,7 @@ export function parseSwitches(search: string): UrlSwitches {
   const race = Number(p.get('race'));
   if (p.has('race') && Number.isFinite(race) && race >= 1) out.race = Math.min(100, Math.round(race));
   if (p.get('grid') === 'reverse') out.grid = 'reverse';
+  if (p.get('car') === 'v1') out.car = 'v1';
   return out;
 }
 
@@ -44,14 +47,28 @@ export function applySwitches(sw: UrlSwitches, ai: AiLike, slip: SlipLike): void
 
 /** The badge text: the switches given, plus what's running ("brain rules · scale 1 · dirty 5%"). */
 export function switchLabel(sw: UrlSwitches, ai: AiLike, slip: SlipLike): string {
-  const given = sw.brain !== undefined || sw.scale !== undefined || sw.dirty !== undefined || sw.watch || sw.race !== undefined || sw.grid !== undefined;
+  const given = sw.brain !== undefined || sw.scale !== undefined || sw.dirty !== undefined || sw.watch || sw.race !== undefined || sw.grid !== undefined || sw.car !== undefined;
   if (!given) return '';
   const pct = Math.round(slip.dirtyAir.maxDownforceLoss * 1000) / 10;
-  const parts = [`brain ${ai.brain ?? 'rules'}`, `scale ${ai.scale?.oxford?.enabled ? 1 : 0}`, `dirty ${pct}%`];
+  const parts = [...(sw.car ? [`car ${sw.car}`] : []), `brain ${ai.brain ?? 'rules'}`, `scale ${ai.scale?.oxford?.enabled ? 1 : 0}`, `dirty ${pct}%`];
   if (sw.watch) parts.push('watch');
   if (sw.race !== undefined) parts.push(`race ${sw.race} laps`);
   if (sw.grid) parts.push('grid reverse');
   return parts.join(' · ');
+}
+
+export interface CarSnapshot {
+  physics: Record<string, Record<string, unknown>>;
+  specs?: Record<string, unknown>;
+  baseSetup?: Record<string, unknown>;
+}
+
+/** ?car=v1: put an old car's values over the live config (each section replaced whole, so a value the new car
+ *  added and the old one didn't have goes away too). Returns its base setups per track (or none). */
+export function applyCar(snap: CarSnapshot, physics: Record<string, unknown>, specs: Record<string, unknown>): Record<string, unknown> {
+  for (const [k, v] of Object.entries(snap.physics)) physics[k] = structuredClone(v);
+  for (const [k, v] of Object.entries(snap.specs ?? {})) specs[k] = structuredClone(v);
+  return snap.baseSetup ?? {};
 }
 
 /** Grid by pace, fastest last: order[slot] = car, sorted by planned lap time, slowest first. */

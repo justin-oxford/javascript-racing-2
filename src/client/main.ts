@@ -19,6 +19,7 @@ import {
   loadOverhead,
   loadNightArt,
   physics,
+  catalog,
   rules,
   simContext,
   siteUrl,
@@ -54,7 +55,8 @@ import { Ghost, parseGhost, recordTrackKey } from './ghost';
 import nightJson from '../../config/night.json';
 import { drawRearLights, previewNight, shadeImage, type NightConfig } from './night';
 import './style.css';
-import { applySwitches, parseSwitches, reverseGridOrder, showSwitchBadge, switchLabel } from './url-switches';
+import { applyCar, applySwitches, parseSwitches, reverseGridOrder, showSwitchBadge, switchLabel, type CarSnapshot } from './url-switches';
+import carV1 from '../../config/car-v1.json';
 
 async function main(): Promise<void> {
   const trackId = chooseTrackId();
@@ -84,6 +86,8 @@ async function main(): Promise<void> {
   // URL switches for testing (?brain= ?scale= ?dirty= ?watch=1 ?race= ?grid=reverse): this page load only.
   const sw = parseSwitches(location.search);
   applySwitches(sw, aiCfg as unknown as Parameters<typeof applySwitches>[1], slipstream);
+  // ?car=v1: the old car (Game-scale car card), before anything reads the physics.
+  const carBase = sw.car === 'v1' ? applyCar(carV1 as unknown as CarSnapshot, physics as unknown as Record<string, unknown>, catalog.specs as unknown as Record<string, unknown>) : undefined;
   // Player profiles (Main menu + profiles card): name, helmet, team, settings and keys live in the active
   // profile in this browser. The first one is seeded from the settings remembered before profiles existed.
   const kv = browserStore();
@@ -161,7 +165,7 @@ async function main(): Promise<void> {
   /** The player's car from the profile: preferred team and spec on the default car. */
   /** This track's base setup (Car setup overhaul card): track.json baseSetup, else the default car's. */
   function trackBase(): CarSetup {
-    return normalizeSetup(json.baseSetup ?? physics.defaultCar.setup, ctx.catalog.specs.setup);
+    return normalizeSetup((carBase?.[json.id] as CarSetup | undefined) ?? json.baseSetup ?? physics.defaultCar.setup, ctx.catalog.specs.setup);
   }
   function curr0Build(): CarBuild {
     const d = physics.defaultCar;
