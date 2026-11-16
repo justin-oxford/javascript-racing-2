@@ -77,7 +77,7 @@ const trackJsons = import.meta.glob<TrackJson>('/tracks/*/track.json', { eager: 
 export function chooseTrackId(): string {
   const asked = new URLSearchParams(location.search).get('track');
   if (asked && trackList.some((t) => t.id === asked)) return asked;
-  const id = defaultTrackId(trackList);
+  const id = defaultTrackId(trackList, (defaults as { defaultTrack?: string }).defaultTrack);
   if (!id) throw new Error('No tracks found in /tracks');
   return id;
 }

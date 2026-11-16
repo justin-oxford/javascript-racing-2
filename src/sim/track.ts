@@ -74,7 +74,9 @@ export interface TrackListing {
 }
 
 /** The track the game opens on: the first authored (non-fixture) track, else the first fixture. */
-export function defaultTrackId(tracks: readonly TrackListing[]): string | undefined {
+export function defaultTrackId(tracks: readonly TrackListing[], preferred?: string): string | undefined {
+  // The configured default (track-defaults.json defaultTrack) if it's there; else the first authored track by name.
+  if (preferred && tracks.some((t) => t.id === preferred && !t.fixture)) return preferred;
   return (tracks.find((t) => !t.fixture) ?? tracks[0])?.id;
 }
 

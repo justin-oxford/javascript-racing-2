@@ -56,7 +56,7 @@ export interface LoadedTrack {
 
 /** The track the game opens on: the first authored track, else the Indiana fixture. */
 export function defaultTrackIdNode(): string {
-  const id = defaultTrackId(listTracks(TRACKS_DIR));
+  const id = defaultTrackId(listTracks(TRACKS_DIR), (trackDefaults as { defaultTrack?: string }).defaultTrack);
   if (!id) throw new Error('no tracks in /tracks');
   return id;
 }

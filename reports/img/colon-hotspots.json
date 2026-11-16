@@ -1,0 +1,1 @@
+{"id":"colon","tag":"colon","carLaps":{"rules":800,"lookahead":800},"zones":[{"from":65,"to":75,"n":46,"wall":34,"barrier":0,"stuck":12},{"from":179,"to":186,"n":17,"wall":11,"barrier":0,"stuck":6},{"from":76,"to":77,"n":11,"wall":8,"barrier":0,"stuck":3},{"from":174,"to":177,"n":7,"wall":5,"barrier":0,"stuck":2},{"from":124,"to":125,"n":4,"wall":4,"barrier":0,"stuck":0}]}

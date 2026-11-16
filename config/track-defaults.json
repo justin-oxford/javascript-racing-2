@@ -1,5 +1,6 @@
 {
-  "_comment": "Used for a track folder that has a mask but no track.json yet (the blockout stage). 10.8 px/m is the 2560x1440 authoring scale.",
+  "_comment": "Used for a track folder that has a mask but no track.json yet (the blockout stage). 10.8 px/m is the 2560x1440 authoring scale. defaultTrack: the track the game (and the tools and tests) open on; without it, the first authored track by name.",
+  "defaultTrack": "oxford",
   "pxPerMeter": 10.8,
   "files": { "mask": "mask.png", "background": "background.png", "overhead": "overhead.png" }
 }
