@@ -166,6 +166,7 @@ Lost:
 - Pace-gap ladder, both brains: 1 s/lap is never passed now (0%), so "rises with the gap" fails.
 - Rules on Indiana's reverse grid: median 4 → 7. Indiana kept its old hand-placed line, so this measures the new car on an old line.
 - Look-ahead: some start aggression correlations.
+- Rules defender in duels: brakes more than 5 m before its own braking point with the attacker close **610 times (was 18)**, though contacts from that fell 5 → 4. The new car's braking into corners changed the rules defender's timing.
 
 ## 7. Decisions and readings I made on my own
 
@@ -214,4 +215,6 @@ Tests: 197 in 27 files, all passing; typecheck and build pass (pre-push hook). D
 5. **Indiana:** regenerate its line under the hard limits (tests and suite numbers on Indiana will move)?
 6. **Target thresholds:** the numbers I chose for "turn to spare", "not tight", "mild understeer" and "setups both ways" are in `tools/car-targets.ts`. Change any you read differently.
 7. **Base setup:** setup-search picked short gearing (246 kph) and 25.5 psi, which doubled wear to about 1.25% a lap. Keep it, or limit the search?
-8. **Still open from earlier:** the Oxford v2 list: thin walls, the T1 top wall, `edit.png` / `tracks/oxford_v2`, saved setup presets.
+8. **Rules defender braking early:** 610 early brakes in 200 duels (was 18). Look at it in the next AI round?
+9. **Trello:** the Racing line optimizer and both AI cards are in Working. Moving the Game-scale car card from Ideas to Working was refused by the tool's permission check, so please move it yourself.
+10. **Still open from earlier:** the Oxford v2 list: thin walls, the T1 top wall, `edit.png` / `tracks/oxford_v2`, saved setup presets.
