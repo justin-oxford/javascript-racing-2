@@ -1,7 +1,7 @@
 // Ghost car (Replays card): keeps only the quickest valid lap, survives a reload (the store), interpolates
 // poses, and refuses another track's ghost file.
 import { describe, expect, it } from 'vitest';
-import { Ghost, parseGhost } from './ghost';
+import { Ghost, parseGhost, recordTrackKey } from './ghost';
 
 const store = () => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) }; };
 /** A lap of `ticks` ticks driving straight along x at 1 m a tick. */
@@ -40,5 +40,21 @@ describe('ghost', () => {
     expect(typeof parseGhost(text, 'oxford')).toBe('object');
     expect(parseGhost(text, 'indiana')).toContain('for oxford');
     expect(parseGhost('{"x":1}', 'oxford')).toBe('not a ghost file');
+  });
+  it('a new layout version: its own records key, and ghosts from the old layout are refused cleanly', () => {
+    expect(recordTrackKey('oxford', undefined)).toBe('oxford'); // version 1 keeps the old keys
+    expect(recordTrackKey('oxford', 1)).toBe('oxford');
+    expect(recordTrackKey('oxford', 2)).toBe('oxford@v2');
+    const s = store(), v1 = new Ghost(s, 'oxford', 'C1');
+    drive(v1, 50);
+    v1.onLap(30, false, 'Justin', 60);
+    const text = JSON.stringify(v1.ghost);
+    expect(new Ghost(s, 'oxford@v2', 'C1').ghost).toBeUndefined(); // the stored v1 ghost isn't shown on v2
+    expect(parseGhost(text, 'oxford@v2')).toBe('that ghost was driven on an older oxford layout (v1); this track is v2');
+    const v2 = new Ghost(s, 'oxford@v2', 'C1');
+    drive(v2, 50);
+    v2.onLap(40, false, 'Justin', 60);
+    expect(parseGhost(JSON.stringify(v2.ghost), 'oxford@v2')).toMatchObject({ lapTime: 40 });
+    expect(new Ghost(s, 'oxford', 'C1').ghost!.lapTime).toBe(30); // v1's own ghost is still kept under its key
   });
 });

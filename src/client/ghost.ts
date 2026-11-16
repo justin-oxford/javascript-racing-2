@@ -23,12 +23,24 @@ export interface GhostStore {
   setItem(k: string, v: string): void;
 }
 
-/** A file's ghost if it's one, for this track (another track's ghost would be meaningless). */
+/** The key lap records and ghosts are stored under: the track id, plus "@v<n>" from layout version 2 on (version 1
+ *  keeps the plain id, so records from before versions existed stay). */
+export function recordTrackKey(id: string, version: number | undefined): string {
+  return version !== undefined && version > 1 ? `${id}@v${version}` : id;
+}
+const splitKey = (key: string) => { const m = /^(.*)@v(\d+)$/.exec(key); return m ? { id: m[1]!, v: Number(m[2]) } : { id: key, v: 1 }; };
+
+/** A file's ghost if it's one, for this track and layout (another track's or layout's ghost would be meaningless).
+ *  `track` is the record key (recordTrackKey). */
 export function parseGhost(text: string, track: string): GhostFile | string {
   try {
     const g = JSON.parse(text) as Partial<GhostFile>;
     if (g.kind !== 'jr2-ghost' || g.v !== 1 || !Array.isArray(g.poses) || typeof g.lapTime !== 'number' || typeof g.hz !== 'number') return 'not a ghost file';
-    if (g.track !== track) return `that ghost is for ${String(g.track)}, not ${track}`;
+    if (g.track !== track) {
+      const a = splitKey(String(g.track)), b = splitKey(track);
+      if (a.id === b.id) return `that ghost was driven on an ${a.v < b.v ? 'older' : 'other'} ${b.id} layout (v${a.v}); this track is v${b.v}`;
+      return `that ghost is for ${a.id}, not ${b.id}`;
+    }
     return g as GhostFile;
   } catch {
     return 'not a ghost file';

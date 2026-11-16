@@ -50,7 +50,7 @@ import { soundTargets, topSpeedKph } from './audio/targets';
 import { Vfx } from './vfx/vfx';
 import { EvolutionLayer } from './vfx/evolution-layer';
 import { WeatherLayer } from './vfx/weather-layer';
-import { Ghost, parseGhost } from './ghost';
+import { Ghost, parseGhost, recordTrackKey } from './ghost';
 import nightJson from '../../config/night.json';
 import { drawRearLights, previewNight, shadeImage, type NightConfig } from './night';
 import './style.css';
@@ -152,9 +152,11 @@ async function main(): Promise<void> {
     const pre = pbPrefix(p);
     return { getItem: (k: string) => kv.getItem(pre + k), setItem: (k: string, v: string) => kv.setItem(pre + k, v), keys: () => kv.keys().filter((k) => (pre ? k.startsWith(pre) : !k.startsWith('p.'))).map((k) => k.slice(pre.length)) };
   };
-  let session = new Session(pbStore(profile), json.id, pbSpec(startBuild.spec), startBuild.team);
+  /** Lap records and ghosts are keyed by track AND layout version (Oxford redesign card). */
+  const recKey = recordTrackKey(json.id, json.version);
+  let session = new Session(pbStore(profile), recKey, pbSpec(startBuild.spec), startBuild.team);
   // Ghost car (Replays card): this profile's quickest lap on this track + spec, as a see-through car.
-  const ghost = new Ghost(pbStore(profile), json.id, pbSpec(startBuild.spec));
+  const ghost = new Ghost(pbStore(profile), recKey, pbSpec(startBuild.spec));
   let ghostKey = `${profile.id}|${pbSpec(startBuild.spec)}`;
   /** The player's car from the profile: preferred team and spec on the default car. */
   /** This track's base setup (Car setup overhaul card): track.json baseSetup, else the default car's. */
@@ -221,7 +223,7 @@ async function main(): Promise<void> {
     const me = curr.cars[0];
     if (me) {
       const gk = `${profile.id}|${pbSpec(me.build.spec)}`;
-      if (gk !== ghostKey) { ghostKey = gk; ghost.switchTo(pbStore(profile), json.id, pbSpec(me.build.spec)); }
+      if (gk !== ghostKey) { ghostKey = gk; ghost.switchTo(pbStore(profile), recKey, pbSpec(me.build.spec)); }
       let crossed = false;
       for (const e of curr.events) if (e.type === 'lap' && e.car === 0) { crossed = true; if (!curr.race && !curr.quali) ghost.onLap(e.time, !!e.invalid, profile.name, TICK_HZ); }
       ghost.tick(me.x, me.y, me.heading, me.timing.started, crossed);
@@ -439,7 +441,7 @@ async function main(): Promise<void> {
     hud.setPerf(perfMode);
     hud.setDamage(damageMode);
     const b = curr0Build();
-    if (switched) session = new Session(pbStore(p), json.id, pbSpec(b.spec), b.team);
+    if (switched) session = new Session(pbStore(p), recKey, pbSpec(b.spec), b.team);
     // A different car (team/spec) shows at once outside a session; a session keeps its cars until restarted.
     if ((switched || carChanged) && !curr.race && !curr.quali) {
       session.changeSpec(pbSpec(b.spec));
@@ -449,7 +451,7 @@ async function main(): Promise<void> {
   };
   /** Local PBs on this track for the active profile (Records tab). */
   const records = (): RecordRow[] => {
-    const store = pbStore(profile), prefix = `jsr.pb.${json.id}.`;
+    const store = pbStore(profile), prefix = `jsr.pb.${recKey}.`;
     const out: RecordRow[] = [];
     for (const k of store.keys()) {
       if (!k.startsWith(prefix)) continue;
@@ -478,7 +480,7 @@ async function main(): Promise<void> {
     ghost: {
       info: () => ghost.ghost ? `${ghost.ghost.lapTime.toFixed(3)} s by ${ghost.ghost.driver} (${ghost.ghost.spec})` : 'No ghost yet for this track and spec: drive a valid lap in practice.',
       download: () => ghost.download(),
-      load: (text) => { const g = parseGhost(text, json.id); if (typeof g === 'string') return g; ghost.use(g); return `ghost loaded: ${g.lapTime.toFixed(3)} s by ${g.driver}`; },
+      load: (text) => { const g = parseGhost(text, recKey); if (typeof g === 'string') return g; ghost.use(g); return `ghost loaded: ${g.lapTime.toFixed(3)} s by ${g.driver}`; },
       toggle: () => (ghost.visible = !ghost.visible),
       visible: () => ghost.visible,
     },

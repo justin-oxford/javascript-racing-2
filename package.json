@@ -38,7 +38,11 @@
     "noise-probe": "tsx tools/noise-probe.ts",
     "weather-probe": "tsx tools/weather-probe.ts",
     "turn-probe": "tsx tools/turn-probe.ts",
-    "race-realism": "tsx tools/race-realism.ts"
+    "race-realism": "tsx tools/race-realism.ts",
+    "art-mask-check": "tsx tools/art-mask-check.ts",
+    "track-fit": "tsx tools/track-fit.ts",
+    "track-stats": "tsx tools/track-stats.ts",
+    "rebuild-track": "tsx tools/rebuild-track.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

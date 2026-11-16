@@ -28,6 +28,9 @@ export const TIMING_KEYS: readonly TimingKey[] = ['startFinish', 's1', 's2'];
 export interface TrackJson {
   id: string;
   name: string;
+  /** Layout version (Oxford redesign card): bump it when the drivable layout changes, so lap records and
+   *  ghosts from the old layout aren't mixed with the new one. Absent = 1. */
+  version?: number;
   /** Test fixture (Indiana): never shown in a player-facing track list. */
   fixture?: boolean;
   pxPerMeter: number;
