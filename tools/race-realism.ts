@@ -2,7 +2,7 @@
 // counts. One command runs every test, each seed as its own process in parallel, and prints one table: each test's
 // target and result (median and spread), PASS / MISS (INFO for the counts with no target).
 //
-// Usage: npm run race-realism -- [--brain rules|lookahead|rules,lookahead] [--seeds 20] [--quick] [--jobs 15]
+// Usage: npm run race-realism -- [--track oxford|colon] [--brain rules|lookahead|rules,lookahead] [--seeds 20] [--quick] [--jobs 15]
 //          [--tests reverse,pacegrid,long,ladder,defence,split,start] [--set ai.lookahead.x=1 ...] [--out file.json]
 //   --quick: fewer seeds and laps (for a fast look while working; the report uses the full run).
 //   --set: as ai-run (a config number or word for this run, every worker; "unset" removes the key).
@@ -26,6 +26,9 @@ import { catalog, loadTrackNode, simContextNode } from './load-track-node.ts';
 
 const ARGS = process.argv.slice(2);
 const opt = (name: string, def: string) => { const i = ARGS.indexOf(`--${name}`); return i >= 0 ? ARGS[i + 1]! : def; };
+/** --track <id>: the track the suite runs on (Oxford by default; Indiana's extra rows only alongside Oxford). */
+const TRACK = opt('track', 'oxford');
+const TRACK_NAME = TRACK.charAt(0).toUpperCase() + TRACK.slice(1);
 const SETS = ARGS.flatMap((a, i) => (a === '--set' ? [ARGS[i + 1]!] : []));
 const ROSTER = (driversJson as { drivers: DriverDef[] }).drivers;
 
@@ -464,19 +467,19 @@ function jobsFor(brain: string, seeds: number, quick: boolean, tests: Set<string
   const S = (k: number) => Array.from({ length: Math.max(1, k) }, (_, i) => i + 1);
   const raceLaps = quick ? 8 : 20;
   if (tests.has('reverse')) {
-    for (const seed of S(seeds)) J.push({ test: 'reverse', seed, brain, track: 'oxford', laps: raceLaps, cars: 10 });
-    for (const seed of S(quick ? 3 : 10)) J.push({ test: 'reverse', seed, brain, track: 'indiana', laps: raceLaps, cars: 10 });
+    for (const seed of S(seeds)) J.push({ test: 'reverse', seed, brain, track: TRACK, laps: raceLaps, cars: 10 });
+    if (TRACK === 'oxford') for (const seed of S(quick ? 3 : 10)) J.push({ test: 'reverse', seed, brain, track: 'indiana', laps: raceLaps, cars: 10 });
   }
-  if (tests.has('pacegrid')) for (const seed of S(seeds)) J.push({ test: 'pacegrid', seed, brain, track: 'oxford', laps: raceLaps, cars: 10 });
-  if (tests.has('long')) for (const seed of S(quick ? 2 : 8)) J.push({ test: 'long', seed, brain, track: 'oxford', laps: quick ? 30 : 100, cars: 10 });
-  if (tests.has('ladder')) for (const gap of [0.2, 0.5, 1, 2]) for (const seed of S(seeds * 2)) J.push({ test: 'ladder', seed, brain, track: 'oxford', laps: 7, cars: 2, p: { gap } });
-  if (tests.has('defence')) for (const seed of S(seeds * 2)) J.push({ test: 'defence', seed, brain, track: 'oxford', laps: 11, cars: 2, p: { gap: 0 } });
-  if (tests.has('split')) for (const wide of [1, 0]) for (const seed of S(seeds)) J.push({ test: 'split', seed, brain, track: 'oxford', laps: 1, cars: 3, p: { wide } });
+  if (tests.has('pacegrid')) for (const seed of S(seeds)) J.push({ test: 'pacegrid', seed, brain, track: TRACK, laps: raceLaps, cars: 10 });
+  if (tests.has('long')) for (const seed of S(quick ? 2 : 8)) J.push({ test: 'long', seed, brain, track: TRACK, laps: quick ? 30 : 100, cars: 10 });
+  if (tests.has('ladder')) for (const gap of [0.2, 0.5, 1, 2]) for (const seed of S(seeds * 2)) J.push({ test: 'ladder', seed, brain, track: TRACK, laps: 7, cars: 2, p: { gap } });
+  if (tests.has('defence')) for (const seed of S(seeds * 2)) J.push({ test: 'defence', seed, brain, track: TRACK, laps: 11, cars: 2, p: { gap: 0 } });
+  if (tests.has('split')) for (const wide of [1, 0]) for (const seed of S(seeds)) J.push({ test: 'split', seed, brain, track: TRACK, laps: 1, cars: 3, p: { wide } });
   if (tests.has('start')) {
-    for (const seed of S(seeds)) J.push({ test: 'start', seed: seed + 100, brain, track: 'oxford', laps: 3, cars: 10 });
-    for (const seed of S(quick ? 3 : 10)) J.push({ test: 'start', seed: seed + 100, brain, track: 'indiana', laps: 3, cars: 10 });
+    for (const seed of S(seeds)) J.push({ test: 'start', seed: seed + 100, brain, track: TRACK, laps: 3, cars: 10 });
+    if (TRACK === 'oxford') for (const seed of S(quick ? 3 : 10)) J.push({ test: 'start', seed: seed + 100, brain, track: 'indiana', laps: 3, cars: 10 });
   }
-  if (tests.has('determinism')) J.push({ test: 'determinism', seed: 3, brain, track: 'oxford', laps: 3, cars: 6 });
+  if (tests.has('determinism')) J.push({ test: 'determinism', seed: 3, brain, track: TRACK, laps: 3, cars: 6 });
   return J;
 }
 
@@ -514,11 +517,11 @@ const count = (xs: string[]) => { const m = new Map<string, number>(); for (cons
 function summarise(results: { job: Job; out: Record<string, unknown> | undefined }[]): { rows: Row[]; raw: Record<string, unknown> } {
   const rows: Row[] = [];
   type O = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-  const of = (test: string, track = 'oxford', p?: (j: Job) => boolean) => results.filter((r) => r.out && r.job.test === test && r.job.track === track && (!p || p(r.job))).map((r) => r.out as O);
+  const of = (test: string, track = TRACK, p?: (j: Job) => boolean) => results.filter((r) => r.out && r.job.test === test && r.job.track === track && (!p || p(r.job))).map((r) => r.out as O);
   const add = (test: string, metric: string, target: string, value: string, v: Row['verdict']) => rows.push({ test, metric, target, value, verdict: v });
   const all: O[] = results.filter((r) => r.out && ['reverse', 'pacegrid', 'long', 'start', 'ladder', 'defence'].includes(r.job.test)).map((r) => r.out as O);
   // 1. Reverse grid.
-  for (const track of ['oxford', 'indiana']) {
+  for (const track of [TRACK, 'indiana']) {
     const rv = of('reverse', track);
     if (!rv.length) continue;
     const pos = rv.map((o) => o.fastestFinish as number), top5 = pos.filter((p) => p <= 5).length / pos.length;
@@ -589,7 +592,7 @@ function summarise(results: { job: Job; out: Record<string, unknown> | undefined
     add('7. Split (B moves right)', 'heavy hits (wide case)', '0', String(w.reduce((a, o) => a + (o.heavy as number), 0)), verdict(w.reduce((a, o) => a + (o.heavy as number), 0) === 0));
   }
   // 8 / 9. Multi-car battles and crossovers (races).
-  const races = results.filter((r) => r.out && ['reverse', 'pacegrid', 'long'].includes(r.job.test) && r.job.track === 'oxford').map((r) => r.out as O);
+  const races = results.filter((r) => r.out && ['reverse', 'pacegrid', 'long'].includes(r.job.test) && r.job.track === TRACK).map((r) => r.out as O);
   if (races.length) {
     const mp = races.map((o) => o.multiPasses as number), ch = races.reduce((a, o) => a + (o.clusterHeavy as number), 0), hv = races.reduce((a, o) => a + (o.heavy as number), 0);
     add('8. Multi-car battles (races)', 'clean passes with 3+ cars within 15 m, per race', 'count', spread(mp), 'INFO');
@@ -597,7 +600,7 @@ function summarise(results: { job: Job; out: Record<string, unknown> | undefined
     add('9. Crossovers (races)', 'cutback passes (defender covering, attacker wide on entry)', 'nice to see', `${races.reduce((a, o) => a + (o.cutbacks as number), 0)} in ${races.length} races`, 'INFO');
   }
   // 10. Race start.
-  for (const track of ['oxford', 'indiana']) {
+  for (const track of [TRACK, 'indiana']) {
     const st = [...of('start', track)];
     if (!st.length) continue;
     const t = `10. Race start${track === 'indiana' ? ' (Indiana)' : ''}`;
@@ -613,7 +616,7 @@ function summarise(results: { job: Job; out: Record<string, unknown> | undefined
     add(t, 'lap-1 heavy hits per start / stuck cars', 'few (≤ 0.2) / none', `${f2(hv / L.length)} / ${stk}`, verdict(hv / L.length <= 0.2 && stk === 0));
   }
   // 11. Back markers.
-  const loss = results.filter((r) => r.out && (r.job.test === 'long' || r.job.test === 'reverse') && r.job.track === 'oxford').flatMap((r) => (r.out as O).lapLoss as number[]);
+  const loss = results.filter((r) => r.out && (r.job.test === 'long' || r.job.test === 'reverse') && r.job.track === TRACK).flatMap((r) => (r.out as O).lapLoss as number[]);
   if (loss.length) add('11. Back markers', 'time lost per lapped car (s)', 'under ~1 s (median)', `${spread(loss, f2)} (n ${loss.length})`, verdict(median(loss) < 1));
   // Every test: heavy hits, stuck by cause, solo lap, determinism.
   if (all.length) {
@@ -621,8 +624,8 @@ function summarise(results: { job: Job; out: Record<string, unknown> | undefined
     const hpr = racesAll.map(({ j, o }) => (o.heavy as number) / (j.laps / 20)), spr = racesAll.map(({ j, o }) => (o.stuck as number) / (j.laps / 20));
     add('All races', 'heavy hits per 20 laps', 'report', spread(hpr), 'INFO');
     add('All races', 'stuck events per 20 laps (by cause)', 'report', `${spread(spr)} (${count(racesAll.flatMap(({ o }) => o.stuckCauses as string[]))})`, 'INFO');
-    const solo = results.filter((r) => r.out && r.job.test === 'reverse' && r.job.track === 'oxford').map((r) => (r.out as O).soloMean as number);
-    if (solo.length) add('All races', 'solo lap time (mean of the field, Oxford)', 'unchanged', `${f2(mean(solo))} s`, 'INFO');
+    const solo = results.filter((r) => r.out && r.job.test === 'reverse' && r.job.track === TRACK).map((r) => (r.out as O).soloMean as number);
+    if (solo.length) add('All races', `solo lap time (mean of the field, ${TRACK_NAME})`, 'unchanged', `${f2(mean(solo))} s`, 'INFO');
   }
   const det = results.find((r) => r.out && r.job.test === 'determinism');
   if (det) add('All', 'determinism (same seed twice)', 'identical', (det.out as O).same ? 'identical' : 'DIFFERENT', verdict(!!(det.out as O).same));
@@ -650,7 +653,7 @@ async function main() {
     const failed = res.filter((r) => !r.out);
     for (const f of failed) process.stderr.write(`FAILED ${JSON.stringify(f.job)}\n${f.err}\n`);
     // Speed alone, after the pool (a loaded machine would understate it).
-    if (!tests.has('nobench')) res.push(...(await runPool([{ test: 'bench', seed: 1, brain, track: 'oxford', laps: 50, cars: 10 }], 1)));
+    if (!tests.has('nobench')) res.push(...(await runPool([{ test: 'bench', seed: 1, brain, track: TRACK, laps: 50, cars: 10 }], 1)));
     const s = summarise(res);
     tables[brain] = s.rows; raw[brain] = s.raw;
     process.stderr.write(`${brain}: ${((performance.now() - t0) / 1000).toFixed(0)} s, ${failed.length} failed\n`);
