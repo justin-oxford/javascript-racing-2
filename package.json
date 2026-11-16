@@ -46,7 +46,8 @@
     "hotspots": "tsx tools/hotspots.ts",
     "line-shot": "tsx tools/line-shot.ts",
     "car-targets": "tsx tools/car-targets.ts",
-    "ai-cards-probe": "tsx tools/ai-cards-probe.ts"
+    "ai-cards-probe": "tsx tools/ai-cards-probe.ts",
+    "midcorner-probe": "tsx tools/midcorner-probe.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
