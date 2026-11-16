@@ -70,6 +70,10 @@ export interface AiConfig {
   mistakes?: MistakeConfig;
   /** Race noise card: ATTACK / DEFEND drive pushMargin closer to the limit (x (1.5 - tyre care)). */
   fight?: { pushMargin: number; dirtyBackOff?: number };
+  /** AI card "plan speed from the path it's actually on" (Game-scale car round): a car off the racing line by more than
+   *  minOffsetM plans its speed and braking from the line moved by its current offset (clipped to the road), using the
+   *  same grip model: the inside of a corner is slower. Absent / enabled false = the racing line's speeds. */
+  pathSpeed?: { enabled: boolean; minOffsetM: number; stepM: number };
   /** AI overtaking card: pulling out of a tow, the overlap rule, conceding, blue flags (racecraft.ts). */
   overtaking?: OvertakingConfig;
   /** AI overtaking round 3: the defender's cover / hold choice into braking zones (racecraft.ts defenceChoice). */
@@ -569,6 +573,23 @@ function locate(path: AiPath, car: CarState, prev: number, speed: number, ahead 
 // Speed profiles per line x car build x preset x the physics numbers that matter: static data computed
 // once (not state), so a memo is fine; physics tuned live gives a new key and a fresh profile.
 const profiles = new WeakMap<AiPath, Map<string, Float64Array>>();
+/** The racing line moved sideways by a fixed offset (quantized to stepM), clipped to the road at each point (half the
+ *  car's width from the edge): the path a car that stays at that offset actually drives (pathSpeed). */
+const offsetLines = new WeakMap<AiPath, Map<number, AiPath>>();
+function offsetLine(line: AiPath, off: number, halfW: number, stepM: number): AiPath {
+  const q = Math.round(off / stepM) * stepM;
+  let m = offsetLines.get(line);
+  if (!m) offsetLines.set(line, (m = new Map()));
+  let p = m.get(q);
+  if (!p) {
+    const o = new Float64Array(line.n);
+    for (let i = 0; i < line.n; i++) o[i] = Math.max(-Math.max(0, line.left[i]! - halfW), Math.min(Math.max(0, line.right[i]! - halfW), q));
+    const xy = offsetPath(line, o);
+    p = { ...line, x: xy.x, y: xy.y, k: xy.k };
+    m.set(q, p);
+  }
+  return p;
+}
 
 /** The EXIT and INSIDE lines for a racing line (offsets + their geometry as paths), per racecraft config. */
 const craftLines = new WeakMap<RacingLine, { key: string; offsets: { exit: Float64Array; inside: Float64Array }; paths: [AiPath, AiPath, AiPath] }>();
@@ -966,7 +987,11 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     // RACECRAFT: the line(s) in use, blended; each has its own speed profile and during a blend the slower counts.
     const rc = cfg.racecraft?.enabled ? racecraftLines(line, cfg.racecraft, phys.car.widthM / 2, ctx) : undefined;
     const profs = rc ? rc.paths.map((p, l) => (st.lineW[l]! > 0.01 ? carProfile(p, car, ctx, preset) : undefined)) : [carProfile(line, car, ctx, preset)];
-    const prof = { at: (q: number) => { let v = Infinity; for (const p of profs) if (p) v = Math.min(v, p[q]!); return v; } };
+    const prof0 = { at: (q: number) => { let v = Infinity; for (const p of profs) if (p) v = Math.min(v, p[q]!); return v; } };
+    // PATH SPEED: off the racing line, plan from the path it's actually on (never faster than the line's own plan).
+    const ps = cfg.pathSpeed;
+    const offProf = ps?.enabled && Math.abs(st.offset) > ps.minOffsetM ? carProfile(offsetLine(line, st.offset, phys.car.widthM / 2, ps.stepM), car, ctx, preset) : undefined;
+    const prof = offProf ? { at: (q: number) => Math.min(prof0.at(q), offProf[q]!) } : prof0;
     // A late braker (mistake) reads the target 12 m on. (Attacking alongside no longer brakes later: on
     // lap one the whole field is alongside someone, and they all went wide into turn 1 together.)
     const ahead = mistakeNow === 'lateBrake' ? Math.max(1, Math.round(mk.lateBrakeAheadM / SPACING_M)) : 1;

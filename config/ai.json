@@ -53,6 +53,8 @@
   "overtaking": { "overlapM": 3.5, "pullOutSec": 1.5, "pullOutAggrSec": 2.0, "attackHeadwaySec": 0.06, "closeUntilBrakeSec": 1.5, "attackFollowBrake": 0.93, "commitM": 16, "leaveRoom": true, "concedeBelow": 0.35, "blueLaps": 0.8, "blueBehindM": 6, "blueLift": 0.03 },
   "mistakes": { "kinds": { "lateBrake": 0.35, "wide": 0.3, "wheelspin": 0.25, "spin": 0.1 }, "durationSec": 2, "armSec": 8, "lateBrakeAheadM": 50, "lateBrakeMul": 1.6, "wideM": 4.5, "wheelspinMaxMps": 25, "spinSteer": 1, "spinSec": 0.6, "pressureMul": 1.0, "pressureSec": 1.0, "attackMul": 0.5, "wearMul": 1.0, "fuelMul": 0.3 },
   "fight": { "pushMargin": 0.02 },
+  "_comment_pathSpeed": "AI card 'plan speed from the path it's actually on' (Game-scale car round): off the racing line by more than minOffsetM, the car plans speed and braking from the line moved by its current offset (clipped to the road, quantized to stepM), same grip model, never faster than the line's own plan. enabled false = the racing line's speeds.",
+  "pathSpeed": { "enabled": false, "minOffsetM": 0.75, "stepM": 0.5 },
   "racecraft": { "enabled": true, "insideM": 2.5, "insideLeadM": 40, "coverLeadM": 120, "insideSlope": 0.06, "insideSmooth": 3, "exitStraightM": 100, "exitShiftM": 30, "exitWeight": 6, "exitIterations": 4000, "edgeM": 0.8, "attackGapSec": 1.0, "defendGapSec": 0.6, "nurseWear": 0.5, "nurseDamage": 0.3, "evalSec": 0.25, "holdSec": 2, "blendPerM": 0.02 },
   "defence": { "decideSec": 3, "gapSec": 1.0, "bias": 0, "aggrW": 2, "threatW": 3, "craftW": 1, "tyreW": 1, "closingRefMps": 4, "coverDetectM": 1.2 },
   "predict": { "margin": 0.97, "gapM": 2, "lookSec": 3, "headwaySec": 0.35 },
