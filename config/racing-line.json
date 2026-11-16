@@ -1,11 +1,13 @@
 {
-  "_comment": "Racing line optimizer. The line moves only sideways from its seed (track.json racingLineSeed) to minimise curvature, keeping the car (half its width + safetyMarginM) on asphalt plus kerbUse (0..1) of each kerb. shortestBlend > 0 pulls toward the shortest path on gentle sections. Re-run after physics changes (the speed profile depends on grip): npm run optimize-racing-line -- <id> --write, or the editor's Optimize line button. EXIT line (npm run optimize-exit-line -- <id> --write): before every corner followed by ai.json racecraft.exitStraightM of straight, from exitLeadM before the corner to exitShiftM after it, the line moves sideways by exitBumps smooth bumps chosen to minimise the time to the end of the straight; stored as track.json racingLineExit.",
+  "_comment": "Racing line optimizer. The line moves only sideways from its seed (track.json racingLineSeed) to minimise curvature, keeping the car (half its width + safetyMarginM) on asphalt plus kerbUse (0..1) of each kerb. shortestBlend > 0 pulls toward the shortest path on gentle sections. Re-run after physics changes (the speed profile depends on grip): npm run optimize-racing-line -- <id> --write, or the editor's Optimize line button. EXIT line (npm run optimize-exit-line -- <id> --write): before every corner followed by ai.json racecraft.exitStraightM of straight, from exitLeadM before the corner to exitShiftM after it, the line moves sideways by exitBumps smooth bumps chosen to minimise the time to the end of the straight; stored as track.json racingLineExit. HARD LIMITS (constraints, not penalties): the car's footprint (half its width + footprintMarginM) stays on asphalt or kerb all along the line, and the line's radius is at least turnRatioMin x the car's tightest radius at the planned speed (lock and grip, from the car model). Checked by npm run track-fit and src/sim/line-limits.test.ts.",
   "spacingM": 2,
   "safetyMarginM": 0.3,
   "kerbUse": 0.5,
   "shortestBlend": 0,
   "iterations": 3000,
   "relax": 1.7,
+  "footprintMarginM": 0.2,
+  "turnRatioMin": 0.99,
   "exitLeadM": 40,
   "exitBumps": 10
 }

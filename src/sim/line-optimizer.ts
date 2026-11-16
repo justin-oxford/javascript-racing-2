@@ -29,6 +29,10 @@ export interface LineOptimizerConfig {
   iterations: number;
   /** Over-relaxation, 1..1.9. */
   relax: number;
+  /** Hard rule 1: room beyond half the car's width that must be drivable (asphalt / kerb) all along the line, metres. Absent = 0.2. */
+  footprintMarginM?: number;
+  /** Hard rule 2: the line's radius over the car's tightest radius at the planned speed must be at least this. Absent = 0.99. */
+  turnRatioMin?: number;
 }
 
 export interface OptimizedLine {
@@ -115,6 +119,22 @@ export function optimizeRacingLine(track: SimTrack, seedPx: readonly Point[], cf
     nx[i] = -(b.y - a.y) / l; ny[i] = (b.x - a.x) / l;
   }
 
+  // HARD RULE 1 (footprint): a seed point without room for the car (on grass, an island tip, a wall) gives
+  // degenerate bounds and the line could never leave it. Move it along its normal to the nearest spot with
+  // room (either side, nearer wins), so the bounds below describe real road.
+  const dD = distanceToUndrivable(track), fpNeed = (physics.car.widthM / 2 + (cfg.footprintMarginM ?? 0.2)) * ppm;
+  const roomD = (x: number, y: number) => { const ix = Math.floor(x), iy = Math.floor(y); return ix < 0 || iy < 0 || ix >= track.mask.width || iy >= track.mask.height ? 0 : dD[iy * track.mask.width + ix]!; };
+  let seedMoved = 0;
+  for (let i = 0; i < n; i++) {
+    const p = seed[i]!;
+    if (roomD(p.x, p.y) >= fpNeed) continue;
+    for (let d = 0.25 * ppm; d <= 15 * ppm; d += 0.25 * ppm) {
+      const a = { x: p.x + nx[i]! * d, y: p.y + ny[i]! * d }, b = { x: p.x - nx[i]! * d, y: p.y - ny[i]! * d };
+      const okA = roomD(a.x, a.y) >= fpNeed, okB = roomD(b.x, b.y) >= fpNeed;
+      if (okA || okB) { seed[i] = okA ? a : b; seedMoved++; break; }
+    }
+  }
+
   // Usable width each side: march along the normal; asphalt counts fully, a kerb for kerbUse of it.
   const lo = new Float64Array(n), hi = new Float64Array(n);
   const step = 0.25 * ppm, maxD = 30 * ppm;
@@ -194,6 +214,26 @@ export function optimizeRacingLine(track: SimTrack, seedPx: readonly Point[], cf
     pushedIn += bad;
     solve(Math.ceil(cfg.iterations / 4));
   }
+  // HARD RULE 1, enforced: every segment's footprint on drivable surface (footprintCheck). A point whose
+  // segment fails gets its bound tightened toward room (it and its next point), and the solve re-runs.
+  const ptAt = (i: number): Point => ({ x: seed[at(i)]!.x + t[at(i)]! * nx[at(i)]!, y: seed[at(i)]!.y + t[at(i)]! * ny[at(i)]! });
+  let fpRounds = 0;
+  for (; fpRounds < 40; fpRounds++) {
+    const pts = Array.from({ length: n }, (_, i) => ptAt(i));
+    const fp = footprintCheck(track, pts, physics.car.widthM / 2, cfg.footprintMarginM ?? 0.2);
+    if (!fp.bad.length) break;
+    for (const { i } of fp.bad)
+      for (const j of [i, at(i + 1)]) {
+        const toward = Math.sign((lo[j]! + hi[j]!) / 2 - t[j]!) || 1;
+        let tj = t[j]! + toward * 0.5;
+        for (let k = 0; k < 400 && roomD(seed[j]!.x + tj * nx[j]!, seed[j]!.y + tj * ny[j]!) < fpNeed + 0.25 * ppm; k++) tj += toward * 0.5;
+        if (toward > 0) lo[j] = Math.min(hi[j]!, Math.max(lo[j]!, tj)); else hi[j] = Math.max(lo[j]!, Math.min(hi[j]!, tj));
+        t[j] = tj;
+      }
+    pushedIn += fp.bad.length;
+    solve(Math.ceil(cfg.iterations / 4));
+  }
+
   const line: Point[] = [];
   let minClear = Infinity;
   for (let i = 0; i < n; i++) {
@@ -338,4 +378,95 @@ export function transferGripFactor(muLat: number, physics: Pick<PhysicsConfig, '
   if (!k) return 1;
   const r = Math.min(1, (physics.car.cgHeightM * muLat) / physics.car.trackWidthM);
   return ((1 + r) ** (1 - k) + (1 - r) ** (1 - k)) / 2;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Hard limits (card "Racing line optimizer: hard track and turning limits"): checks any line can be put through.
+
+/** Drivable for a line: asphalt and kerb. Grass, gravel, walls, the pit lane and out of bounds are not. */
+const lineDrivable = (track: SimTrack) => { const ids = track.surfaces.map((s) => s.id); return (p: number) => ids[p] === 'asphalt' || ids[p] === 'kerb'; };
+
+/** Per-track cache of the distance (px) from each pixel to the nearest non-drivable pixel. */
+const drivableDist = new WeakMap<SimTrack, Float32Array>();
+export function distanceToUndrivable(track: SimTrack): Float32Array {
+  let d = drivableDist.get(track);
+  if (!d) { d = distanceTo(track, lineDrivable(track)); drivableDist.set(track, d); }
+  return d;
+}
+
+export interface FootprintCheck {
+  /** Smallest room either side of the line, metres (distance to non-drivable surface). */
+  minRoomM: number;
+  /** Line point (index) where it's smallest. */
+  at: number;
+  /** Points whose segment to the next point comes closer than the footprint needs, with the room found. */
+  bad: Array<{ i: number; roomM: number }>;
+}
+
+/**
+ * RULE 1, ON TRACK: the car's footprint (half its width + `marginM` either side of the line) on drivable surface
+ * all along a closed line in track pixels, sampled every ~0.25 m along each segment (a thin island tip between
+ * two points counts too).
+ */
+export function footprintCheck(track: SimTrack, line: readonly Point[], halfWidthM: number, marginM: number): FootprintCheck {
+  const ppm = track.json.pxPerMeter, d = distanceToUndrivable(track), { width: w, height: h } = track.mask;
+  const room = (x: number, y: number) => { const ix = Math.floor(x), iy = Math.floor(y); return ix < 0 || iy < 0 || ix >= w || iy >= h ? 0 : d[iy * w + ix]! / ppm; };
+  const need = halfWidthM + marginM, n = line.length;
+  let minRoom = Infinity, at = 0;
+  const bad: FootprintCheck['bad'] = [];
+  for (let i = 0; i < n; i++) {
+    const a = line[i]!, b = line[(i + 1) % n]!, steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / (0.25 * ppm)));
+    let segMin = Infinity;
+    for (let s = 0; s < steps; s++) segMin = Math.min(segMin, room(a.x + ((b.x - a.x) * s) / steps, a.y + ((b.y - a.y) * s) / steps));
+    if (segMin < minRoom) { minRoom = segMin; at = i; }
+    if (segMin < need) bad.push({ i, roomM: segMin });
+  }
+  return { minRoomM: minRoom, at, bad };
+}
+
+/**
+ * The tightest steady radius the car can turn at speed v (m/s), metres, from the car model: the steering lock
+ * available at that speed (mechLockRad, plus the half peak-slip allowance the speed profile gives) and the
+ * cornering grip (with downforce). The larger of the two limits it.
+ */
+export function carTurnRadiusM(v: number, physics: PhysicsConfig, stats: Stats, fuelKg = physics.fuel.startKg / 2): { radiusM: number; lockM: number; gripM: number } {
+  const t = physics.tyres, c = physics.car, wf = c.weightFront, mass = c.dryMassKg + fuelKg;
+  const mu = t.baseGrip * stats.grip * (t.frontGrip * wf + t.rearGrip * (1 - wf)) * (t.loadSensitivity ? (c.dryMassKg / mass) ** t.loadSensitivity : 1);
+  const muLat = mu * t.lateralGrip * transferGripFactor(mu * t.lateralGrip, physics);
+  const lat = muLat * G * (1 + physics.aero.downforceCoef * stats.downforce * v * v);
+  const lockM = c.wheelbaseM / Math.tan(mechLockRad(v, physics.steering) + ((t.peakSlipDeg * Math.PI) / 180) * 0.5);
+  const gripM = (v * v) / lat;
+  return { radiusM: Math.max(lockM, gripM), lockM, gripM };
+}
+
+export interface TurnCheck {
+  /** Worst ratio of the line's radius to the car's tightest radius at the planned speed (< 1 = can't turn). */
+  minRatio: number;
+  at: number;
+  pathRadiusM: number;
+  carRadiusM: number;
+  /** Planned speed there, kph. */
+  kph: number;
+  /** Line points under ratioMin (the car is at its limit at exactly 1). */
+  bad: number[];
+}
+
+/**
+ * RULE 2, TURNABLE: the line's radius (pathCurvature, as the AI and the speed profile see it) against the car's
+ * tightest radius at the speed the reference profile plans there. Line in metres.
+ */
+export function turnCheck(x: ArrayLike<number>, y: ArrayLike<number>, physics: PhysicsConfig, stats: Stats, ratioMin = 0.99): TurnCheck {
+  const k = pathCurvature(x, y, true);
+  const v = speedProfile(x, y, physics, stats, { cornerMargin: 1, brakeMargin: 1, fuelKg: physics.fuel.startKg / 2 });
+  let minRatio = Infinity, at = 0;
+  const bad: number[] = [];
+  for (let i = 0; i < k.length; i++) {
+    const pathR = Math.abs(k[i]!) > 1e-9 ? 1 / Math.abs(k[i]!) : Infinity;
+    const car = carTurnRadiusM(v[i]!, physics, stats).radiusM;
+    const ratio = pathR / car;
+    if (ratio < minRatio) { minRatio = ratio; at = i; }
+    if (ratio < ratioMin) bad.push(i);
+  }
+  const pathR = 1 / Math.max(1e-9, Math.abs(k[at]!));
+  return { minRatio, at, pathRadiusM: pathR, carRadiusM: carTurnRadiusM(v[at]!, physics, stats).radiusM, kph: v[at]! * 3.6, bad };
 }

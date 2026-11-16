@@ -43,7 +43,8 @@
     "track-fit": "tsx tools/track-fit.ts",
     "track-stats": "tsx tools/track-stats.ts",
     "rebuild-track": "tsx tools/rebuild-track.ts",
-    "hotspots": "tsx tools/hotspots.ts"
+    "hotspots": "tsx tools/hotspots.ts",
+    "line-shot": "tsx tools/line-shot.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

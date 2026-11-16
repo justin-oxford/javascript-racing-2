@@ -5,8 +5,9 @@
 // Usage: npm run track-fit -- <id> [--cars 10]
 // Points are reported as line points (racingLine index) and track pixels.
 import aiJson from '../config/ai.json' with { type: 'json' };
-import { buildRacingLine, startPose, surfaceAt, wheelPositions, type AiConfig, type Point } from '../src/sim/index.ts';
-import { loadTrackNode, simContextNode } from './load-track-node.ts';
+import racingLineJson from '../config/racing-line.json' with { type: 'json' };
+import { buildRacingLine, buildStats, footprintCheck, startPose, surfaceAt, turnCheck, wheelPositions, type AiConfig, type Point } from '../src/sim/index.ts';
+import { catalog, loadTrackNode, simContextNode } from './load-track-node.ts';
 
 void aiJson as unknown as AiConfig;
 const args = process.argv.slice(2);
@@ -81,15 +82,27 @@ if (!gridBad) ok(`spawn + ${CARS - 1} grid slots: every wheel on legal surface, 
 
 // ---- Lines on the road.
 console.log('\nLines');
-const offRoad = (pts: readonly Point[] | undefined, name: string) => {
+const offRoad = (pts: readonly Point[] | undefined, name: string, infoOnly = false) => {
   if (!pts?.length) { console.log(`  - ${name}: none`); return; }
   const bad = pts.map((p, i) => (S(p.x, p.y).legal ? -1 : i)).filter((i) => i >= 0);
-  if (bad.length) warn(`${name}: ${bad.length} of ${pts.length} points off legal surface: ${bad.slice(0, 12).map((i) => `${i} ${S(pts[i]!.x, pts[i]!.y).id}`).join(', ')}${bad.length > 12 ? ' …' : ''}`);
+  if (bad.length) (infoOnly ? (m: string) => console.log(`  - info: ${m}`) : warn)(`${name}: ${bad.length} of ${pts.length} points off legal surface: ${bad.slice(0, 12).map((i) => `${i} ${S(pts[i]!.x, pts[i]!.y).id}`).join(', ')}${bad.length > 12 ? ' …' : ''}`);
   else ok(`${name}: all ${pts.length} points on legal surface`);
 };
 offRoad(json.racingLine, 'racing line');
-offRoad(json.racingLineSeed, 'racing line seed (the optimizer starts here)');
+offRoad(json.racingLineSeed, 'racing line seed (direction only: the optimizer moves seed points onto the road)', true);
 offRoad(json.racingLineExit, 'EXIT line');
+// The optimizer's two hard rules (Racing line optimizer: hard track and turning limits).
+const fpMargin = racingLineJson.footprintMarginM ?? 0.2, turnMin = racingLineJson.turnRatioMin ?? 0.99;
+const stats = buildStats(ctx.physics.defaultCar, catalog);
+for (const [name, pts] of [['racing line', json.racingLine], ['EXIT line', json.racingLineExit]] as const) {
+  if (!pts || pts.length < 3) continue;
+  const f = footprintCheck(track, pts, ctx.physics.car.widthM / 2, fpMargin);
+  const fMsg = `${name} footprint (half width ${(ctx.physics.car.widthM / 2).toFixed(2)} m + ${fpMargin} m on asphalt / kerb): least room ${f.minRoomM.toFixed(2)} m at point ${f.at}`;
+  if (f.bad.length) warn(`${fMsg}; ${f.bad.length} segment(s) short: ${f.bad.slice(0, 10).map((b) => `${b.i} (${b.roomM.toFixed(2)} m)`).join(', ')}`); else ok(fMsg);
+  const t = turnCheck(pts.map((p) => p.x / ppm), pts.map((p) => p.y / ppm), ctx.physics, stats, turnMin);
+  const tMsg = `${name} turnable: tightest vs the car ${t.minRatio.toFixed(2)}x at point ${t.at} (path ${t.pathRadiusM.toFixed(1)} m, car ${t.carRadiusM.toFixed(1)} m at ${t.kph.toFixed(0)} kph)`;
+  if (t.bad.length) warn(`${tMsg}; ${t.bad.length} point(s) under ${turnMin}x: ${t.bad.slice(0, 12).join(', ')}`); else ok(tMsg);
+}
 if (json.racingLineSpeed && json.racingLineSpeed.length !== line.length) warn(`racingLineSpeed has ${json.racingLineSpeed.length} values for ${line.length} line points (stale)`);
 
 // ---- Pit path + boxes.
