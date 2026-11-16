@@ -1,4 +1,4 @@
-import { aiStartCompound, computeExitLine, rainAt, waterAt, wheelPositions, shower, consumableScale, defaultPitPlan, offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type CarSetup, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { aiStartCompound, computeExitLine, rainAt, waterAt, wheelPositions, shower, consumableScale, defaultPitPlan, offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, cornerTable, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type CarSetup, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawTrails, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -6,6 +6,7 @@ import { startLoop } from './loop';
 import { Renderer, type CarLook } from './render';
 import {
   chooseTrackId,
+  playerTrackList,
   contact,
   raceConfig,
   slipstream,
@@ -201,7 +202,7 @@ async function main(): Promise<void> {
   const plannedLap = (b: CarBuild, k: number): number => {
     const line = racingLine!, base = aiCfg.presets[aiPreset] ?? aiCfg.presets[aiCfg.defaultPreset]!;
     const pr = k === 0 ? base : driverPreset(base, lineup[k - 1], aiCfg.skill?.spread ?? 0);
-    const v = speedProfile(line.x, line.y, physics, buildStats(b, ctx.catalog), { cornerMargin: pr.cornerMargin, brakeMargin: pr.brakeMargin, fuelKg: physics.fuel.startKg / 2 });
+    const v = speedProfile(line.x, line.y, physics, buildStats(b, ctx.catalog), { cornerMargin: pr.cornerMargin, brakeMargin: pr.brakeMargin, fuelKg: physics.fuel.startKg / 2, table: (aiCfg as unknown as AiConfig).measuredLimits ? cornerTable(ctx, b) : undefined });
     let t = 0;
     for (let i = 0; i < v.length; i++) t += Math.hypot(line.x[(i + 1) % v.length]! - line.x[i]!, line.y[(i + 1) % v.length]! - line.y[i]!) / Math.max(1, v[i]!);
     return t;
@@ -474,6 +475,8 @@ async function main(): Promise<void> {
     nightAvailable: !!night,
     evolution: ctx.evolution.enabled,
     trackName: json.name,
+    tracks: playerTrackList(),
+    onTrack: (id: string) => { const q = new URLSearchParams(location.search); q.set('track', id); location.search = q.toString(); },
     trackId: json.id,
     setupFields: ctx.catalog.specs.setup.fields,
     trackBase: () => ({ ...trackBase() }),

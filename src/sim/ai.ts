@@ -6,7 +6,8 @@
 import { buildStats } from './car-config';
 import { damageGrip, isDamaged } from './damage';
 import { blueFlag, chooseMode, concedes, coverChance, keepGoodExits, lineFor, LINE_IDS, lineOffsets, offsetPath, offsetsFromPoints, otherHasRightOfWay, type CraftMode, type DefenceConfig, type LineId, type OvertakingConfig, type RacecraftConfig } from './racecraft';
-import { speedProfile, transferGripFactor } from './line-optimizer';
+import { plannedRadius, plannedSpeed, speedProfile, transferGripFactor } from './line-optimizer';
+import { cornerTable } from './car-limits';
 import { planDefence, planMove, type LookaheadConfig, type Plan, type PlanCar } from './lookahead';
 import { aiCompound, compoundGrip, compoundWaterGrip, consumableScale, FUEL_TO_END, fuelGrip, stopDone, type Compound, type PitPlan } from './strategy';
 import { towRange } from './slipstream';
@@ -74,6 +75,15 @@ export interface AiConfig {
    *  minOffsetM plans its speed and braking from the line moved by its current offset (clipped to the road), using the
    *  same grip model: the inside of a corner is slower. Absent / enabled false = the racing line's speeds. */
   pathSpeed?: { enabled: boolean; minOffsetM: number; stepM: number };
+  /** Card "AI speed plan from the car's measured limits": plan corner speeds and the cornering grip left for braking from
+   *  the car's measured cornering table (car-limits.ts), not the both-axles-at-the-limit model. Absent / false = the model. */
+  measuredLimits?: boolean;
+  /** Card "AI: pass when the car ahead slows mid-corner": GAP OPTIONS (the free stretches across the road past the cars
+   *  within rangeM ahead, gapMarginM either side of each; each stretch's centre is a lane: look-ahead adds them to its
+   *  lanes, the rules brain aims its pass there) and OPPORTUNISTIC passes (the car ahead running slowFrac under this car's
+   *  own plan there, less for an aggressive driver: pull out even mid-corner). latDecay: the look-ahead's sideways
+   *  prediction of a car moving across, while on. Absent / enabled false = off. */
+  midCorner?: { enabled: boolean; slowFrac: number; rangeM: number; gapMarginM: number; latDecay?: number };
   /** AI overtaking card: pulling out of a tow, the overlap rule, conceding, blue flags (racecraft.ts). */
   overtaking?: OvertakingConfig;
   /** AI overtaking round 3: the defender's cover / hold choice into braking zones (racecraft.ts defenceChoice). */
@@ -511,6 +521,10 @@ export interface AiState {
   /** Round 8 (Oxford scale): the car ahead's speed / this car's own profile where it's at its limit, smoothed
    *  (1 = no pace advantage; absent = 1). */
   pace?: number;
+  /** Mid-corner passing: the line offset of the gap a committed pass aims at (absent: the preset's pass offset). */
+  passOffsetM?: number | undefined;
+  /** Mid-corner passing: the committed pass is an opportunistic one (the car ahead slowed mid-corner). */
+  passOpp?: boolean;
   defPlan?: { cover: boolean; p: number } | undefined;
   /** Start mode (part D): its launch ('good' / 'spin' / 'bog') and whether lap one's start mode has handed over. */
   launch?: 'good' | 'spin' | 'bog';
@@ -619,15 +633,15 @@ function racecraftLines(line: RacingLine, cfg: RacecraftConfig, halfCarM: number
   }
   return c;
 }
-function carProfile(line: AiPath, car: CarState, ctx: SimContext, preset: AiPreset): Float64Array {
+function carProfile(line: AiPath, car: CarState, ctx: SimContext, preset: AiPreset, measured = false): Float64Array {
   const p = ctx.physics;
-  const key = JSON.stringify([car.build, preset.cornerMargin, preset.brakeMargin, p.tyres, p.car, p.engine, p.brakes, p.aero]);
+  const key = JSON.stringify([car.build, preset.cornerMargin, preset.brakeMargin, p.tyres, p.car, p.engine, p.brakes, p.aero, measured ? [p.steering, p.traction, p.input, ctx.catalog.specs.setup] : 0]);
   let m = profiles.get(line);
   if (!m) profiles.set(line, (m = new Map()));
   let prof = m.get(key);
   if (!prof) {
     if (m.size > 64) m.clear();
-    prof = speedProfile(line.x, line.y, p, buildStats(car.build, ctx.catalog), { cornerMargin: preset.cornerMargin, brakeMargin: preset.brakeMargin, fuelKg: p.fuel.startKg / 2 });
+    prof = speedProfile(line.x, line.y, p, buildStats(car.build, ctx.catalog), { cornerMargin: preset.cornerMargin, brakeMargin: preset.brakeMargin, fuelKg: p.fuel.startKg / 2, table: measured ? cornerTable(ctx, car.build) : undefined });
     m.set(key, prof);
   }
   return prof;
@@ -841,9 +855,13 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   const kAero = phys.aero.downforceCoef * stats.downforce;
   const vTop = (phys.engine.topSpeedKph / 3.6) * stats.topSpeed;
   const muLatT = mu * phys.tyres.lateralGrip * transferGripFactor(mu * phys.tyres.lateralGrip, phys); // load transfer costs grip
-  const latMax = (v: number) => muLatT * G * (1 + kAero * v * v);
-  /** Max cornering speed at curvature k: v^2 |k| = mu_lat g (1 + kAero v^2). */
+  // MEASURED LIMITS (ai.measuredLimits): the car's measured cornering table, this car's grip x its tyres today.
+  const tbl = cfg.measuredLimits ? cornerTable(ctx, car.build) : undefined;
+  const tStats = tbl ? { ...stats, grip: stats.grip * tyre } : stats;
+  const latMax = (v: number) => { if (!tbl) return muLatT * G * (1 + kAero * v * v); const u = Math.max(v, 1); return (u * u) / Math.max(1e-6, plannedRadius(tbl, u, phys, tStats, car.fuelKg)); };
+  /** Max cornering speed at curvature k: v^2 |k| = mu_lat g (1 + kAero v^2) (or the measured table). */
   const cornerV = (k: number) => {
+    if (tbl) return Math.abs(k) < 1e-9 ? vTop : plannedSpeed(tbl, 1 / Math.abs(k), phys, tStats, vTop, car.fuelKg);
     const muLat = mu * phys.tyres.lateralGrip;
     const den = Math.abs(k) - muLat * G * kAero;
     return den <= 0 ? vTop : Math.min(vTop, Math.sqrt((muLat * G) / den));
@@ -874,6 +892,24 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     return { ahead: bq * SPACING_M + proj - ownProj, side: lateral(best + bq, other.x, other.y) - crossErr, along: other.vx * tg.x + other.vy * tg.y };
   };
   const others = world.cars.map((o, oi) => (oi === i ? undefined : rel(o)));
+  // GAP OPTIONS (ai.midCorner): where this car's centre could go past the cars ahead, line-relative offsets.
+  const mc = cfg.midCorner?.enabled && !pit ? cfg.midCorner : undefined;
+  const gapCentres = (): number[] => {
+    if (!mc) return [];
+    let roomL = Infinity, roomR = Infinity;
+    for (let q = 0; q <= Math.ceil(mc.rangeM / SPACING_M); q++) { roomL = Math.min(roomL, path.left[idx(best + q)]!); roomR = Math.min(roomR, path.right[idx(best + q)]!); }
+    const half = phys.car.widthM / 2, lo = -roomL + half + 0.3, hi = roomR - half - 0.3;
+    if (hi <= lo) return [];
+    const blocked = others.filter((o): o is NonNullable<typeof o> => !!o && Number.isFinite(o.ahead) && o.ahead > -phys.car.lengthM && o.ahead < mc.rangeM)
+      .map((o) => { const c = o.side + crossErr; return [c - phys.car.widthM - mc.gapMarginM, c + phys.car.widthM + mc.gapMarginM] as const; })
+      .sort((a, b) => a[0] - b[0]);
+    const out: number[] = [];
+    let from = lo;
+    for (const [a, b] of blocked) { if (a > from) { const to = Math.min(a, hi); if (to > from) out.push((from + to) / 2); } from = Math.max(from, b); if (from >= hi) break; }
+    if (from < hi) out.push((from + hi) / 2);
+    return out;
+  };
+  const gaps = gapCentres();
   // ROUND 7 (scale): following gaps in car lengths, a small speed term, AGGRESSION closer (both brains).
   // (Round 8, Oxford scale on: its own follow block, the tight gap only for a car in ATTACK with a real pace advantage.)
   const fw = sc ? sc.follow : cfg.follow?.enabled ? cfg.follow : undefined;
@@ -918,7 +954,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     let qe = q0; while (qe < q0 + 80 && Math.abs(path.k[idx(best + qe)]!) > 0.01) qe++;
     let qs = qe; while (qs < qe + 200 && Math.abs(path.k[idx(best + qs)]!) < 0.006) qs++;
     if ((qs - qe) * SPACING_M < cb.minStraightM) return {};
-    const rcl = racecraftLines(line, rcfg, phys.car.widthM / 2, ctx), pN = carProfile(line, car, ctx, preset), pE = carProfile(rcl.paths[1], car, ctx, preset), pI = carProfile(rcl.paths[2], car, ctx, preset);
+    const rcl = racecraftLines(line, rcfg, phys.car.widthM / 2, ctx), pN = carProfile(line, car, ctx, preset, !!cfg.measuredLimits), pE = carProfile(rcl.paths[1], car, ctx, preset, !!cfg.measuredLimits), pI = carProfile(rcl.paths[2], car, ctx, preset, !!cfg.measuredLimits);
     const j = idx(best + qe + 5), gain = Math.max(0, pE[j]! - Math.min(pN[j]!, pI[j]!));
     return { cutback: { side: -turn, gainM: gain * cb.gainSec } };
   };
@@ -929,7 +965,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   if (sm && race?.phase === 'racing' && !st.startDone && !pit) {
     let near = false, brakeSoon = false;
     for (const o of others) if (o && Number.isFinite(o.ahead) && Math.abs(o.ahead) < sm.spreadM) near = true;
-    const pf0 = carProfile(line, car, ctx, preset);
+    const pf0 = carProfile(line, car, ctx, preset, !!cfg.measuredLimits);
     for (let q = 1, look = Math.ceil((Math.max(10, speed) * sm.untilBrakeSec) / SPACING_M); q <= look; q++) if (pf0[idx(best + q)]! < speed * 0.9) { brakeSoon = true; break; }
     if (prog0 >= 1 || (world.tick - st.launchTick > 30 && (!near || brakeSoon))) st.startDone = true;
     else startMode = true;
@@ -939,7 +975,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     if (st.planTicks <= 0) {
       const react = la.craftReact ? 1.5 - (preset.racecraft ?? 0.5) : 1;
       st.planTicks = Math.max(1, Math.round((la.evalSec * react) / TICK_DT));
-      const pf = carProfile(line, car, ctx, preset), pScale = Math.sqrt(Math.max(0.05, tyre)) * st.trust;
+      const pf = carProfile(line, car, ctx, preset, !!cfg.measuredLimits), pScale = Math.sqrt(Math.max(0.05, tyre)) * st.trust;
       const bF = brakeA(speed);
       st.plan = planMove({
         speed, lat: crossErr, latRate: cfg.pitLane?.latRateMps ?? 5,
@@ -953,7 +989,9 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
         ...(la.cutback && !startMode ? cutbackFor(la.cutback) : {}),
         // Start mode: lanes across the whole road (and where it is now), a cost for each metre moved across.
         ...(startMode && sm ? { laneOffsets: startLanes(path.left[best]!, path.right[best]!, crossErr, sm.laneStepM), moveCostM: sm.moveCostM } : {}),
-      }, react !== 1 ? { ...la, reactSec: la.reactSec * react } : la, st.plan);
+        // GAP OPTIONS (ai.midCorner): its fixed lanes plus the centre of every free gap across the road ahead.
+        ...(!(startMode && sm) && mc && gaps.length ? { laneOffsets: [...la.lanes.map((l) => l * la.laneM), ...gaps] } : {}),
+      }, { ...(react !== 1 ? { ...la, reactSec: la.reactSec * react } : la), ...(mc?.latDecay !== undefined ? { latDecay: mc.latDecay } : {}) }, st.plan);
     }
   } else if (st.plan || st.planTicks) { st.plan = undefined; st.planTicks = 0; }
   const plan = st.plan;
@@ -986,11 +1024,11 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     // with the square root of grip) and how much of its corner speed it has learned to trust.
     // RACECRAFT: the line(s) in use, blended; each has its own speed profile and during a blend the slower counts.
     const rc = cfg.racecraft?.enabled ? racecraftLines(line, cfg.racecraft, phys.car.widthM / 2, ctx) : undefined;
-    const profs = rc ? rc.paths.map((p, l) => (st.lineW[l]! > 0.01 ? carProfile(p, car, ctx, preset) : undefined)) : [carProfile(line, car, ctx, preset)];
+    const profs = rc ? rc.paths.map((p, l) => (st.lineW[l]! > 0.01 ? carProfile(p, car, ctx, preset, !!cfg.measuredLimits) : undefined)) : [carProfile(line, car, ctx, preset, !!cfg.measuredLimits)];
     const prof0 = { at: (q: number) => { let v = Infinity; for (const p of profs) if (p) v = Math.min(v, p[q]!); return v; } };
     // PATH SPEED: off the racing line, plan from the path it's actually on (never faster than the line's own plan).
     const ps = cfg.pathSpeed;
-    const offProf = ps?.enabled && Math.abs(st.offset) > ps.minOffsetM ? carProfile(offsetLine(line, st.offset, phys.car.widthM / 2, ps.stepM), car, ctx, preset) : undefined;
+    const offProf = ps?.enabled && Math.abs(st.offset) > ps.minOffsetM ? carProfile(offsetLine(line, st.offset, phys.car.widthM / 2, ps.stepM), car, ctx, preset, !!cfg.measuredLimits) : undefined;
     const prof = offProf ? { at: (q: number) => Math.min(prof0.at(q), offProf[q]!) } : prof0;
     // A late braker (mistake) reads the target 12 m on. (Attacking alongside no longer brakes later: on
     // lap one the whole field is alongside someone, and they all went wide into turn 1 together.)
@@ -1003,7 +1041,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     const backOff = 1 - (cfg.fight?.dirtyBackOff ?? 0) * (preset.tyreCare ?? 0.5) * (car.dirtyAir / Math.max(1e-6, ctx.slipstream.dirtyAir.maxDownforceLoss));
     allowed = prof.at(idx(best + ahead)) * Math.sqrt(Math.max(0.05, tyre)) * st.trust * push * backOff;
     diagPush = push;
-    if (cfg.predict) { profN = carProfile(line, car, ctx, preset); profI = rc ? carProfile(rc.paths[2], car, ctx, preset) : undefined; profScale = Math.sqrt(Math.max(0.05, tyre)) * st.trust; }
+    if (cfg.predict) { profN = carProfile(line, car, ctx, preset, !!cfg.measuredLimits); profI = rc ? carProfile(rc.paths[2], car, ctx, preset, !!cfg.measuredLimits) : undefined; profScale = Math.sqrt(Math.max(0.05, tyre)) * st.trust; }
     for (let q = 1, look = Math.ceil((speed * 6) / SPACING_M); q <= look; q++) if (prof.at(idx(best + q)) < speed * 0.9) { brakeInSec = (q * SPACING_M) / Math.max(1, speed); brakingSoon = brakeInSec <= (sc ? scaleSec(sc.brakeSoon, phys.car.lengthM, speed) : 3); break; }
     st.brakeInSec = brakeInSec;
     // Oxford scale (round 8): this car's pace advantage on the car ahead in line (within 40 m): that car's speed over
@@ -1269,10 +1307,12 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
   if (st.passTarget >= 0) {
     const o = others[st.passTarget];
     const past = !!o && Number.isFinite(o.ahead) && o.ahead < -phys.car.lengthM;
-    if (pit || !o || !Number.isFinite(o.ahead) || past || o.ahead > ov.commitM || (Math.abs(path.k[best]!) > 0.02 && o.ahead > phys.car.lengthM * 1.5)) {
+    if (pit || !o || !Number.isFinite(o.ahead) || past || o.ahead > ov.commitM || (!st.passOpp && Math.abs(path.k[best]!) > 0.02 && o.ahead > phys.car.lengthM * 1.5)) {
       if (past) st.passesMade++;
       st.passTarget = -1;
-    } else wantOffset = st.passSide * passOff;
+      st.passOffsetM = undefined;
+      st.passOpp = false;
+    } else wantOffset = st.passOffsetM ?? st.passSide * passOff;
   }
   for (const [oi, o] of (pit && !rejoining ? [] : others).entries()) {
     if (!o) continue;
@@ -1289,22 +1329,40 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
     // ...unless it's covering that inside (round 3): then the CUTBACK, stay on our own line, carry the speed through
     // the apex behind it and get the better exit (diving at a covered inside, or round the outside, is no pass).
     const covered = !committed && coveringAhead(o);
-    let passSide = committed ? st.passSide : pit || !straightAhead || covered ? undefined
+    // OPPORTUNISTIC (ai.midCorner): the car ahead clearly under this car's own plan where it is (a mistake, a slow
+    // exit, running wide): a pass is on even off a straight, on the open side (away from it).
+    let opportunistic = false;
+    if (mc && !committed && !covered && profN && ahead < mc.rangeM) {
+      const pv = profN[idx(best + Math.round(ahead / SPACING_M))]! * profScale;
+      opportunistic = pv > 5 && otherFwd < pv * (1 - mc.slowFrac * (1.5 - aggr));
+    }
+    const oLine = side + crossErr;
+    /** The gap on side sd of this car (ahead), nearest the preset's pass lane on that side. */
+    const gapOn = (sd: number) => { const g = gaps.filter((c) => (c - oLine) * sd > 0); return g.length ? g.reduce((a, b) => (Math.abs(b - sd * passOff) < Math.abs(a - sd * passOff) ? b : a)) : undefined; };
+    const oSides = opportunistic ? (side >= 0 ? [-1, 1] : [1, -1]) : sides;
+    let passSide = committed ? st.passSide : pit || (!straightAhead && !opportunistic) || covered ? undefined
+      : mc ? oSides.find((sd) => sd !== alongside && gapOn(sd) !== undefined)
       : sides.find((sd) => sd !== alongside && (sd > 0 ? path.right[best]! : path.left[best]!) > passOff + 0.5);
     // In a tow: stay tucked in and let it pull us up; pull out when the braking point is near (before the
     // braking zone), not the moment we're close. More aggressive drivers pull out earlier (AI overtaking card).
     const tucked = !committed && passSide !== undefined && car.tow > 0.05 && brakeInSec > ov.pullOutSec + aggr * ov.pullOutAggrSec && closing < 1.5 && ahead > phys.car.lengthM + 0.8;
-    if (tucked) passSide = undefined;
-    if (passSide !== undefined) wantOffset = passSide * passOff;
+    if (tucked && !opportunistic) passSide = undefined;
+    // (An opportunistic pass follows its gap every tick: the car that made the mistake drifts, usually wide, into it.)
+    const gapAim = mc && passSide !== undefined && (!committed || st.passOpp) ? gapOn(passSide) : undefined;
+    if (committed && st.passOpp && gapAim !== undefined) st.passOffsetM = gapAim;
+    if (passSide !== undefined) wantOffset = committed ? st.passOffsetM ?? passSide * passOff : gapAim ?? passSide * passOff;
     // Out of the tow and closing within commitM: the move is on.
-    if (!committed && passSide !== undefined && st.passTarget < 0 && ahead < ov.commitM && closing > 0) { st.passTarget = oi; st.passSide = passSide; st.passTries++; }
+    if (!committed && passSide !== undefined && st.passTarget < 0 && ahead < ov.commitM && closing > 0) { st.passTarget = oi; st.passSide = passSide; st.passOffsetM = gapAim; st.passOpp = opportunistic; st.passTries++; }
     // Alongside (or nearly) on the inside of the coming corner: attack, braking a little later.
     if (passSide !== undefined && passSide === nextTurn && ahead < phys.car.lengthM * 1.5) attack = true;
     // Following: hold a gap (tucked into a tow: just a safe car length or so). Passing: still never drive
     // into it while we overlap it sideways (a car is ~2 m wide); once out of line, the gap stops mattering.
     // Still in line with it as the braking zone comes: the full gap, since it brakes when we can't see it coming
     // (racing into the back of the car ahead there was most of the AI's car contact in races).
-    const hold = tucked ? phys.car.lengthM + 1 : passSide === undefined ? gap : Math.abs(side) < 2.2 ? (brakingSoon ? gap : phys.car.lengthM + 1.5) : -Infinity;
+    // (An opportunistic pass moving out round a car that slowed mid-corner keeps a car length + 1 m, not the braking-zone
+    // gap: following it down to its speed while still in line is what stopped every such pass.)
+    const opp = opportunistic || (committed && !!st.passOpp);
+    const hold = tucked ? phys.car.lengthM + 1 : passSide === undefined ? gap : opp ? (Math.abs(side) < phys.car.widthM * 0.9 ? phys.car.lengthM + 0.5 : -Infinity) : Math.abs(side) < 2.2 ? (brakingSoon ? gap : phys.car.lengthM + 1.5) : -Infinity;
     // Pulling out from behind a slow or stopped car: creep (it can't steer out of line standing still).
     // Still in line with it (not yet a car's width across): creep only as fast as the gap left allows, down to
     // nothing at a hand's width (a fixed 2 m/s creep nudged a stopped car on the grid, Bugs card).
@@ -1327,7 +1385,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
       for (let q = 1, look = Math.ceil(Math.max(12, speed) / SPACING_M); q <= look; q++) room = Math.min(room, passSide > 0 ? path.right[idx(best + q)]! : path.left[idx(best + q)]!);
       squeezeSoon = room - 1.5 < needSide;
     }
-    if (pr && profN && (passSide === undefined || Math.abs(side) < 2.2 || squeezeSoon)) {
+    if (pr && profN && (passSide === undefined || (opp ? Math.abs(side) < phys.car.widthM * 0.9 : Math.abs(side) < 2.2 || squeezeSoon))) {
       const gBase = fw ? phys.car.lengthM + fwBumper(speed, true) : phys.car.lengthM + pr.gapM;
       const onInside = coveringAhead(o) && !!profI, pL = best + Math.round(ahead / SPACING_M), a = brakeA(speed), g = plan && oi === plan.target ? Math.min(plan.gapM, gBase) : gBase;
       // Follow switch: the car ahead's predicted speed = the ratio it runs at to this car's profile where it's at that

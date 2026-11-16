@@ -27,7 +27,7 @@ import rules from '../config/rules.json' with { type: 'json' };
 import wallTracing from '../config/wall-tracing.json' with { type: 'json' };
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
-  aiInputSource, buildRacingLine, buildStats, cornersOf, createSimTrack, createWorld, normalizeSetup, speedProfile, step, surfaceAt, traceWalls,
+  aiInputSource, buildRacingLine, buildStats, cornersOf, cornerTable, createSimTrack, createWorld, normalizeSetup, speedProfile, step, surfaceAt, traceWalls,
   type AiConfig, type CarBuild, type CarInput, type CarSetup, type PhysicsConfig, type SimContext, type TrackJson, type WorldState,
 } from '../src/sim/index.ts';
 import { catalog, loadTrackNode, simContextNode, surfaces } from './load-track-node.ts';
@@ -166,7 +166,7 @@ if (only.has(2)) {
   // planned apex speed for the hairpin, speed held on / off throttle; the circle it settles on vs the hairpin line's
   // tightest radius (local, +-2 points), and whether it spins on the way in.
   const stats = buildStats(build(), catalog);
-  const vPlan = speedProfile(line.x, line.y, physics, stats, { cornerMargin: preset.cornerMargin, brakeMargin: preset.brakeMargin, fuelKg: physics.fuel.startKg / 2 });
+  const vPlan = speedProfile(line.x, line.y, physics, stats, { cornerMargin: preset.cornerMargin, brakeMargin: preset.brakeMargin, fuelKg: physics.fuel.startKg / 2, table: cfg0.measuredLimits ? cornerTable(ctx, build()) : undefined });
   const n = line.n, wrap = (q: number) => ((q % n) + n) % n;
   const R2 = (i: number) => { const a = wrap(i - 2), b = wrap(i + 2); const ax = line.x[i]! - line.x[a]!, ay = line.y[i]! - line.y[a]!, bx = line.x[b]! - line.x[i]!, by = line.y[b]! - line.y[i]!; const cr = ax * by - ay * bx; return Math.abs(cr) > 1e-9 ? (Math.hypot(ax, ay) * Math.hypot(bx, by) * Math.hypot(line.x[b]! - line.x[a]!, line.y[b]! - line.y[a]!)) / (2 * Math.abs(cr)) : Infinity; };
   let vApex = Infinity, rMin = Infinity;

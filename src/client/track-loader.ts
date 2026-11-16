@@ -29,6 +29,7 @@ import {
   defaultTrackId,
   hashMask,
   snapToPalette,
+  strategyForTrack,
   stubTrackJson,
   traceWalls,
   type CarCatalog,
@@ -74,6 +75,11 @@ const defaults = trackDefaults as TrackDefaults;
 const trackJsons = import.meta.glob<TrackJson>('/tracks/*/track.json', { eager: true, import: 'default' });
 
 /** ?track=<id> wins (dev convenience; fixtures allowed there), else the first authored track. */
+/** Tracks a player may pick (never fixtures), with their names (Track: Colon card: the menu's Track row). */
+export function playerTrackList(): Array<{ id: string; name: string }> {
+  return trackList.filter((t) => !t.fixture).map((t) => ({ id: t.id, name: getTrackJsonStub(t.id).name ?? t.id }));
+}
+
 export function chooseTrackId(): string {
   const asked = new URLSearchParams(location.search).get('track');
   if (asked && trackList.some((t) => t.id === asked)) return asked;
@@ -211,5 +217,5 @@ export async function loadOverhead(json: TrackJson): Promise<HTMLImageElement | 
 }
 
 export function simContext(mask: MaskState): SimContext {
-  return { track: mask.track, walls: mask.walls, physics, catalog, rules, contact, race: raceConfig, slipstream, assists, damage, ers, evolution, strategy, weather, cache: createPhysicsCache() };
+  return { track: mask.track, walls: mask.walls, physics, catalog, rules, contact, race: raceConfig, slipstream, assists, damage, ers, evolution, strategy: strategyForTrack(strategy, mask.track.json.tyreLifeLaps), weather, cache: createPhysicsCache() };
 }

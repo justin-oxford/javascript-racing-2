@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import aiJson from '../config/ai.json' with { type: 'json' };
 import lineJson from '../config/racing-line.json' with { type: 'json' };
 import { formatTrackJson } from '../src/client/editor/format.ts';
-import { buildRacingLine, buildStats, computeExitLine, cornersOf, offsetPath, type AiConfig, type TrackJson } from '../src/sim/index.ts';
+import { buildRacingLine, buildStats, computeExitLine, cornersOf, cornerTable, normalizeSetup, offsetPath, type AiConfig, type TrackJson } from '../src/sim/index.ts';
 import { catalog, loadTrackNode, simContextNode, TRACKS_DIR } from './load-track-node.ts';
 
 const args = process.argv.slice(2);
@@ -23,7 +23,7 @@ const stats = buildStats(ctx.physics.defaultCar, catalog);
 const lc = lineJson as unknown as { exitLeadM: number; exitBumps: number };
 const n = line.n, wrap = (q: number) => ((q % n) + n) % n;
 const t0 = performance.now();
-const { points, offsets: exit, speed: prof, time } = computeExitLine(line, ctx.physics, stats, { exitStraightM: rc.exitStraightM, exitShiftM: rc.exitShiftM, edgeM: rc.edgeM, exitLeadM: lc.exitLeadM, exitBumps: lc.exitBumps }, loaded.track.json.pxPerMeter);
+const { points, offsets: exit, speed: prof, time } = computeExitLine(line, ctx.physics, stats, { exitStraightM: rc.exitStraightM, exitShiftM: rc.exitShiftM, edgeM: rc.edgeM, exitLeadM: lc.exitLeadM, exitBumps: lc.exitBumps }, loaded.track.json.pxPerMeter, cornerTable(ctx, { ...ctx.physics.defaultCar, setup: normalizeSetup(loaded.track.json.baseSetup ?? ctx.physics.defaultCar.setup, catalog.specs.setup) }));
 console.log(`${id}: EXIT line in ${(performance.now() - t0).toFixed(0)} ms (straights >= ${rc.exitStraightM} m)`);
 
 const neutralV = prof(line.x, line.y), ep = offsetPath(line, exit), exitV = prof(ep.x, ep.y);

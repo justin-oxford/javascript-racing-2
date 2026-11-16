@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import racingLineJson from '../../config/racing-line.json';
 import { listTracks } from '../../tools/track-list';
 import { catalog, loadTrackNode, simContextNode, TRACKS_DIR } from '../../tools/load-track-node';
-import { buildStats, footprintCheck, turnCheck, type Point } from './index';
+import { buildStats, cornerTable, footprintCheck, normalizeSetup, turnCheck, type Point } from './index';
 
 // Player-facing tracks (fixtures like Indiana, a drafted test mask, are reported by track-fit but not held to this).
 const tracks = listTracks(TRACKS_DIR).map((t) => t.id).filter((id) => { const j = loadTrackNode(id).track.json; return !j.fixture && j.racingLine.length > 2; });
@@ -23,11 +23,14 @@ describe('racing line hard limits', () => {
     }
   });
 
-  it.each(tracks)('%s: the racing line and EXIT line are never tighter than the car can turn at the planned speed', (id) => {
-    const L = loadTrackNode(id), ctx = simContextNode(L), j = L.track.json, stats = buildStats(ctx.physics.defaultCar, catalog);
+  it.each(tracks)('%s: the racing line and EXIT line are never tighter than the car can turn at the planned speed', { timeout: 60_000 }, (id) => {
+    const L = loadTrackNode(id), ctx = simContextNode(L), j = L.track.json;
+    // Against the car's MEASURED cornering limits on the track's base setup (as the AI plans).
+    const build = { ...ctx.physics.defaultCar, setup: normalizeSetup(j.baseSetup ?? ctx.physics.defaultCar.setup, catalog.specs.setup) };
+    const stats = buildStats(build, catalog), table = cornerTable(ctx, build);
     for (const pts of [j.racingLine, j.racingLineExit ?? []]) {
       if (pts.length < 3) continue;
-      const m = toM(pts, j.pxPerMeter), t = turnCheck(m.x, m.y, ctx.physics, stats, racingLineJson.turnRatioMin ?? 0.99);
+      const m = toM(pts, j.pxPerMeter), t = turnCheck(m.x, m.y, ctx.physics, stats, racingLineJson.turnRatioMin ?? 0.99, table);
       expect(t.bad, `ratio ${t.minRatio.toFixed(3)} at point ${t.at}: path ${t.pathRadiusM.toFixed(1)} m, car ${t.carRadiusM.toFixed(1)} m at ${t.kph.toFixed(0)} kph`).toEqual([]);
     }
   });

@@ -6,7 +6,7 @@
 // Points are reported as line points (racingLine index) and track pixels.
 import aiJson from '../config/ai.json' with { type: 'json' };
 import racingLineJson from '../config/racing-line.json' with { type: 'json' };
-import { buildRacingLine, buildStats, footprintCheck, startPose, surfaceAt, turnCheck, wheelPositions, type AiConfig, type Point } from '../src/sim/index.ts';
+import { buildRacingLine, buildStats, cornerTable, footprintCheck, normalizeSetup, startPose, surfaceAt, turnCheck, wheelPositions, type AiConfig, type Point } from '../src/sim/index.ts';
 import { catalog, loadTrackNode, simContextNode } from './load-track-node.ts';
 
 void aiJson as unknown as AiConfig;
@@ -93,13 +93,16 @@ offRoad(json.racingLineSeed, 'racing line seed (direction only: the optimizer mo
 offRoad(json.racingLineExit, 'EXIT line');
 // The optimizer's two hard rules (Racing line optimizer: hard track and turning limits).
 const fpMargin = racingLineJson.footprintMarginM ?? 0.2, turnMin = racingLineJson.turnRatioMin ?? 0.99;
-const stats = buildStats(ctx.physics.defaultCar, catalog);
+const baseBuild = { ...ctx.physics.defaultCar, setup: normalizeSetup(json.baseSetup ?? ctx.physics.defaultCar.setup, catalog.specs.setup) };
+const stats = buildStats(baseBuild, catalog);
+// Rule 2 against the car's MEASURED cornering limits on this track's base setup (car-limits.ts).
+const table = cornerTable(ctx, baseBuild);
 for (const [name, pts] of [['racing line', json.racingLine], ['EXIT line', json.racingLineExit]] as const) {
   if (!pts || pts.length < 3) continue;
   const f = footprintCheck(track, pts, ctx.physics.car.widthM / 2, fpMargin);
   const fMsg = `${name} footprint (half width ${(ctx.physics.car.widthM / 2).toFixed(2)} m + ${fpMargin} m on asphalt / kerb): least room ${f.minRoomM.toFixed(2)} m at point ${f.at}`;
   if (f.bad.length) warn(`${fMsg}; ${f.bad.length} segment(s) short: ${f.bad.slice(0, 10).map((b) => `${b.i} (${b.roomM.toFixed(2)} m)`).join(', ')}`); else ok(fMsg);
-  const t = turnCheck(pts.map((p) => p.x / ppm), pts.map((p) => p.y / ppm), ctx.physics, stats, turnMin);
+  const t = turnCheck(pts.map((p) => p.x / ppm), pts.map((p) => p.y / ppm), ctx.physics, stats, turnMin, table);
   const tMsg = `${name} turnable: tightest vs the car ${t.minRatio.toFixed(2)}x at point ${t.at} (path ${t.pathRadiusM.toFixed(1)} m, car ${t.carRadiusM.toFixed(1)} m at ${t.kph.toFixed(0)} kph)`;
   if (t.bad.length) warn(`${tMsg}; ${t.bad.length} point(s) under ${turnMin}x: ${t.bad.slice(0, 12).join(', ')}`); else ok(tMsg);
 }

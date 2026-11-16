@@ -56,6 +56,17 @@ export interface StopState {
   repair: boolean;
 }
 
+/**
+ * This track's tyre lives (track.json tyreLifeLaps, measured per track with npm run strategy-probe -- --track <id>)
+ * over the compound defaults: the AI's stint planning reads lifeLaps. The rest of the config is shared, unchanged.
+ */
+export function strategyForTrack(cfg: StrategyConfig, lives: Partial<Record<string, number>> | undefined): StrategyConfig {
+  if (!lives) return cfg;
+  const compounds = { ...cfg.compounds };
+  for (const [c, laps] of Object.entries(lives)) if (c in compounds && typeof laps === 'number') compounds[c as Compound] = { ...compounds[c as Compound], lifeLaps: laps };
+  return { ...cfg, compounds };
+}
+
 export function defaultPitPlan(cfg: StrategyConfig, compound: Compound = cfg.defaultCompound): PitPlan {
   return { compound, fuelKg: FUEL_TO_END, tyres: true, repair: true };
 }

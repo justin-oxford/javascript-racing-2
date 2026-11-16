@@ -19,3 +19,4 @@ export * from './racecraft';
 export * from './drivers';
 export * from './strategy';
 export * from './weather';
+export * from './car-limits';

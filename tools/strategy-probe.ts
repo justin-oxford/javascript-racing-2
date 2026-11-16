@@ -5,14 +5,14 @@
 //     and lowest wheel wear per lap (soft quicker first and off the cliff first; hard the reverse). Gives the
 //     lifeLaps to put in config/strategy.json.
 //  3. RACE: 10 AI, --laps (default 20), seeded start compounds and the AI's own stops: compounds each car used.
-// Usage: npm run strategy-probe [-- --k 0.6 --laps 20 --seed 1 --matched --skip-stints --stops]
+// Usage: npm run strategy-probe [-- --track oxford --k 0.6 --laps 20 --seed 1 --matched --skip-stints --stops]
 import aiJson from '../config/ai.json' with { type: 'json' };
-import { aiInputSource, aiStartCompound, buildRacingLine, COMPOUNDS, consumableScale, createRaceWorld, createWorld, step, wearGrip, type AiConfig, type CarBuild, type Compound, type WorldState } from '../src/sim/index.ts';
+import { aiInputSource, aiStartCompound, buildRacingLine, normalizeSetup, COMPOUNDS, consumableScale, createRaceWorld, createWorld, step, wearGrip, type AiConfig, type CarBuild, type Compound, type WorldState } from '../src/sim/index.ts';
 import { catalog, defaultTrackIdNode, loadTrackNode, simContextNode } from './load-track-node.ts';
 
 const args = process.argv.slice(2);
 const opt = (n: string, d: string) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1]! : d; };
-const loaded = loadTrackNode(defaultTrackIdNode());
+const loaded = loadTrackNode(opt('track', defaultTrackIdNode()));
 const ctx = simContextNode(loaded);
 if (args.includes('--k')) ctx.physics.tyres.loadSensitivity = Number(opt('k', '0'));
 const line = buildRacingLine(loaded.track)!;
@@ -24,7 +24,7 @@ const minWear = cfg.pits?.minWear ?? 0.45;
 function solo(build: CarBuild, maxLaps: number, fixFuel?: number, stopWhen?: (w: WorldState) => boolean) {
   let w: WorldState = createWorld(ctx, [build]);
   if (fixFuel !== undefined) w = { ...w, cars: [{ ...w.cars[0]!, fuelKg: fixFuel }] };
-  const noPit = { ...cfg, pits: { ...cfg.pits!, minWear: 0, fuelLaps: 0 } };
+  const noPit = { ...cfg, pits: { ...cfg.pits!, minWear: 0, fuelLaps: 1, reachLaps: 0 } };
   const ai = aiInputSource(0, () => ({ world: w, ctx, line }), () => clean, () => noPit, 7);
   const laps: { time: number; wear: number; grip: number }[] = [];
   for (let t = 0; t < 60 * 60 * 20 && laps.length < maxLaps; t++) {
@@ -51,7 +51,9 @@ function solo(build: CarBuild, maxLaps: number, fixFuel?: number, stopWhen?: (w:
 if (!args.includes('--skip-stints')) {
   console.log(`\nSTINTS (one AI alone, half a tank held, until the lowest wheel is under the AI's pit threshold ${minWear}):`);
   for (const c of COMPOUNDS) {
-    const laps = solo({ ...ctx.physics.defaultCar, equalise: 1, compound: c }, 40, ctx.physics.fuel.tankKg / 2, (w) => Math.min(...w.cars[0]!.wheels.map((x) => x.wear)) < minWear - 0.1);
+    // On the track's base setup (Game-scale car round: the setup's gearing and pressure move wear a lot).
+    if (c === 'inter' || c === 'wet') continue;
+    const laps = solo({ ...ctx.physics.defaultCar, setup: normalizeSetup(loaded.track.json.baseSetup ?? ctx.physics.defaultCar.setup, catalog.specs.setup), equalise: 1, compound: c }, 120, ctx.physics.fuel.tankKg / 2, (w) => Math.min(...w.cars[0]!.wheels.map((x) => x.wear)) < minWear - 0.1);
     const life = laps.findIndex((l) => l.wear < minWear);
     console.log(`  ${c.padEnd(6)} life to the pit threshold ${life < 0 ? `>${laps.length}` : life} laps; laps: ${laps.map((l) => `${l.time.toFixed(2)}(${Math.round(l.wear * 100)}%)`).join(' ')}`);
   }

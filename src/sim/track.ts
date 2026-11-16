@@ -56,6 +56,9 @@ export interface TrackJson {
   /** AI racecraft EXIT line (Racing line optimizer card): the racing line moved for exit speed before long
    *  straights, same points round the lap (npm run optimize-exit-line). Absent = generated from curvature. */
   racingLineExit?: Point[];
+  /** Tyre life to the AI's pit threshold per compound on this track, laps (npm run strategy-probe -- --track <id>);
+   *  over config/strategy.json's defaults. Absent = the defaults. */
+  tyreLifeLaps?: Partial<Record<string, number>>;
   /** Car setup overhaul card: this track's base setup (real units; npm run setup-search -- --write). What
    *  players and the AI load here; players adjust from it. Absent = the default car's. */
   baseSetup?: CarSetup;

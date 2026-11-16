@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PNG } from 'pngjs';
 import racingLineJson from '../config/racing-line.json' with { type: 'json' };
-import { buildStats, footprintCheck, turnCheck, type Point, type TrackJson } from '../src/sim/index.ts';
+import { buildStats, cornerTable, footprintCheck, normalizeSetup, turnCheck, type Point, type TrackJson } from '../src/sim/index.ts';
 import { catalog, loadTrackNode, simContextNode, TRACKS_DIR } from './load-track-node.ts';
 
 const args = process.argv.slice(2);
@@ -24,7 +24,7 @@ const stats = buildStats(ctx.physics.defaultCar, catalog), half = ctx.physics.ca
 const draw = (pts: readonly Point[] | undefined, col: number[], edges: boolean) => {
   if (!pts?.length) return;
   const fp = new Set(footprintCheck(L.track, pts, ctx.physics.car.widthM / 2, racingLineJson.footprintMarginM ?? 0.2).bad.flatMap((b) => [b.i, (b.i + 1) % pts.length]));
-  const tc = new Set(turnCheck(pts.map((p) => p.x / ppm), pts.map((p) => p.y / ppm), ctx.physics, stats, racingLineJson.turnRatioMin ?? 0.99).bad);
+  const tc = new Set(turnCheck(pts.map((p) => p.x / ppm), pts.map((p) => p.y / ppm), ctx.physics, stats, racingLineJson.turnRatioMin ?? 0.99, cornerTable(ctx, { ...ctx.physics.defaultCar, setup: normalizeSetup(json.baseSetup ?? ctx.physics.defaultCar.setup, catalog.specs.setup) })).bad);
   const n = pts.length;
   for (let i = 0; i < n; i++) {
     const a = pts[i]!, b = pts[(i + 1) % n]!, l = Math.hypot(b.x - a.x, b.y - a.y) || 1, nx = -(b.y - a.y) / l, ny = (b.x - a.x) / l;

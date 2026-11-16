@@ -27,6 +27,9 @@ export interface MenuDeps {
   trackBase: () => { [field: string]: number };
   setupSlots: ReadonlyArray<{ slot: string; minus: string; plus: string }>;
   trackName: string;
+  /** Tracks a player can pick (Track: Colon card): id + name; choosing one reloads the page on it. */
+  tracks?: ReadonlyArray<{ id: string; name: string }>;
+  onTrack?(id: string): void;
   profiles: ProfileStore;
   /** Audio buses and their current volume. */
   volumes(): Array<{ bus: string; value: number }>;
@@ -155,6 +158,7 @@ export class MainMenu {
       </div>
       <p class="note">Race weekend: practice, then qualifying (best lap sets the grid), then the race. Quick race goes straight to the grid.</p>
       <div class="rows">
+        ${this.d.tracks && this.d.tracks.length > 1 ? `<label>Track</label><select data-field="track">${this.d.tracks.map((t) => `<option value="${esc(t.id)}"${t.id === this.d.trackId ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>` : ''}
         <label>Team</label><select data-field="team"><option value="">Default</option>${this.d.catalog.teams.map((t) => `<option value="${t.id}"${t.id === p.team ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
         <label>Spec</label>${this.choice('spec', s.spec ?? specs[0]!, specs.map((x) => [x, x] as const))}
         <label>AI opponents</label>${this.choice('aiCount', s.ai.count, [0, 1, 3, 5, 9].map((n) => [n, String(n)] as const))}
@@ -296,6 +300,7 @@ export class MainMenu {
     if (f === 'name') { const name = cleanName(t.value); if (name) this.save({ ...p, name }); else this.render(); }
     else if (f === 'helmet') this.save({ ...p, helmet: t.value });
     else if (f === 'team') this.save({ ...p, team: t.value });
+    else if (f === 'track' && t.value !== this.d.trackId) this.d.onTrack?.(t.value);
     else if (f === 'active') { const q = this.d.profiles.setActive(t.value); if (q) { this.d.onProfile(q); this.render(); } }
     else if (f === 'import') void this.importProfile(t);
     else if (f === 'ghost' && t.files?.[0] && this.d.ghost) {

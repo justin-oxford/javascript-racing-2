@@ -3,7 +3,17 @@
   "name": "Oxford",
   "version": 2,
   "pxPerMeter": 10.8,
-  "baseSetup": { "frontWingDeg": 26, "rearWingDeg": 30, "topSpeedKph": 246, "brakeBiasPct": 67.5, "arbFront": 6, "arbRear": 4, "rideFrontMm": 40, "rideRearMm": 42, "pressurePsi": 25.5 },
+  "baseSetup": {
+    "frontWingDeg": 26,
+    "rearWingDeg": 30,
+    "topSpeedKph": 246,
+    "brakeBiasPct": 67.5,
+    "arbFront": 6,
+    "arbRear": 4,
+    "rideFrontMm": 40,
+    "rideRearMm": 42,
+    "pressurePsi": 25.5
+  },
   "files": { "background": "background.png", "mask": "mask.png", "overhead": "overhead.png" },
   "timingLines": {
     "startFinish": { "a": { "x": 1560, "y": 378 }, "b": { "x": 1560, "y": 121 } },
@@ -1690,5 +1700,6 @@
     { "x": 1477.3, "y": 207.5 },
     { "x": 1498.9, "y": 207 },
     { "x": 1520.4, "y": 206 }
-  ]
+  ],
+  "tyreLifeLaps": { "soft": 28, "medium": 55, "hard": 100 }
 }

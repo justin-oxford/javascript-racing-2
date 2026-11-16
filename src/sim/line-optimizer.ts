@@ -274,6 +274,8 @@ export function pathCurvature(x: ArrayLike<number>, y: ArrayLike<number>, closed
 export interface ProfileOptions {
   /** Fraction of the computed corner speed used (AI preset cornerMargin; 1 for the reference line). */
   cornerMargin: number;
+  /** The car's measured cornering limits (car-limits.ts cornerTable). Absent = the analytic both-axles model. */
+  table?: CornerTable | undefined;
   /** Fraction of the braking estimate planned with (AI preset brakeMargin; 1 for the reference line). */
   brakeMargin: number;
   /** Fuel load for the estimate, kg. */
@@ -298,7 +300,7 @@ export function speedProfile(x: ArrayLike<number>, y: ArrayLike<number>, physics
   const muLat = mu * t.lateralGrip * transferGripFactor(mu * t.lateralGrip, physics);
   const kAero = physics.aero.downforceCoef * stats.downforce;
   const vTop = (physics.engine.topSpeedKph / 3.6) * stats.topSpeed;
-  const latMax = (v: number) => muLat * G * (1 + kAero * v * v);
+  const latMax = (v: number) => { if (!opt.table) return muLat * G * (1 + kAero * v * v); const u = Math.max(v, 1); return (u * u) / Math.max(1e-6, plannedRadius(opt.table, u, physics, stats, opt.fuelKg)); };
   // Steering lock limits corner speed too: the front wheels must reach about wheelbase x curvature
   // (Ackermann) within the lock available at that speed, which shrinks with speed (lockFalloffKph).
   // A car gets round a little tighter than pure geometry (tyre slip, some rotation): half a peak slip
@@ -315,6 +317,8 @@ export function speedProfile(x: ArrayLike<number>, y: ArrayLike<number>, physics
     return Math.max(6, lo);
   };
   const corner = (kk: number) => {
+    // MEASURED LIMITS: the fastest speed whose measured radius still fits this curvature (lock and either axle included).
+    if (opt.table) return (Math.abs(kk) < 1e-9 ? vTop : plannedSpeed(opt.table, 1 / Math.abs(kk), physics, stats, vTop, opt.fuelKg)) * opt.cornerMargin;
     const den = Math.abs(kk) - muLat * G * kAero;
     const grip = den <= 0 ? vTop : Math.min(vTop, Math.sqrt((muLat * G) / den));
     return Math.min(grip, lockV(kk)) * opt.cornerMargin;
@@ -353,9 +357,9 @@ export function speedProfile(x: ArrayLike<number>, y: ArrayLike<number>, physics
  * timed with this speed profile (see racecraft.ts optimizeExitOffsets). Returns the whole lap's points in
  * track pixels (track.json racingLineExit) and the offsets. Used by npm run optimize-exit-line and the editor.
  */
-export function computeExitLine(line: LinePath, physics: PhysicsConfig, stats: Stats, cfg: { exitStraightM: number; exitShiftM: number; edgeM: number; exitLeadM: number; exitBumps: number }, ppm: number): { points: Point[]; offsets: Float64Array; speed: (x: ArrayLike<number>, y: ArrayLike<number>) => Float64Array; time: (x: ArrayLike<number>, y: ArrayLike<number>, v: ArrayLike<number>, from: number, to: number) => number } {
+export function computeExitLine(line: LinePath, physics: PhysicsConfig, stats: Stats, cfg: { exitStraightM: number; exitShiftM: number; edgeM: number; exitLeadM: number; exitBumps: number }, ppm: number, table?: CornerTable): { points: Point[]; offsets: Float64Array; speed: (x: ArrayLike<number>, y: ArrayLike<number>) => Float64Array; time: (x: ArrayLike<number>, y: ArrayLike<number>, v: ArrayLike<number>, from: number, to: number) => number } {
   const n = line.n, wrap = (q: number) => ((q % n) + n) % n;
-  const speed = (x: ArrayLike<number>, y: ArrayLike<number>) => speedProfile(x, y, physics, stats, { cornerMargin: 1, brakeMargin: 1, fuelKg: physics.fuel.startKg / 2 });
+  const speed = (x: ArrayLike<number>, y: ArrayLike<number>) => speedProfile(x, y, physics, stats, { cornerMargin: 1, brakeMargin: 1, fuelKg: physics.fuel.startKg / 2, table });
   const time = (x: ArrayLike<number>, y: ArrayLike<number>, v: ArrayLike<number>, from: number, to: number) => {
     let t = 0;
     for (let q = from; q < to; q++) { const i = wrap(q), j = wrap(q + 1); t += Math.hypot(x[j]! - x[i]!, y[j]! - y[i]!) / Math.max(1, (v[i]! + v[j]!) / 2); }
@@ -455,18 +459,58 @@ export interface TurnCheck {
  * RULE 2, TURNABLE: the line's radius (pathCurvature, as the AI and the speed profile see it) against the car's
  * tightest radius at the speed the reference profile plans there. Line in metres.
  */
-export function turnCheck(x: ArrayLike<number>, y: ArrayLike<number>, physics: PhysicsConfig, stats: Stats, ratioMin = 0.99): TurnCheck {
+export function turnCheck(x: ArrayLike<number>, y: ArrayLike<number>, physics: PhysicsConfig, stats: Stats, ratioMin = 0.99, table?: CornerTable): TurnCheck {
   const k = pathCurvature(x, y, true);
-  const v = speedProfile(x, y, physics, stats, { cornerMargin: 1, brakeMargin: 1, fuelKg: physics.fuel.startKg / 2 });
+  const v = speedProfile(x, y, physics, stats, { cornerMargin: 1, brakeMargin: 1, fuelKg: physics.fuel.startKg / 2, table });
   let minRatio = Infinity, at = 0;
   const bad: number[] = [];
   for (let i = 0; i < k.length; i++) {
     const pathR = Math.abs(k[i]!) > 1e-9 ? 1 / Math.abs(k[i]!) : Infinity;
-    const car = carTurnRadiusM(v[i]!, physics, stats).radiusM;
+    const car = plannedRadius(table, v[i]!, physics, stats);
     const ratio = pathR / car;
     if (ratio < minRatio) { minRatio = ratio; at = i; }
     if (ratio < ratioMin) bad.push(i);
   }
   const pathR = 1 / Math.max(1e-9, Math.abs(k[at]!));
-  return { minRatio, at, pathRadiusM: pathR, carRadiusM: carTurnRadiusM(v[at]!, physics, stats).radiusM, kph: v[at]! * 3.6, bad };
+  return { minRatio, at, pathRadiusM: pathR, carRadiusM: plannedRadius(table, v[at]!, physics, stats), kph: v[at]! * 3.6, bad };
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// The car's measured cornering limits (car-limits.ts measures the table; these read it).
+
+export interface CornerTable {
+  /** Speeds measured, m/s, ascending. */
+  v: number[];
+  /** Tightest steady radius held at each speed, m (non-decreasing after a monotone clean-up). */
+  r: number[];
+  /** Measured radius / the analytic model's radius (carTurnRadiusM) for the same car at each speed: how much wider
+   *  the real car turns than the both-axles-at-the-limit model says. Other team stats scale through the model. */
+  ratio: number[];
+}
+
+/** The measured / model ratio at speed v (interpolated; the end values beyond the measured range). */
+export function ratioAt(t: CornerTable, v: number): number {
+  const n = t.v.length;
+  if (!n) return 1;
+  if (v <= t.v[0]!) return t.ratio[0]!;
+  for (let i = 1; i < n; i++) if (v <= t.v[i]!) { const f = (v - t.v[i - 1]!) / (t.v[i]! - t.v[i - 1]!); return t.ratio[i - 1]! + f * (t.ratio[i]! - t.ratio[i - 1]!); }
+  return t.ratio[n - 1]!;
+}
+
+/** This car's tightest steady radius at speed v, m: the model's for its own stats x the measured ratio. */
+export function plannedRadius(t: CornerTable | undefined, v: number, physics: PhysicsConfig, stats: Stats, fuelKg?: number): number {
+  const m = carTurnRadiusM(v, physics, stats, fuelKg).radiusM;
+  return t ? m * ratioAt(t, v) : m;
+}
+
+/** The fastest speed (m/s, up to vMax) whose planned radius still fits radius R (bisection; radius grows with speed). */
+export function plannedSpeed(t: CornerTable | undefined, R: number, physics: PhysicsConfig, stats: Stats, vMax: number, fuelKg?: number): number {
+  if (plannedRadius(t, vMax, physics, stats, fuelKg) <= R) return vMax;
+  let lo = 0.5, hi = vMax;
+  // Tighter than the car turns even at walking pace: it can still crawl round on slip and rotation (the analytic plan's
+  // 6 m/s floor; at 0.5 m/s cars stopped dead at the pit-box entry kinks).
+  if (plannedRadius(t, lo, physics, stats, fuelKg) > R) return Math.min(vMax, 6);
+  for (let k = 0; k < 32; k++) { const mid = (lo + hi) / 2; if (plannedRadius(t, mid, physics, stats, fuelKg) <= R) lo = mid; else hi = mid; }
+  return Math.max(lo, Math.min(vMax, 6));
+}
+
