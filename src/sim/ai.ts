@@ -84,6 +84,11 @@ export interface AiConfig {
    *  own plan there, less for an aggressive driver: pull out even mid-corner). latDecay: the look-ahead's sideways
    *  prediction of a car moving across, while on. Absent / enabled false = off. */
   midCorner?: { enabled: boolean; slowFrac: number; rangeM: number; gapMarginM: number; latDecay?: number };
+  /** Card "Lap-1 turn-one pile-up": a follower predicts the car ahead from where it WILL be: its speed recovering toward
+   *  its own plan at accelMps2 (min(plan, now + accel x t)), not staying at its current fraction of the plan for the
+   *  whole look (that margin stacked car by car down a queue until the back nearly stopped). Reaction time (RACECRAFT)
+   *  and the gap stay. Absent / enabled false = the old prediction. */
+  queuePlan?: { enabled: boolean; accelMps2: number };
   /** AI overtaking card: pulling out of a tow, the overlap rule, conceding, blue flags (racecraft.ts). */
   overtaking?: OvertakingConfig;
   /** AI overtaking round 3: the defender's cover / hold choice into braking zones (racecraft.ts defenceChoice). */
@@ -162,6 +167,8 @@ const G = 9.81;
 
 /** config/ai.json "mistakes" (Race noise card). */
 export interface MistakeConfig {
+  /** Every mistake chance x this (?mistakes=<x>, AI mistake rate card; absent = 1). Launch mistakes too. */
+  scale?: number;
   /** Relative weights of each kind. */
   kinds: { lateBrake: number; wide: number; wheelspin: number; spin: number };
   durationSec: number;
@@ -674,7 +681,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
       if (sc) {
         const [r1, n1] = rand(st.rng), [r2, n2] = rand(n1);
         st.rng = n2;
-        st.launch = r1 < sc.badChance * (1.5 - (preset.consistency ?? 0.5)) * 2 ? (r2 < 0.5 ? 'spin' : 'bog') : 'good';
+        st.launch = r1 < sc.badChance * (1.5 - (preset.consistency ?? 0.5)) * 2 * (cfg.mistakes?.scale ?? 1) ? (r2 < 0.5 ? 'spin' : 'bog') : 'good';
       }
     }
     if (world.tick < st.launchTick) return { input: { throttle: 0, brake: 0, steer: 0 }, state: st };
@@ -807,7 +814,7 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
       return lon < 0 && -lon < mk.pressureSec * v && Math.abs(lat) < 4;
     });
     const worn = 1 - car.wheels.reduce((a, w) => a + w.wear, 0) / 4;
-    const rate = (preset.mistakesPerMin / 60) * (pressed ? 1 + mk.pressureMul : 1) * (st.craft === 'attack' ? 1 + mk.attackMul : 1)
+    const rate = (preset.mistakesPerMin / 60) * (mk.scale ?? 1) * (pressed ? 1 + mk.pressureMul : 1) * (st.craft === 'attack' ? 1 + mk.attackMul : 1)
       * (1 + mk.wearMul * worn) * (1 + mk.fuelMul * car.fuelKg / Math.max(1, phys.fuel.tankKg));
     if (r < rate * TICK_DT) {
       [r, st.rng] = rand(st.rng);
@@ -1397,9 +1404,12 @@ export function aiDrive(world: WorldState, i: number, prevState: AiState, line: 
         tR = fw.reactSec * (1.5 - (preset.racecraft ?? 0.5));
       }
       let vCap = Infinity;
+      const qp = cfg.queuePlan?.enabled ? cfg.queuePlan : undefined;
       for (let k = 0, K = Math.ceil((Math.max(10, speed) * pr.lookSec) / SPACING_M); k <= K; k++) {
         const q = idx(pL + k);
-        const vL = (onInside ? Math.min(profN[q]!, profI![q]!) : profN[q]!) * profScale * lr;
+        const plan0 = (onInside ? Math.min(profN[q]!, profI![q]!) : profN[q]!) * profScale;
+        // QUEUE PLAN: where it WILL be: back toward its plan at a real car's acceleration, not stuck at today's fraction.
+        const vL = qp ? Math.min(plan0, Math.max(0, otherFwd) + qp.accelMps2 * ((k * SPACING_M) / Math.max(5, otherFwd))) : plan0 * lr;
         const d = ahead + k * SPACING_M - g - Math.max(0, speed - vL) * tR;
         vCap = Math.min(vCap, d <= 0 ? vL : Math.sqrt(vL * vL + 2 * a * d));
       }

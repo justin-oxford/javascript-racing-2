@@ -47,7 +47,10 @@
     "line-shot": "tsx tools/line-shot.ts",
     "car-targets": "tsx tools/car-targets.ts",
     "ai-cards-probe": "tsx tools/ai-cards-probe.ts",
-    "midcorner-probe": "tsx tools/midcorner-probe.ts"
+    "midcorner-probe": "tsx tools/midcorner-probe.ts",
+    "corner-list": "tsx tools/corner-list.ts",
+    "turn-one-probe": "tsx tools/turn-one-probe.ts",
+    "mistake-probe": "tsx tools/mistake-probe.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

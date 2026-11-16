@@ -57,6 +57,8 @@
   "pathSpeed": { "enabled": false, "minOffsetM": 0.75, "stepM": 0.5 },
   "_comment_measuredLimits": "Card 'AI speed plan from the car's measured limits': corner speeds and the cornering grip left for braking come from the car's measured cornering table (src/sim/car-limits.ts: the tightest steady circle at each speed, driven on a flat pad), not the both-axles-at-the-limit model. false = the model.",
   "measuredLimits": true,
+  "_comment_queuePlan": "Card 'Lap-1 turn-one pile-up': a follower predicts the car ahead from where it WILL be (its speed back toward its own plan at accelMps2), not at its current fraction of the plan for the whole look; reaction time and the gap stay.",
+  "queuePlan": { "enabled": false, "accelMps2": 8 },
   "_comment_midCorner": "Card 'AI: pass when the car ahead slows mid-corner': gap options (the centre of every free stretch across the road past the cars within rangeM ahead, gapMarginM either side of each; look-ahead adds them to its lanes, the rules brain aims its pass there) and opportunistic passes (the car ahead slowFrac under this car's own plan there, x (1.5 - aggression): pull out even mid-corner). latDecay: look-ahead's sideways prediction while on.",
   "midCorner": { "enabled": false, "slowFrac": 0.12, "rangeM": 40, "gapMarginM": 0.4, "latDecay": 0.95 },
   "racecraft": { "enabled": true, "insideM": 2.5, "insideLeadM": 40, "coverLeadM": 120, "insideSlope": 0.06, "insideSmooth": 3, "exitStraightM": 100, "exitShiftM": 30, "exitWeight": 6, "exitIterations": 4000, "edgeM": 0.8, "attackGapSec": 1.0, "defendGapSec": 0.6, "nurseWear": 0.5, "nurseDamage": 0.3, "evalSec": 0.25, "holdSec": 2, "blendPerM": 0.02 },

@@ -5,6 +5,7 @@
 //   ?watch=1                 the AI drives the player's car too (spectate)
 //   ?race=<laps>             start a quick race at once (with ?ai=N for the field)
 //   ?grid=reverse            that race's grid by pace, fastest car last (pace = each car's own planned lap)
+//   ?mistakes=<x>            every AI mistake chance x <x> (ai.mistakes.scale; 1 = as configured)
 //   ?car=v1                  the old car (tag car-v1, config/car-v1.json): its physics, setup effects and base setups
 // The active ones show in a badge in the HUD's corner, so screenshots carry them.
 
@@ -17,6 +18,8 @@ export interface UrlSwitches {
   race?: number;
   grid?: 'reverse';
   car?: 'v1';
+  /** Every AI mistake chance x this. */
+  mistakes?: number;
 }
 
 export function parseSwitches(search: string): UrlSwitches {
@@ -32,25 +35,29 @@ export function parseSwitches(search: string): UrlSwitches {
   if (p.has('race') && Number.isFinite(race) && race >= 1) out.race = Math.min(100, Math.round(race));
   if (p.get('grid') === 'reverse') out.grid = 'reverse';
   if (p.get('car') === 'v1') out.car = 'v1';
+  const mk = p.get('mistakes');
+  if (mk !== null && mk.trim() !== '' && Number.isFinite(Number(mk)) && Number(mk) >= 0) out.mistakes = Math.min(10, Number(mk));
   return out;
 }
 
-interface AiLike { brain?: string; scale?: { oxford?: { enabled?: boolean } } }
+interface AiLike { brain?: string; scale?: { oxford?: { enabled?: boolean } }; mistakes?: { scale?: number } }
 interface SlipLike { dirtyAir: { maxDownforceLoss: number } }
 
 /** Apply the config switches in place (the page's live config objects). */
 export function applySwitches(sw: UrlSwitches, ai: AiLike, slip: SlipLike): void {
   if (sw.brain) ai.brain = sw.brain;
   if (sw.scale !== undefined && ai.scale?.oxford) ai.scale.oxford.enabled = sw.scale;
+  if (sw.mistakes !== undefined && ai.mistakes) ai.mistakes.scale = sw.mistakes;
   if (sw.dirty !== undefined) slip.dirtyAir.maxDownforceLoss = sw.dirty;
 }
 
 /** The badge text: the switches given, plus what's running ("brain rules · scale 1 · dirty 5%"). */
 export function switchLabel(sw: UrlSwitches, ai: AiLike, slip: SlipLike): string {
-  const given = sw.brain !== undefined || sw.scale !== undefined || sw.dirty !== undefined || sw.watch || sw.race !== undefined || sw.grid !== undefined || sw.car !== undefined;
+  const given = sw.brain !== undefined || sw.scale !== undefined || sw.dirty !== undefined || sw.watch || sw.race !== undefined || sw.grid !== undefined || sw.car !== undefined || sw.mistakes !== undefined;
   if (!given) return '';
   const pct = Math.round(slip.dirtyAir.maxDownforceLoss * 1000) / 10;
   const parts = [...(sw.car ? [`car ${sw.car}`] : []), `brain ${ai.brain ?? 'rules'}`, `scale ${ai.scale?.oxford?.enabled ? 1 : 0}`, `dirty ${pct}%`];
+  if (sw.mistakes !== undefined) parts.push(`mistakes x${sw.mistakes}`);
   if (sw.watch) parts.push('watch');
   if (sw.race !== undefined) parts.push(`race ${sw.race} laps`);
   if (sw.grid) parts.push('grid reverse');

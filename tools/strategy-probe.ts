@@ -27,7 +27,7 @@ function solo(build: CarBuild, maxLaps: number, fixFuel?: number, stopWhen?: (w:
   const noPit = { ...cfg, pits: { ...cfg.pits!, minWear: 0, fuelLaps: 1, reachLaps: 0 } };
   const ai = aiInputSource(0, () => ({ world: w, ctx, line }), () => clean, () => noPit, 7);
   const laps: { time: number; wear: number; grip: number }[] = [];
-  for (let t = 0; t < 60 * 60 * 20 && laps.length < maxLaps; t++) {
+  for (let t = 0; t < 60 * 60 * 70 && laps.length < maxLaps; t++) {
     w = step(w, [ai.read(w.tick)], ctx);
     if (fixFuel !== undefined) w = { ...w, cars: [{ ...w.cars[0]!, fuelKg: fixFuel }] };
     for (const e of w.events) if (e.type === 'lap') {

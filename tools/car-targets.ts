@@ -1,5 +1,5 @@
 // Game-scale car card: score the car against its behaviour targets 1-7, the same way before and after a change.
-// Usage: npm run car-targets [-- --car v1] [--physics file.json] [--set assists.abs.cornerShare=0.8] [--json out.json] [--only 1,2,5]
+// Usage: npm run car-targets [-- --track colon --hairpin 2087,459] [--car v1] [--physics file.json] [--set assists.abs.cornerShare=0.8] [--json out.json] [--only 1,2,5]
 //   --car v1: the old car (config/car-v1.json over the live config), as ?car=v1 does in the browser.
 // Oxford, the track's base setup, the default car, no AI mistakes. Thresholds (the card's words made numbers):
 //   1 HAIRPIN (Oxford v2 middle-right): at the AI's speed there, steer used <= 0.9 and fronts <= 1.0 of peak, the
@@ -35,7 +35,7 @@ import { catalog, loadTrackNode, simContextNode, surfaces } from './load-track-n
 const args = process.argv.slice(2);
 const opt = (n: string) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : undefined; };
 const only = new Set((opt('only') ?? '1,2,3,4,5,6,7').split(',').map(Number));
-const loaded = loadTrackNode('oxford');
+const loaded = loadTrackNode(opt('track') ?? 'oxford');
 let physics = structuredClone(simContextNode(loaded).physics) as PhysicsConfig;
 if (opt('physics')) physics = JSON.parse(readFileSync(opt('physics')!, 'utf8')) as PhysicsConfig;
 let baseRaw: unknown = loaded.track.json.baseSetup;
@@ -125,7 +125,9 @@ function balanceAt(kph: number, b = build(), a = ARENA) {
 }
 
 // ---------- the hairpin: the AI alone on Oxford ----------
-const hairpinXY = { x: 1440 / loaded.track.json.pxPerMeter, y: 990 / loaded.track.json.pxPerMeter };
+// --hairpin x,y (track px): the corner targets 1 and 2 score (default: Oxford's middle-right hairpin).
+const hp = (opt('hairpin') ?? '1440,990').split(',').map(Number);
+const hairpinXY = { x: hp[0]! / loaded.track.json.pxPerMeter, y: hp[1]! / loaded.track.json.pxPerMeter };
 const corners = cornersOf(line);
 const hairpin = corners.map((c) => { let best = Infinity, q = c.from; for (let k = c.from; k !== (c.to + 1) % line.n; k = (k + 1) % line.n) { const d = (line.x[k]! - hairpinXY.x) ** 2 + (line.y[k]! - hairpinXY.y) ** 2; if (d < best) { best = d; q = k; } } return { c, d: best, q }; }).sort((a, b) => a.d - b.d)[0]!;
 const inHairpin = (q: number) => { const { from, to } = hairpin.c; const t2 = (to + 6) % line.n; return from <= t2 ? q >= from && q <= t2 : q >= from || q <= t2; };

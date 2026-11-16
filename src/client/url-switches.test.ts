@@ -32,4 +32,14 @@ describe('URL switches', () => {
     expect(base).toEqual({ oxford: { frontWingDeg: 15 } });
     expect(switchLabel(sw, { brain: 'rules' }, { dirtyAir: { maxDownforceLoss: 0.05 } })).toBe('car v1 · brain rules · scale 0 · dirty 5%');
   });
+  it('?mistakes=<x> scales every AI mistake chance for the page load, and shows in the badge', () => {
+    const sw = parseSwitches('?mistakes=0.5');
+    expect(sw.mistakes).toBe(0.5);
+    expect(parseSwitches('?mistakes=abc').mistakes).toBeUndefined();
+    expect(parseSwitches('?mistakes=-1').mistakes).toBeUndefined();
+    const ai = { brain: 'rules', mistakes: { scale: 1 } }, slip = { dirtyAir: { maxDownforceLoss: 0.05 } };
+    applySwitches(sw, ai, slip);
+    expect(ai.mistakes.scale).toBe(0.5);
+    expect(switchLabel(sw, ai, slip)).toBe('brain rules · scale 0 · dirty 5% · mistakes x0.5');
+  });
 });

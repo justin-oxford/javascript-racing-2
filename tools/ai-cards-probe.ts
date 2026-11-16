@@ -1,6 +1,6 @@
 // Re-measure the two AI cards (Game-scale car round, step 4) on a car: "late-stint spins on corner exits" and "plan speed
 // from the path it's actually on" (side-by-side wall incidents).
-// Usage: npm run ai-cards-probe -- [--car v1] [--seeds 10] [--jobs 12] [--set ai.x.y=v ...] [--json out.json]
+// Usage: npm run ai-cards-probe -- [--track oxford] [--races-only] [--car v1] [--seeds 10] [--jobs 12] [--set ai.x.y=v ...] [--json out.json]
 //   STINTS: 10 AI (team field), 20 laps, no fuel burn and no stops (one stint), both brains. Per lap of the stint: spins
 //     (body slip > 60 deg at > 5 m/s) and big slides (> 25 deg) that aren't the AI's own scripted mistakes, the lap time
 //     vs the car's laps 2-4, front / rear tyre wear left. Where (line point) the spins happen.
@@ -21,13 +21,13 @@ import {
 import { contactLog } from './contact-split.ts';
 import { catalog, loadTrackNode, ROOT, simContextNode } from './load-track-node.ts';
 
-interface Job { kind: 'stint' | 'race'; brain: string; seed: number; car: string; sets: string[] }
+interface Job { kind: 'stint' | 'race'; brain: string; seed: number; car: string; sets: string[]; track: string }
 const ARGS = process.argv.slice(2);
 const opt = (n: string, d: string) => { const i = ARGS.indexOf(`--${n}`); return i >= 0 ? ARGS[i + 1]! : d; };
 const DEG = 180 / Math.PI;
 
 function worker(job: Job) {
-  const loaded = loadTrackNode('oxford');
+  const loaded = loadTrackNode(job.track);
   const base = simContextNode(loaded);
   const physics = structuredClone(base.physics) as PhysicsConfig;
   let baseRaw: unknown = loaded.track.json.baseSetup;
@@ -111,7 +111,8 @@ function worker(job: Job) {
 async function main() {
   const brains = ['rules', 'lookahead'], seeds = Number(opt('seeds', '10')), jobsN = Number(opt('jobs', '12')), car = opt('car', 'live');
   const sets = ARGS.flatMap((a, i) => (a === '--set' ? [ARGS[i + 1]!] : []));
-  const jobs: Job[] = brains.flatMap((brain) => Array.from({ length: seeds }, (_, s) => [{ kind: 'stint', brain, seed: s + 1, car, sets } as Job, { kind: 'race', brain, seed: s + 1, car, sets } as Job]).flat());
+  const track = opt('track', 'oxford'), racesOnly = ARGS.includes('--races-only');
+  const jobs: Job[] = brains.flatMap((brain) => Array.from({ length: seeds }, (_, s) => [...(racesOnly ? [] : [{ kind: 'stint', brain, seed: s + 1, car, sets, track } as Job]), { kind: 'race', brain, seed: s + 1, car, sets, track } as Job]).flat());
   const self = fileURLToPath(import.meta.url);
   const res: Array<ReturnType<typeof worker>> = [];
   let next = 0;
