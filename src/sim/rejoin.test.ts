@@ -22,13 +22,15 @@ const ahead = (a: number, b: number) => wrap(b - a);
 const nearest = (c: Pick<CarState, 'x' | 'y'>) => { let b = 0, bd = Infinity; for (let q = 0; q < line.n; q++) { const d = (line.x[q]! - c.x) ** 2 + (line.y[q]! - c.y) ** 2; if (d < bd) { bd = d; b = q; } } return b; };
 const heading = (q: number) => Math.atan2(line.x[wrap(q + 1)]! - line.x[q]!, -(line.y[wrap(q + 1)]! - line.y[q]!));
 const place = (w: WorldState, i: number, x: number, y: number, h: number): WorldState => ({ ...w, cars: w.cars.map((c, k) => (k === i ? { ...c, x, y, heading: h, vx: 0, vy: 0, angVel: 0 } : c)) });
+/** Every 0.5 m across +/-3 m: a thin wall line between coarser samples would drop the car onto it (Oxford v2's islands). */
+const GRID = Array.from({ length: 13 }, (_, k) => k * 0.5 - 3);
 /** A spot near line point q with the car's wheels on grass or gravel (not legal, not wall, not pit lane), metres. */
 const offTrackNear = (q: number): { x: number; y: number } | undefined => {
   const ppm = ctx.track.json.pxPerMeter, h = heading(q), bad = new Set(['grass', 'gravel']);
   for (let side = 6; side < 40; side += 0.5)
     for (const sg of [1, -1]) {
       const x = line.x[q]! + Math.cos(h) * side * sg, y = line.y[q]! + Math.sin(h) * side * sg;
-      const ok = [-3, 0, 3].every((dx) => [-3, 0, 3].every((dy) => { const id = ctx.track.surfaces[ctx.track.mask.data[Math.round((y + dy) * ppm) * ctx.track.mask.width + Math.round((x + dx) * ppm)]!]?.id; return !!id && bad.has(id); }));
+      const ok = GRID.every((dx) => GRID.every((dy) => { const px = Math.round((x + dx) * ppm), py = Math.round((y + dy) * ppm), m = ctx.track.mask; if (px < 0 || py < 0 || px >= m.width || py >= m.height) return false; const id = ctx.track.surfaces[m.data[py * m.width + px]!]?.id; return !!id && bad.has(id); }));
       if (ok) return { x, y };
     }
   return undefined;

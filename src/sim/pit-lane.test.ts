@@ -46,7 +46,7 @@ describe('a field that all pits together', () => {
     const cfg = aiJson as unknown as AiConfig;
     const builds = Array.from({ length: 8 }, (_, i) => ({ ...base.physics.defaultCar, team: catalog.teams[i]!.id }));
     let w: WorldState = createRaceWorld(base, builds, { laps: 5, seed: 1 });
-    w = { ...w, cars: w.cars.map((c) => ({ ...c, fuelKg: 12 })) }; // everyone pits at the end of lap 1
+    w = { ...w, cars: w.cars.map((c) => ({ ...c, fuelKg: 16 })) }; // everyone pits at the end of lap 1 (Oxford v2: 12 kg ran dry before the pits on the longer lap)
     const ai = builds.map((_, i) => aiInputSource(i, () => ({ world: w, ctx: base, line }), () => ({ ...cfg.presets[cfg.defaultPreset]!, mistakesPerMin: 0 }), () => cfg, 70 + i));
     const boxQ = (i: number) => line.pit!.boxStops[w.race!.cars[i]!.box]!.q;
     let queued = 0, pitStuck = 0;

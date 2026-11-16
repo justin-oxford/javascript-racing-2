@@ -94,7 +94,8 @@ describe('slicks keep to the dry line (Wet weather card)', () => {
       const cx = Math.floor(rl.x[q]! / g.cellM), cy = Math.floor(rl.y[q]! / g.cellM);
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const x = cx + dx, y = cy + dy; if (x >= 0 && y >= 0 && x < g.w && y < g.h && Math.hypot((x + 0.5) * g.cellM - rl.x[q]!, (y + 0.5) * g.cellM - rl.y[q]!) < 2) water[y * g.w + x] = 0; }
     }
-    const q = 40, hx = rl.x[q + 1]! - rl.x[q]!, hy = rl.y[q + 1]! - rl.y[q]!, heading = Math.atan2(hx, -hy);
+    // A point on a straight with room to the right for a 3 m offset (was path point 40: keyed to Oxford v1).
+    const q = Array.from({ length: rl.n - 20 }, (_, k) => k + 10).find((k) => [-6, 0, 6].every((d) => Math.abs(rl.k[k + d]!) < 0.005) && rl.right[k]! > 5 && rl.left[k]! > 2)!, hx = rl.x[q + 1]! - rl.x[q]!, hy = rl.y[q + 1]! - rl.y[q]!, heading = Math.atan2(hx, -hy);
     const at = (compound: 'soft' | 'inter'): WorldState => ({ ...base, race: { ...base.race!, phase: 'racing' }, surface: { ...g, water }, cars: [{ ...base.cars[0]!, x: rl.x[q]!, y: rl.y[q]!, heading, vx: Math.sin(heading) * 30, vy: -Math.cos(heading) * 30, compound }] });
     const cfg = aiJson as unknown as AiConfig;
     const held = (w: WorldState, c: SimContextLike) => {
