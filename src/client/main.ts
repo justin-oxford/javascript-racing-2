@@ -54,6 +54,7 @@ import { Ghost, parseGhost } from './ghost';
 import nightJson from '../../config/night.json';
 import { drawRearLights, previewNight, shadeImage, type NightConfig } from './night';
 import './style.css';
+import { applySwitches, parseSwitches, reverseGridOrder, showSwitchBadge, switchLabel } from './url-switches';
 
 async function main(): Promise<void> {
   const trackId = chooseTrackId();
@@ -80,6 +81,9 @@ async function main(): Promise<void> {
   const aiCfg = aiJson as unknown as AiConfig;
   let racingLine: RacingLine | undefined = buildRacingLine(mask.track);
   const params = new URLSearchParams(location.search);
+  // URL switches for testing (?brain= ?scale= ?dirty= ?watch=1 ?race= ?grid=reverse): this page load only.
+  const sw = parseSwitches(location.search);
+  applySwitches(sw, aiCfg as unknown as Parameters<typeof applySwitches>[1], slipstream);
   // Player profiles (Main menu + profiles card): name, helmet, team, settings and keys live in the active
   // profile in this browser. The first one is seeded from the settings remembered before profiles existed.
   const kv = browserStore();
@@ -92,7 +96,9 @@ async function main(): Promise<void> {
   });
   /** Change the active profile's settings (and remember them). */
   const persist = (f: (s: ProfileSettings) => ProfileSettings): void => { profile = profiles.save({ ...profile, settings: f(profile.settings) }); };
-  let aiCount = Math.min(9, Math.max(0, Number(params.get('ai') ?? profile.settings.ai.count) || 0));
+  /** ?ai=N: the AI count for this page load (the profile's own count otherwise, and it isn't saved). */
+  const urlAi = params.has('ai') ? Math.min(9, Math.max(0, Number(params.get('ai')) || 0)) : undefined;
+  let aiCount = urlAi ?? Math.min(9, Math.max(0, profile.settings.ai.count || 0));
   let aiPreset = params.get('level') ?? (profile.settings.ai.preset || aiCfg.defaultPreset);
   if (!aiCfg.presets[aiPreset]) aiPreset = aiCfg.defaultPreset;
   // Car performance (Equal performance card): team stats or equalised cars.
@@ -183,6 +189,17 @@ async function main(): Promise<void> {
   const aiDrivers = (count: number): InputSource[] => Array.from({ length: count }, (_, k) =>
     aiInputSource(k + 1, () => ({ world: curr, ctx, line: racingLine }), () => driverPreset(aiCfg.presets[aiPreset] ?? aiCfg.presets[aiCfg.defaultPreset]!, lineup[k], aiCfg.skill?.spread ?? 0), () => aiCfg, 1000 + k));
   setCarDrivers([undefined, ...lineup]);
+  /** The player's car: the keyboard, or with ?watch=1 an AI driver (spectating). */
+  const playerDriver = (): InputSource => (sw.watch ? aiInputSource(0, () => ({ world: curr, ctx, line: racingLine }), () => aiCfg.presets[aiPreset] ?? aiCfg.presets[aiCfg.defaultPreset]!, () => aiCfg, 999) : keyboard);
+  /** ?grid=reverse: each car's own planned lap on the racing line (its build and driver margins, as the AI plans it). */
+  const plannedLap = (b: CarBuild, k: number): number => {
+    const line = racingLine!, base = aiCfg.presets[aiPreset] ?? aiCfg.presets[aiCfg.defaultPreset]!;
+    const pr = k === 0 ? base : driverPreset(base, lineup[k - 1], aiCfg.skill?.spread ?? 0);
+    const v = speedProfile(line.x, line.y, physics, buildStats(b, ctx.catalog), { cornerMargin: pr.cornerMargin, brakeMargin: pr.brakeMargin, fuelKg: physics.fuel.startKg / 2 });
+    let t = 0;
+    for (let i = 0; i < v.length; i++) t += Math.hypot(line.x[(i + 1) % v.length]! - line.x[i]!, line.y[(i + 1) % v.length]! - line.y[i]!) / Math.max(1, v[i]!);
+    return t;
+  };
   const aiBuilds = (me: CarBuild, count: number): CarBuild[] => {
     const teams = ctx.catalog.teams.filter((t) => t.id !== me.team);
     // The AI runs this track's base setup (track.json baseSetup, from npm run setup-search).
@@ -240,7 +257,7 @@ async function main(): Promise<void> {
     curr = withSurface(createWorld(ctx, builds, settings()), keepTrack ? was : freshSurface());
     if (keepWeekend && weekend) weekend = { ...weekend, started: true };
     prev = curr;
-    drivers = aiCount === 0 ? [keyboard, ...Array.from({ length: extra }, (_, k) => new DonutInput(k + 1))] : [keyboard, ...aiDrivers(aiCount)];
+    drivers = aiCount === 0 ? [playerDriver(), ...Array.from({ length: extra }, (_, k) => new DonutInput(k + 1))] : [playerDriver(), ...aiDrivers(aiCount)];
     hud.setAi(aiCount, aiPreset);
     raceHud?.hide();
   };
@@ -260,11 +277,12 @@ async function main(): Promise<void> {
     // The AI's starting tyres (Race strategy card): seeded, from the race length.
     const scale = consumableScale(profile.settings.race.length, laps, ctx.strategy);
     const builds: CarBuild[] = [me, ...aiBuilds(me, count).map((b, k) => ({ ...b, compound: aiStartCompound(laps, scale, ctx.strategy, (((seed ^ ((k + 1) * 2654435761)) >>> 0) % 1000) / 1000) }))];
-    curr = createRaceWorld(ctx, builds, { laps, seed, playerSlot: grid === 'pole' ? 0 : grid === 'back' ? count : undefined, grid: order, settings: settings() });
+    const gridOrder = order ?? (sw.grid === 'reverse' ? reverseGridOrder(builds.map(plannedLap)) : undefined);
+    curr = createRaceWorld(ctx, builds, { laps, seed, playerSlot: gridOrder ? undefined : grid === 'pole' ? 0 : grid === 'back' ? count : undefined, grid: gridOrder, settings: settings() });
     // The race of a weekend: the track as qualifying left it, swept. A quick race: the starting state.
     curr = withSurface(curr, order && carried ? nextSession(carried, ctx.evolution) : freshSurface());
     prev = curr;
-    drivers = [keyboard, ...aiDrivers(count)];
+    drivers = [playerDriver(), ...aiDrivers(count)];
     hud.setAi(aiCount, aiPreset);
     if (curr.race!.sharedBoxes) console.warn(`[race] ${ctx.track.boxes.length} pit box(es) for ${builds.length} cars: boxes are shared round-robin`);
   };
@@ -290,7 +308,7 @@ async function main(): Promise<void> {
     curr = withSurface(curr, fromPractice ? nextSession(fromPractice, ctx.evolution) : freshSurface());
     prev = curr;
     raceSetup = undefined;
-    drivers = [keyboard, ...aiDrivers(count)];
+    drivers = [playerDriver(), ...aiDrivers(count)];
     weekend = { ...weekend, stage: 'quali' };
   };
   /** Qualifying: end your session; parked in your own pit box (box 0), the rest fast-forwarded. */
@@ -412,8 +430,9 @@ async function main(): Promise<void> {
     if (vfx.quality !== p.settings.vfx) vfx.setQuality(p.settings.vfx);
     if (labelMode !== p.settings.labels) setLabels(p.settings.labels);
     if (p.settings.night !== nightOn && night) setNight(p.settings.night);
-    aiCount = p.settings.ai.count;
-    aiPreset = aiCfg.presets[p.settings.ai.preset] ? p.settings.ai.preset : aiCfg.defaultPreset;
+    aiCount = urlAi ?? p.settings.ai.count;
+    const want = params.get('level') ?? p.settings.ai.preset;
+    aiPreset = aiCfg.presets[want] ? want : aiCfg.defaultPreset;
     perfMode = p.settings.perf;
     damageMode = p.settings.damage;
     hud.setAi(aiCount, aiPreset);
@@ -490,7 +509,9 @@ async function main(): Promise<void> {
   if (preview && night && !profile.settings.night) persist((s) => ({ ...s, night: true })); // ?night=preview: start at night
   applyProfile(profile);
   // The front door: the main menu on load, unless a dev URL param skips straight in.
-  if (!['track', 'ai', 'edit', 'garage', 'level', 'cars'].some((k) => params.has(k))) menu.open('main');
+  if (sw.race !== undefined) startRace(sw.race, 'random');
+  else if (!['track', 'ai', 'edit', 'garage', 'level', 'cars'].some((k) => params.has(k))) menu.open('main');
+  showSwitchBadge(switchLabel(sw, aiCfg as unknown as Parameters<typeof switchLabel>[1], slipstream));
   let debug = false;
   let fps = TICK_HZ; // display smoothing starts at the expected rate, not 0
 

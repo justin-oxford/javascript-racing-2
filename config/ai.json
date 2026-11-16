@@ -60,7 +60,7 @@
   "fuelSave": { "releaseLaps": 0.5 },
   "follow": { "enabled": false, "gapLengths": 0.4, "headwaySec": 0.04, "brakeGapM": 0.75, "brakeZoneSec": 1.5, "aggrScale": 0.8, "followBrake": 1, "predictMargin": 0.97, "reactSec": 0.15, "sideGapM": 0.3, "passOffsetM": 2.5 },
   "scale": { "oxford": {
-    "enabled": false,
+    "enabled": true,
     "windows": { "racecraft.attackGapSec": [2, 0.25], "racecraft.defendGapSec": [1.5, 0.15], "defence.gapSec": [2, 0.25], "defence.decideSec": [8, 0.5], "mistakes.pressureSec": [2, 0.25], "overtaking.closeUntilBrakeSec": [4, 0.5], "overtaking.lapOneCloseUntilBrakeSec": [4, 0.5], "overtaking.pullOutSec": [3, 0.4], "overtaking.pullOutAggrSec": [0, 0.6], "lookahead.attackStayGapSec": [2.5, 0.3] },
     "followCars": 3, "followSec": 0.3, "brakeSoon": [6, 0.5], "deployMinCars": 1.1,
     "follow": { "enabled": true, "gapLengths": 1, "headwaySec": 0.05, "brakeGapM": 0.75, "brakeZoneSec": 1, "aggrScale": 0.8, "followBrake": 1, "predictMargin": 0.97, "reactSec": 0.15, "sideGapM": 0.3, "passOffsetM": 2.5, "attackOnly": true, "paceAdvMin": 0.01, "paceTauSec": 3 }
