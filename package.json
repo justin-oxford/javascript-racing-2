@@ -44,7 +44,8 @@
     "track-stats": "tsx tools/track-stats.ts",
     "rebuild-track": "tsx tools/rebuild-track.ts",
     "hotspots": "tsx tools/hotspots.ts",
-    "line-shot": "tsx tools/line-shot.ts"
+    "line-shot": "tsx tools/line-shot.ts",
+    "car-targets": "tsx tools/car-targets.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
