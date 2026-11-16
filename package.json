@@ -42,7 +42,8 @@
     "art-mask-check": "tsx tools/art-mask-check.ts",
     "track-fit": "tsx tools/track-fit.ts",
     "track-stats": "tsx tools/track-stats.ts",
-    "rebuild-track": "tsx tools/rebuild-track.ts"
+    "rebuild-track": "tsx tools/rebuild-track.ts",
+    "hotspots": "tsx tools/hotspots.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
