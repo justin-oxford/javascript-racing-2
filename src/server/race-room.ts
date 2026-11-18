@@ -8,7 +8,7 @@ import raceJson from '../../config/race.json' with { type: 'json' };
 import teamsJson from '../../config/teams.json' with { type: 'json' };
 import specsJson from '../../config/specs.json' with { type: 'json' };
 import trackDefaults from '../../config/track-defaults.json' with { type: 'json' };
-import { TICK_HZ } from '../sim';
+import { TICK_HZ, type WorldState } from '../sim';
 import { aiCfg, RaceHost } from './race-host';
 import { DROP_GRACE_SEC, MAX_CARS, SNAP_EVERY, type InputMsg, type LobbyMsg, type LobbyPlayer, type RoomPhase, type RoomSettings, type StartMsg } from './protocol';
 import { raceContext, roomTracks } from './tracks';
@@ -40,6 +40,8 @@ export interface RoomOptions {
 }
 
 export class RaceRoom extends Room {
+  /** Tests: sees the server's world after every tick (the truth the clients are checked against). */
+  static tap: ((code: string, world: WorldState) => void) | undefined;
   override maxClients = MAX_CARS;
   private code = '';
   private hostId = '';
@@ -204,6 +206,7 @@ export class RaceRoom extends Room {
         next += tickMs;
         n++;
         host.step();
+        RaceRoom.tap?.(this.code, host.world);
         this.retireDropped();
         if (host.world.tick % SNAP_EVERY === 0) {
           const snap = host.takeSnapshot();

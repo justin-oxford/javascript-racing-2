@@ -58,6 +58,7 @@ import { drawRearLights, previewNight, shadeImage, type NightConfig } from './ni
 import './style.css';
 import { applyCar, applySwitches, parseSwitches, reverseGridOrder, showSwitchBadge, switchLabel, type CarSnapshot } from './url-switches';
 import carV1 from '../../config/car-v1.json';
+import { OnlineMode } from './net/online-mode';
 
 async function main(): Promise<void> {
   const trackId = chooseTrackId();
@@ -333,7 +334,13 @@ async function main(): Promise<void> {
     startRace(weekend.laps, 'random', grid);
   };
 
-  const hud = new Hud(canvas, hudConfig, ctx.catalog, {
+  // Online (card 07, ?online): the server runs the race; the HUD's session menu and the main menu are off.
+  let online: OnlineMode | undefined;
+  /** The world from the last snapshot handed to react() (online). */
+  let netLast: WorldState | undefined;
+  const offlineOnly = <T extends object>(cbs: T): T =>
+    Object.fromEntries(Object.entries(cbs).map(([k, f]) => [k, (...a: unknown[]) => (online ? undefined : (f as (...x: unknown[]) => unknown)(...a))])) as T;
+  const hud = new Hud(canvas, hudConfig, ctx.catalog, offlineOnly({
     onSpec: (spec) => {
       const b = curr.cars[0]!.build;
       if (b.spec === spec) return;
@@ -388,11 +395,11 @@ async function main(): Promise<void> {
     },
     onWeekend: (laps) => startWeekend(laps),
     onLabels: (m) => setLabels(m),
-  }, () => renderer.trackHeight, siteUrl, Object.keys(aiCfg.presets));
+  }), () => renderer.trackHeight, siteUrl, Object.keys(aiCfg.presets));
   hud.setRaceDefaults(ctx.race.defaultLaps);
   const raceHud: RaceHud = new RaceHud(hud.element, ctx.catalog, {
-    onRestart: () => raceSetup && startRace(raceSetup.laps, raceSetup.grid, raceSetup.order),
-    onMenu: () => { startPractice(); hud.openMenu(); },
+    onRestart: () => (online ? online.restart() : raceSetup && startRace(raceSetup.laps, raceSetup.grid, raceSetup.order)),
+    onMenu: () => { if (online) return online.menu(); startPractice(); hud.openMenu(); },
     onQualify: () => startQuali(),
     onEndSession: () => endSession(),
     onStartRace: () => startWeekendRace(),
@@ -518,13 +525,34 @@ async function main(): Promise<void> {
   if (preview && night && !profile.settings.night) persist((s) => ({ ...s, night: true })); // ?night=preview: start at night
   applyProfile(profile);
   // The front door: the main menu on load, unless a dev URL param skips straight in.
-  if (sw.race !== undefined) startRace(sw.race, 'random');
+  if (params.has('online')) {
+    online = new OnlineMode({
+      trackId: json.id,
+      teams: ctx.catalog.teams.map((t) => ({ id: t.id, name: t.name, color: t.colors.primary })),
+      me: { name: profile.name, team: curr0Build().team },
+      setKeysSuspended: (on) => { keyboard.suspended = on; keyboard.release(); },
+      onStart: (world, drv, me) => {
+        raceSetup = undefined;
+        weekend = undefined;
+        setCarDrivers(drv.map((d, i) => (i === 0 ? undefined : { code: d.code, name: d.name })));
+        setPlayerIdentity(nameCode(me.name), me.name);
+        const mine = world.cars[0]!;
+        keyboard.pitPlan = defaultPitPlan(ctx.strategy, mine.compound);
+        fuelLap.laps = -1;
+        vfx.clear();
+        session = new Session(pbStore(profile), recKey, pbSpec(mine.build.spec), mine.build.team);
+        prev = curr = netLast = world;
+      },
+      onLobby: () => { netLast = undefined; startPractice(); },
+    }, params);
+  } else if (sw.race !== undefined) startRace(sw.race, 'random');
   else if (!['track', 'ai', 'edit', 'garage', 'level', 'cars'].some((k) => params.has(k))) menu.open('main');
   showSwitchBadge(switchLabel(sw, aiCfg as unknown as Parameters<typeof switchLabel>[1], slipstream));
   let debug = false;
   let fps = TICK_HZ; // display smoothing starts at the expected rate, not 0
 
   keyboard.onAction((a) => {
+    if (online && (a.type === 'pause' || a.type === 'gridSlot')) return; // online: no pause, no teleports
     // In a race, 0-9 (grid slots) are off: they'd teleport you round the lap. (R is reset to track now:
     // held, in the sim; back to the pits is a menu button.)
     if ((curr.race || curr.quali) && a.type === 'gridSlot') return;
@@ -723,6 +751,7 @@ async function main(): Promise<void> {
 
   const loopHooks = {
     tick() {
+      if (online) return online.tick(keyboard.read(curr.tick)); // online: inputs up, the server steps the world
       if (paused) return; // pause menu: the world stands still (rendering carries on)
       const q = curr.quali;
       const n = q && q.phase !== 'results' && q.cars[0]?.done ? Math.max(1, Math.round(ctx.race.qualiFastForward)) : 1;
@@ -732,6 +761,33 @@ async function main(): Promise<void> {
       const inputs = drivers.map((d) => d.read(curr.tick));
       prev = curr;
       curr = step(curr, inputs, ctx);
+      react();
+    },
+    render(alpha: number, frameSeconds: number) {
+      if (frameSeconds > 0) fps += (1 / frameSeconds - fps) * 0.05;
+      if (online) { alpha = onlineFrame(alpha); online.updateBadge(); }
+      vfx.update(frameSeconds);
+      drawFrame(alpha, frameSeconds);
+    },
+  };
+  /** Online: hand every snapshot that's now in the past to react() (events, effects, sound), then draw between the two either side of now. */
+  function onlineFrame(alpha: number): number {
+    if (!online?.racing) return alpha;
+    const v = online.net.view(performance.now());
+    if (!v) return alpha;
+    for (const s of v.passed) {
+      prev = netLast ?? s.world;
+      curr = s.world;
+      react();
+      netLast = s.world;
+    }
+    prev = v.prev;
+    curr = v.curr;
+    return v.alpha;
+  }
+  /** After the world moved on (a local tick, or a snapshot online): ghost, effects, sound, timing events. */
+  function react(): void {
+    {
       afterTick();
       vfx.onTick(prev, curr, ctx.track, physics);
       const me = curr.cars[0], was = prev.cars[0];
@@ -756,13 +812,8 @@ async function main(): Promise<void> {
         if (e.type === 'outOfBounds')
           console.warn(`[mask bug] car ${e.car} reached out-of-bounds at (${e.x.toFixed(1)}, ${e.y.toFixed(1)}) px in ${mask.file}; reset to spawn`);
       }
-    },
-    render(alpha: number, frameSeconds: number) {
-      if (frameSeconds > 0) fps += (1 / frameSeconds - fps) * 0.05;
-      vfx.update(frameSeconds);
-      drawFrame(alpha, frameSeconds);
-    },
-  };
+    }
+  }
   startLoop(loopHooks);
 
   function drawFrame(alpha: number, _frameSeconds: number): void {
@@ -868,7 +919,7 @@ async function main(): Promise<void> {
           } else if (wx === 'wet' || curr.surface?.water) text = 'WET';
           hud.setWeather(text, rainNow > 0.01);
         }
-        hud.update(me, (curr.tick + alpha) * TICK_DT, session, !!json.timingLines.startFinish, stoppedInBox(), race ? { laps: race.laps, box: (race.cars[0]?.box ?? -1) + 1 } : undefined, { holdFrac: me.rejoin.holdTicks / Math.max(1, ctx.race.reset.holdSec * TICK_HZ), penaltySec: me.rejoin.penaltyTicks / TICK_HZ }, { batteryFrac: me.ers.batteryKJ / Math.max(1, ctx.ers.battery.capacityKJ), fuelMargin }, {
+        hud.update(me, (online?.racing ? prev.tick + alpha * (curr.tick - prev.tick) : curr.tick + alpha) * TICK_DT, session, !!json.timingLines.startFinish, stoppedInBox(), race ? { laps: race.laps, box: (race.cars[0]?.box ?? -1) + 1 } : undefined, { holdFrac: me.rejoin.holdTicks / Math.max(1, ctx.race.reset.holdSec * TICK_HZ), penaltySec: me.rejoin.penaltyTicks / TICK_HZ }, { batteryFrac: me.ers.batteryKJ / Math.max(1, ctx.ers.battery.capacityKJ), fuelMargin }, {
           letter: ctx.strategy.compounds[me.compound].letter,
           color: ctx.strategy.compounds[me.compound].color,
           // The pit board: up for 3 s after a pit key, and all the time in the pit lane.
