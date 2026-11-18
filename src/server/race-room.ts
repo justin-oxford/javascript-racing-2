@@ -16,6 +16,8 @@ import { raceContext, roomTracks } from './tracks';
 const teams = (teamsJson as { teams: Array<{ id: string; name: string }> }).teams;
 const specs = Object.keys((specsJson as { specs: Record<string, unknown> }).specs);
 const codes = new Set<string>();
+/** Rooms open on this server (/health). */
+export const roomCount = (): number => codes.size;
 /** A fresh 4-letter join code (no I or O: they read as 1 and 0). */
 function newCode(): string {
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -59,6 +61,7 @@ export class RaceRoom extends Room {
   override onCreate(options: RoomOptions): void {
     this.code = newCode();
     this.roomId = this.code;
+    console.info(`[room ${this.code}] created`);
     this.timeScale = Math.max(1, Math.min(20, Number(options?.timeScale) || 1));
     const tracks = roomTracks();
     const preferred = (trackDefaults as { defaultTrack?: string }).defaultTrack;
@@ -165,6 +168,7 @@ export class RaceRoom extends Room {
   override onDispose(): void {
     if (this.timer) clearInterval(this.timer);
     codes.delete(this.code);
+    console.info(`[room ${this.code}] closed`);
   }
 
   private startRace(): void {
@@ -174,6 +178,7 @@ export class RaceRoom extends Room {
     const aiCount = Math.min(this.settings.aiCount, MAX_CARS - racers.length);
     const seed = (Math.random() * 2 ** 32) >>> 0;
     this.raceId++;
+    console.info(`[room ${this.code}] race ${this.raceId}: ${this.settings.track}, ${this.settings.laps} laps, ${racers.length} player(s) + ${aiCount} AI`);
     this.host = new RaceHost(ctx, { ...this.settings, aiCount }, racers.map((p) => ({ player: p.id, name: p.name, team: p.team })), seed, this.raceId);
     for (const p of this.players.values()) p.car = this.host.carOf(p.id);
     this.dropped.length = 0;

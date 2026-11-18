@@ -1,7 +1,8 @@
 // Online mode (card 07, ?online): the lobby, the connection and the latency simulator, glued to the game.
 // main.ts keeps drawing worlds exactly as offline; online, the worlds come from the server's snapshots.
 import type { CarInput, CarState, SimContext, WorldState } from '../../sim';
-import { DEFAULT_PORT, type CarDriver, type LobbyMsg, type StartMsg } from '../../server/protocol';
+import netCfg from '../../../config/net.json' with { type: 'json' };
+import { type CarDriver, type LobbyMsg, type StartMsg } from '../../server/protocol';
 import { LAG_PRESETS, LatencySim } from './latency';
 import { LobbyUi } from './lobby-ui';
 import { NetClient } from './net-client';
@@ -23,9 +24,14 @@ export interface OnlineDeps {
 
 const LAG_KEY = 'jr2.net.lag';
 
-/** Where the server is: ?server=ws://..., else VITE_SERVER_URL, else this host on the dev port. */
+/**
+ * Where the server is (card 08): ?server=wss://..., else VITE_SERVER_URL, else config/net.json: the real
+ * server in a production build (GitHub Pages), this machine's dev server in dev.
+ */
 export function serverUrl(params: URLSearchParams): string {
-  return params.get('server') ?? (import.meta.env.VITE_SERVER_URL as string | undefined) ?? `ws://${location.hostname || 'localhost'}:${DEFAULT_PORT}`;
+  return params.get('server')
+    ?? (import.meta.env.VITE_SERVER_URL as string | undefined)
+    ?? (import.meta.env.PROD ? netCfg.server.prodUrl : `ws://${location.hostname || 'localhost'}:${netCfg.server.devPort}`);
 }
 
 export class OnlineMode {

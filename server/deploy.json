@@ -1,0 +1,6 @@
+{
+  "_comment": "npm run deploy:server: the game server box (card 08). Not secret: the key FILE stays on your computer. DEPLOY_HOST / DEPLOY_KEY / DEPLOY_URL override these.",
+  "host": "ubuntu@race.justinoxford.com",
+  "key": "~/.ssh/race-server",
+  "url": "https://race.justinoxford.com"
+}

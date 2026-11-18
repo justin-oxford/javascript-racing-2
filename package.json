@@ -7,7 +7,9 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite",
-    "server": "tsx src/server/main.ts",
+    "server": "tsx src/server/serve.ts",
+    "build:server": "node tools/build-server.mjs",
+    "deploy:server": "node tools/deploy-server.mjs",
     "net-test": "tsx tools/net-test.ts",
     "prepare": "node tools/install-hooks.mjs",
     "build": "npm run typecheck && vite build",
