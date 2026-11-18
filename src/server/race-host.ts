@@ -90,6 +90,11 @@ export class RaceHost {
     return aiInputSource(i, () => ({ world: this.world, ctx: this.ctx, line: this.line }), preset, () => aiCfg, 1000 + i + this.seed);
   }
 
+  /** Is the AI driving car i this tick (AI fill, or a player who dropped)? */
+  aiDriving(i: number): boolean {
+    return !!this.aiDriven[i];
+  }
+
   /** Car index for a player, -1 if they're not in this race. */
   carOf(player: string): number {
     return this.drivers.findIndex((d) => d.player === player);

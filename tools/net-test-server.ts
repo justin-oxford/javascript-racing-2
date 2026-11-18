@@ -6,7 +6,7 @@ import { RaceRoom } from '../src/server/race-room.ts';
 
 const { port } = workerData as { port: number };
 RaceRoom.tap = (_code, w, host) => {
-  parentPort!.postMessage({ type: 'tick', tick: w.tick, cars: w.cars.map((c) => [c.x, c.y, c.heading]), order: [...(w.race?.order ?? [])], phase: w.race?.phase ?? '', race: w.race?.phase === 'results' ? w.race : undefined, inputStats: host.inputStats });
+  parentPort!.postMessage({ type: 'tick', tick: w.tick, cars: w.cars.map((c) => [c.x, c.y, c.heading]), order: [...(w.race?.order ?? [])], phase: w.race?.phase ?? '', race: w.race?.phase === 'results' ? w.race : undefined, inputStats: host.inputStats, ai: w.cars.map((_, i) => host.aiDriving(i)) });
 };
 const server = await startServer(port);
 parentPort!.postMessage({ type: 'ready' });

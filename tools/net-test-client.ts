@@ -15,13 +15,15 @@ export interface ClientReport {
   corrections: number[]; big: string[]; stalls: number[];
   final: { tick: number; race: unknown } | undefined;
   along95: number; side95: number; alongTicks95: number;
+  /** Server tick at which this client SHOWED lights out (predicted race), and the server's own. */
+  shownLightsOut: number; reconnects: number;
   sent: number; ack: number; rtt: number; kbps: number; stepped: number; reconcileMs: number; drivers: Array<{ code: string; player?: string }>;
 }
 
 const a = workerData as ClientArgs;
 const ctx = simContextNode(loadTrackNode(a.track)), line = buildRacingLine(ctx.track);
 const aiCfg = aiJson as unknown as AiConfig;
-const rep: ClientReport = { name: a.name, you: -1, code: '', samples: [], corrections: [], big: [], stalls: [], final: undefined, along95: 0, side95: 0, alongTicks95: 0, sent: 0, ack: -1, rtt: 0, kbps: 0, stepped: 0, reconcileMs: 0, drivers: [] };
+const rep: ClientReport = { name: a.name, you: -1, code: '', samples: [], corrections: [], big: [], stalls: [], final: undefined, along95: 0, side95: 0, alongTicks95: 0, shownLightsOut: -1, reconnects: 0, sent: 0, ack: -1, rtt: 0, kbps: 0, stepped: 0, reconcileMs: 0, drivers: [] };
 
 const net = new NetClient(`ws://localhost:${a.port}`, new LatencySim(a.lag), { lobby: () => {}, start: () => {}, closed: (r) => console.info(`[${a.name}] closed: ${r}`) });
 net.predict = a.predict;
@@ -46,6 +48,9 @@ parentPort!.postMessage({ type: 'joined', code: rep.code });
 parentPort!.on('message', (m: { type: string; settings?: Partial<RoomSettings> }) => {
   if (m.type === 'settings') net.setSettings(m.settings!);
   if (m.type === 'start') net.startRace();
+  // A dropped connection (no consent): the server hands the car to its AI; the SDK reconnects on its own.
+  // 4010 = MAY_TRY_RECONNECT: what a lost link looks like to the SDK.
+  if (m.type === 'drop') net.room?.connection.close(4010, 'net-test drop');
   if (m.type === 'lobby') parentPort!.postMessage({ type: 'lobby', players: net.lobby?.players.length ?? 0, host: net.isHost });
 });
 
@@ -67,6 +72,12 @@ const timer = setInterval(() => {
     rep.sent++;
   }
 }, 4);
+// What this client shows at lights out: the view's race phase, read every few ms.
+const lightsWatch = setInterval(() => {
+  const v = net.racing ? net.view(performance.now()) : undefined;
+  if (v && rep.shownLightsOut < 0 && v.curr.race?.phase === 'racing') rep.shownLightsOut = Math.round((v.curr.race.startTime) * TICK_HZ);
+}, 4);
+net.room!.onReconnect(() => rep.reconnects++);
 const sampler = setInterval(() => {
   const w = net.rawLatest;
   if (w?.race) rep.samples.push({ tick: w.tick, cars: w.cars.map((c) => [c.x, c.y, c.heading]), order: [...w.race.order] });
@@ -80,6 +91,7 @@ async function finish(): Promise<void> {
   await new Promise((r) => setTimeout(r, a.lag + 300)); // the last snapshots in
   clearInterval(timer);
   clearInterval(sampler);
+  clearInterval(lightsWatch);
   const w = net.rawLatest;
   const p95 = (v: number[]) => [...v].sort((x, y) => x - y)[Math.floor(v.length * 0.95)] ?? 0;
   Object.assign(rep, {

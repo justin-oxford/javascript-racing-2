@@ -184,7 +184,9 @@ export class NetClient {
     const t = Math.max(0, Math.min(1, tickAlpha));
     let dh = b.heading - a.heading;
     dh = Math.atan2(Math.sin(dh), Math.cos(dh));
-    return { ...b, x: a.x + (b.x - a.x) * t + this.offset.dx, y: a.y + (b.y - a.y) * t + this.offset.dy, heading: a.heading + dh * t + this.offset.dh };
+    // Step 7: lap timing is the server's, never the prediction's (laps, sectors, lap clock).
+    const timing = this.base[p.you]?.timing ?? b.timing;
+    return { ...b, timing, x: a.x + (b.x - a.x) * t + this.offset.dx, y: a.y + (b.y - a.y) * t + this.offset.dy, heading: a.heading + dh * t + this.offset.dh };
   }
 
   /**
@@ -200,8 +202,17 @@ export class NetClient {
     const k = Math.exp(-frameSec / Math.max(1e-3, netCfg.correction.blendSec));
     this.offset.dx *= k; this.offset.dy *= k; this.offset.dh *= k;
     const me = this.ownCar(tickAlpha);
+    // Start lights (step 7): the server decided the whole sequence when it built the race (the hold is
+    // seeded, in the race state). Shown from the predicted world they come on when your input will reach
+    // the server, so you react to lights out at the tick the server has it (not ~a ping + 100 ms late,
+    // behind the server's AI). Positions, finish and results: snapshots only.
+    const pr = this.predictor?.world?.race, sr = br.b.world.race;
+    const lights = pr && sr && (sr.phase === 'grid' || sr.phase === 'lights') ? { phase: pr.phase, phaseTick: pr.phaseTick, lights: pr.lights, startTime: pr.startTime } : undefined;
     // Mine is already placed: the same car in both, so the renderer's blend leaves it there.
-    const withMe = (w: WorldState): WorldState => (me ? { ...w, cars: [me, ...w.cars.slice(1)] } : w);
+    const withMe = (w: WorldState): WorldState => {
+      const race = lights && w.race ? { ...w.race, ...lights } : w.race;
+      return { ...w, ...(me ? { cars: [me, ...w.cars.slice(1)] } : {}), ...(race ? { race } : {}) };
+    };
     return { prev: withMe(br.a.world), curr: withMe(br.b.world), alpha: br.alpha, passed: this.buffer.take(t), renderTick: t };
   }
 }
