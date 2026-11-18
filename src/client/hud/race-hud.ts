@@ -1,11 +1,12 @@
-// Race overlay (card 06 + race weekend): start lights, the ticker under the top bar, and the results screens.
-// Ticker, by session:
-//   race:        LAP n/N | P1-P3 pinned | the rest scrolling if it doesn't fit | your place + intervals
-//   qualifying:  clock   | P1-P3 by best lap | the rest | your place, best lap, END SESSION
-//   weekend practice: RACE WEEKEND - PRACTICE | GO TO QUALIFYING
+// Race overlay (card 06 + race weekend; HUD v2 card): the bar's middle section (start lights, then the
+// ticker) and the results screens. The lap line and your place + intervals live in the bar's left and
+// right sections (Hud). Ticker, by session:
+//   race:        P1-P3 pinned | the rest scrolling if it doesn't fit
+//   qualifying:  P1-P3 by best lap | the rest | END SESSION
+//   practice:    the session's best laps, fastest first (| GO TO QUALIFYING in a race weekend)
 // Reads world.race / world.quali; never writes sim state. Choices go out through callbacks.
 import { pointsFor, qualiResults, qualiTimeLeft, raceResults, TICK_DT, type CarCatalog, type RaceConfig, type WorldState } from '../../sim';
-import { gapText, lapHead, lapText, playerIntervals, qualiEntries, runningOrder, type OrderEntry, carIdentity } from './running-order';
+import { gapText, lapText, qualiEntries, runningOrder, type OrderEntry, carIdentity } from './running-order';
 import './race-hud.css';
 
 export interface RaceHudCallbacks {
@@ -43,25 +44,29 @@ export class RaceHud {
   weekend: WeekendView | undefined;
 
   constructor(
+    /** The HUD root (results screens) and the bar's middle section (lights, ticker). */
     parent: HTMLElement,
+    middle: HTMLElement,
     private readonly catalog: CarCatalog,
     private readonly cb: RaceHudCallbacks,
-    /** Track size in track px and its scale, so the ticker can tell when a car is underneath it. */
-    private readonly trackPx: () => { height: number; pxPerMeter: number },
     private readonly raceCfg: () => RaceConfig,
   ) {
+    const bar = document.createElement('div');
+    bar.className = 'race-bar';
+    bar.innerHTML = `
+      <div class="start" data-id="start">
+        <div class="lights" data-id="lights">${[0, 1, 2, 3, 4].map(() => '<div class="light"><i></i><i></i></div>').join('')}</div>
+        <div class="note" data-id="note"></div>
+      </div>
+      <div class="ticker" data-id="ticker">
+        <div class="tk-top" data-id="tkTop"></div>
+        <div class="tk-scroll" data-id="tkScroll"><div class="tk-reel" data-id="tkReel"><div class="tk-set" data-id="tkSetA"></div><div class="tk-set" data-id="tkSetB"></div></div></div>
+        <button class="tk-btn" data-id="tkBtn"></button>
+      </div>`;
+    middle.prepend(bar);
     const root = document.createElement('div');
     root.className = 'race-hud';
     root.innerHTML = `
-      <div class="lights" data-id="lights">${[0, 1, 2, 3, 4].map(() => '<div class="light"><i></i><i></i></div>').join('')}</div>
-      <div class="ticker" data-id="ticker">
-        <div class="tk-head" data-id="tkHead">GRID</div>
-        <div class="tk-top" data-id="tkTop"></div>
-        <div class="tk-scroll" data-id="tkScroll"><div class="tk-reel" data-id="tkReel"><div class="tk-set" data-id="tkSetA"></div><div class="tk-set" data-id="tkSetB"></div></div></div>
-        <div class="tk-me" data-id="tkMe"></div>
-        <button class="tk-btn" data-id="tkBtn"></button>
-      </div>
-      <div class="note" data-id="note"></div>
       <div class="results" data-id="results">
         <div class="title" data-id="resTitle">RESULTS</div>
         <div class="sub" data-id="resSub"></div>
@@ -69,7 +74,7 @@ export class RaceHud {
         <div class="buttons" data-id="resButtons"></div>
       </div>`;
     parent.appendChild(root);
-    root.querySelectorAll<HTMLElement>('[data-id]').forEach((e) => (this.el[e.dataset.id!] = e));
+    for (const r of [root, bar]) r.querySelectorAll<HTMLElement>('[data-id]').forEach((e) => (this.el[e.dataset.id!] = e));
     this.el.tkBtn!.addEventListener('click', () => {
       if (this.mode === 'practice') this.cb.onQualify();
       else if (this.mode === 'quali') this.cb.onEndSession();
@@ -81,11 +86,11 @@ export class RaceHud {
       else if (act === 'race') this.cb.onStartRace();
     });
     this.el.root = root;
+    this.el.bar = bar;
     this.hide();
   }
 
   hide(): void {
-    this.el.root!.style.display = 'none';
     this.mode = '';
     this.closeResults();
   }
@@ -100,39 +105,36 @@ export class RaceHud {
     return { name: carIdentity(car, team?.name).name, swatch: team ? team.colors.primary : '#888' };
   }
 
-  /** `note`: a line under the ticker (e.g. shared pit boxes). */
-  update(world: WorldState, note = ''): void {
-    const mode = world.race ? 'race' : world.quali ? 'quali' : this.weekend?.stage === 'practice' ? 'practice' : '';
-    if (!mode) return this.hide();
+  /**
+   * `note`: a line beside the start lights (e.g. shared pit boxes).
+   * `practiceBest`: practice, the session's best laps, fastest first (the ticker's practice view).
+   */
+  update(world: WorldState, note = '', practiceBest: OrderEntry[] = []): void {
+    const mode = world.race ? 'race' : world.quali ? 'quali' : 'practice';
     if (mode !== this.mode) { this.mode = mode; this.closeResults(); this.lastTicker = 0; }
-    this.el.root!.style.display = '';
-    this.el.root!.dataset.mode = mode;
-    this.el.note!.textContent = note;
+    this.el.bar!.dataset.mode = mode;
 
-    // Lights (race only): five pairs light up one by one; all go out at the start. Shown until a moment after.
+    // Before the start the ticker has nothing to show: the lights (and any note) use its slot. Five pairs
+    // light up one by one; at lights out the ticker takes over.
     const race = world.race;
     const lightsOn = !!race && (race.phase === 'grid' || race.phase === 'lights');
-    const sinceStart = race && race.startTime >= 0 ? world.tick / 60 - race.startTime : 0;
-    this.el.lights!.style.display = lightsOn || (race?.phase === 'racing' && sinceStart < 1.5) ? '' : 'none';
+    this.el.start!.style.display = lightsOn ? '' : 'none';
+    this.el.ticker!.style.display = lightsOn ? 'none' : '';
+    if (this.el.note!.textContent !== note) this.el.note!.textContent = note;
     this.el.lights!.querySelectorAll('.light').forEach((l, k) => l.classList.toggle('on', lightsOn && k < race!.lights));
 
     // Ticker text: ~8x a second is plenty.
     const now = performance.now();
     if (now - this.lastTicker > 120) {
       this.lastTicker = now;
-      if (mode === 'practice') this.fillPractice();
+      if (mode === 'practice') this.fillPractice(practiceBest);
       else this.fillTicker(world, mode);
     }
-    // A car under the ticker (the top straight on Oxford): fade it so the car shows through.
-    const root = this.el.root!.getBoundingClientRect(), tk = this.el.ticker!.getBoundingClientRect();
-    const { height, pxPerMeter } = this.trackPx();
-    const limitM = (((tk.bottom - root.top + 10) / root.height) * height) / pxPerMeter;
-    this.el.ticker!.classList.toggle('see-through', world.cars.some((c) => c.y < limitM));
     // Ticker scroll: every frame, a seamless loop over two copies of the set.
     const dt = this.lastFrame ? Math.min(0.1, (now - this.lastFrame) / 1000) : 0;
     this.lastFrame = now;
     if (this.reelWidth > 0) {
-      const u = this.el.ticker!.getBoundingClientRect().width / 1280;
+      const u = this.el.root!.getBoundingClientRect().width / 1280;
       this.scrollPx = (this.scrollPx + RaceHud.scrollSpeed * u * dt) % this.reelWidth;
     } else this.scrollPx = 0;
     this.el.tkReel!.style.transform = `translateX(${-this.scrollPx}px)`;
@@ -152,26 +154,9 @@ export class RaceHud {
     b.style.display = text ? '' : 'none';
   }
 
-  private fillPractice(): void {
-    this.el.tkHead!.textContent = 'RACE WEEKEND';
-    this.el.tkTop!.innerHTML = '<span class="chip"><b>PRACTICE</b></span>';
-    this.el.tkSetA!.innerHTML = `<span class="chip">Learn the track and try setups (stop in a pit box). Then qualifying: best lap sets the grid for ${this.weekend?.laps ?? '?'} laps.</span>`;
-    this.el.tkSetB!.innerHTML = '';
-    this.reelWidth = 0;
-    this.el.tkScroll!.classList.remove('scrolling');
-    this.el.tkMe!.innerHTML = '';
-    this.setButton('GO TO QUALIFYING');
-  }
-
-  private fillTicker(world: WorldState, mode: 'race' | 'quali'): void {
-    const order = mode === 'race' ? runningOrder(world, this.catalog) : qualiEntries(world, this.catalog);
-    if (mode === 'race') this.el.tkHead!.textContent = lapHead(world);
-    else {
-      const q = world.quali!;
-      const left = qualiTimeLeft(q, world.tick, TICK_DT);
-      this.el.tkHead!.textContent = q.phase === 'running' ? `Q ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}` : 'FLAG';
-    }
-    this.el.tkTop!.innerHTML = order.slice(0, 3).map((e) => this.chip(e)).join('');
+  /** Lay out the field: P1-P3 pinned, the rest scrolling only when it doesn't fit. */
+  private fillOrder(order: OrderEntry[], empty = ''): void {
+    this.el.tkTop!.innerHTML = order.length ? order.slice(0, 3).map((e) => this.chip(e)).join('') : empty;
     const rest = order.slice(3).map((e) => this.chip(e)).join('');
     const a = this.el.tkSetA!, b = this.el.tkSetB!;
     a.innerHTML = rest;
@@ -180,22 +165,33 @@ export class RaceHud {
     b.innerHTML = fits ? '' : rest;
     this.reelWidth = fits ? 0 : a.getBoundingClientRect().width;
     this.el.tkScroll!.classList.toggle('scrolling', !fits);
+  }
 
-    if (mode === 'race') {
-      const me = playerIntervals(world);
-      this.el.tkMe!.innerHTML = !me ? '' : `<span class="mp">P${me.pos}<small>/${me.of}</small></span>`
-        + `<span class="iv"><small>AHEAD</small>${me.ahead || (me.pos === 1 ? 'LEADER' : '---')}</span>`
-        + `<span class="iv"><small>BEHIND</small>${me.behind || '---'}</span>`;
-      this.setButton('');
-    } else {
-      const q = world.quali!, mine = q.cars[0]!, k = q.order.indexOf(0);
-      const pole = q.cars[q.order[0]!]!.bestLap;
-      this.el.tkMe!.innerHTML = `<span class="mp">P${k + 1}<small>/${q.order.length}</small></span>`
-        + `<span class="iv"><small>BEST</small>${mine.bestLap ? lapText(mine.bestLap) : '---'}</span>`
-        + `<span class="iv"><small>TO POLE</small>${!mine.bestLap ? '---' : k === 0 ? 'POLE' : `+${(mine.bestLap - pole).toFixed(3)}`}</span>`;
+  private fillPractice(best: OrderEntry[]): void {
+    const weekend = this.weekend?.stage === 'practice';
+    this.fillOrder(best, `<span class="chip hint">${weekend
+      ? `Race weekend practice: learn the track and try setups (stop in a pit box). Then qualifying: best lap sets the grid for ${this.weekend?.laps ?? '?'} laps.`
+      : 'Practice: best laps show here, fastest first.'}</span>`);
+    this.setButton(weekend ? 'GO TO QUALIFYING' : '');
+  }
+
+  private fillTicker(world: WorldState, mode: 'race' | 'quali'): void {
+    this.fillOrder(mode === 'race' ? runningOrder(world, this.catalog) : qualiEntries(world, this.catalog));
+    if (mode === 'race') this.setButton('');
+    else {
+      const q = world.quali!, mine = q.cars[0]!;
       this.setButton(q.phase === 'results' ? '' : mine.done ? 'FAST-FORWARDING' : 'END SESSION');
       this.el.tkBtn!.toggleAttribute('disabled', mine.done);
     }
+  }
+
+  /** Qualifying clock for the bar's lap slot ("4:32", or FLAG once it's out). */
+  static qualiClock(world: WorldState): string {
+    const q = world.quali;
+    if (!q) return '';
+    if (q.phase !== 'running') return 'FLAG';
+    const left = qualiTimeLeft(q, world.tick, TICK_DT);
+    return `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`;
   }
 
   private openResults(title: string, sub: string, head: string[], rows: string[], buttons: Array<[string, string]>): void {

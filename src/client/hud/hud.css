@@ -18,9 +18,7 @@
   height: calc(var(--u) * 50);
   background: var(--bar);
   display: flex;
-  align-items: center;
-  gap: calc(var(--u) * 18);
-  padding: 0 calc(var(--u) * 12);
+  align-items: stretch;
   font-size: calc(var(--u) * 9);
   pointer-events: auto;
   z-index: 3;
@@ -33,14 +31,10 @@
   opacity: 0.75;
   flex: none;
 }
-.hud-icon.time { background-image: var(--icon-time); margin-left: auto; }
+.hud-icon.time { background-image: var(--icon-time); align-self: center; width: calc(var(--u) * 22); height: calc(var(--u) * 22); margin: 0 calc(var(--u) * 6); }
 .hud-icon:hover { opacity: 1; }
-.lap-speed b, .current b { font-size: calc(var(--u) * 20); padding: 0 calc(var(--u) * 14) 0 calc(var(--u) * 5); }
-.current { font-size: calc(var(--u) * 12); width: calc(var(--u) * 190); flex: none; white-space: nowrap; }
-.lap-speed { white-space: nowrap; flex: none; }
-.current b.invalid { color: var(--invalid-live); }
 
-.sectors { border-collapse: collapse; text-align: center; margin-left: auto; table-layout: fixed; width: calc(var(--u) * 480); flex: none; }
+.sectors { border-collapse: collapse; text-align: center; table-layout: fixed; width: 100%; }
 .sectors td { padding: 0 calc(var(--u) * 3); white-space: nowrap; }
 .idents td { font-size: calc(var(--u) * 7); height: calc(var(--u) * 11); vertical-align: bottom; }
 .splits td { font-size: calc(var(--u) * 8); height: calc(var(--u) * 13); vertical-align: top; opacity: 0.85; }
@@ -139,10 +133,9 @@
 }
 .hud-bar .tow.on { visibility: visible; }
 
-/* Reset to track: hold progress, then the race penalty countdown. Centre of the screen, above the cars. */
-.reset-note { display: none; position: absolute; left: 50%; top: 38%; transform: translateX(-50%); z-index: 2;
-  background: rgba(10, 10, 14, 0.82); color: #fff; padding: calc(var(--u) * 6) calc(var(--u) * 12); border-radius: calc(var(--u) * 4);
-  font-size: calc(var(--u) * 12); letter-spacing: 0.06em; pointer-events: none; white-space: nowrap; }
+/* Reset to track: hold progress, then the race penalty countdown. Over the ticker, in the bar. */
+.reset-note { display: none; position: absolute; inset: 0; z-index: 4; text-align: center; line-height: calc(var(--u) * 50);
+  background: #111; color: #fff; font-size: calc(var(--u) * 13); letter-spacing: 0.08em; pointer-events: none; white-space: nowrap; }
 .reset-note b { color: #ffcc33; margin-left: calc(var(--u) * 6); }
 .reset-note .fill { display: inline-block; vertical-align: middle; width: calc(var(--u) * 60); height: calc(var(--u) * 6); margin-left: calc(var(--u) * 8); background: rgba(255,255,255,0.2); }
 .reset-note .fill span { display: block; height: 100%; background: #ffcc33; }
@@ -153,11 +146,11 @@
 .hud-bar .weather.rain { background: rgba(47, 129, 247, 0.85); }
 
 /* Race strategy: the compound badge in the bar, and the pit board (right side, below the bar). */
-.hud-bar .ers .compound { width: calc(var(--u) * 16); height: calc(var(--u) * 16); line-height: calc(var(--u) * 13); text-align: center; border-radius: 50%;
+.hud-bar .compound { width: calc(var(--u) * 16); height: calc(var(--u) * 16); line-height: calc(var(--u) * 13); text-align: center; border-radius: 50%;
   border: calc(var(--u) * 2.5) solid var(--c, #f2c230); color: var(--c, #f2c230); box-sizing: border-box; font-size: calc(var(--u) * 9); }
-.pit-board { display: none; position: absolute; right: calc(var(--u) * 10); top: calc(var(--u) * 70); z-index: 2; pointer-events: none;
+.pit-board { display: none; text-align: left; margin-bottom: calc(var(--u) * 8);
   background: rgba(10, 10, 14, 0.85); color: #fff; padding: calc(var(--u) * 6) calc(var(--u) * 10); border-radius: calc(var(--u) * 4);
-  font-family: "Formula1 Bold", system-ui, sans-serif; font-size: calc(var(--u) * 9); letter-spacing: 0.05em; min-width: calc(var(--u) * 150); }
+  font-family: "Formula1 Bold", system-ui, sans-serif; font-size: calc(var(--u) * 9); letter-spacing: 0.05em; }
 .pit-board .title { color: #ffcc33; margin-bottom: calc(var(--u) * 4); }
 .pit-board .row { display: flex; align-items: center; gap: calc(var(--u) * 6); margin: calc(var(--u) * 3) 0; }
 .pit-board .k { width: calc(var(--u) * 44); opacity: 0.7; }
@@ -168,9 +161,8 @@
 .pit-board .tog.on { opacity: 1; color: #6fdc7a; }
 .pit-board .stop { color: #9cd2ff; }
 
-/* Damage diagram (Car damage card): bottom left, only when damage is on. */
-.damage-mini { display: none; position: absolute; left: calc(var(--u) * 10); bottom: calc(var(--u) * 10); width: calc(var(--u) * 34); height: calc(var(--u) * 60);
-  background: rgba(10, 10, 14, 0.6); border-radius: calc(var(--u) * 4); padding: calc(var(--u) * 4); pointer-events: none; z-index: 1; }
+/* Damage diagram (Car damage card): in the bar's left section, only when damage is on. */
+.damage-mini { display: none; flex: none; align-self: center; width: calc(var(--u) * 20); height: calc(var(--u) * 36); margin-left: auto; pointer-events: none; }
 .damage-mini .body { fill: rgba(255, 255, 255, 0.15); }
 
 /* Engine mode + battery (Engine modes card), in the top bar after TOW. */
@@ -198,3 +190,47 @@
 .balance .corner small { opacity: 0.8; }
 .balance .corner.under { background: rgba(64, 140, 230, 0.75); }
 .balance .corner.over { background: rgba(230, 120, 40, 0.8); }
+
+/* ===== HUD v2: one top bar (session | ticker | your car). Solid, inside the reserved top 100 track px. ===== */
+.hud-bar .sec { position: relative; display: flex; align-items: center; min-width: 0; }
+.hud-bar .sec.left { flex: none; width: calc(var(--u) * 205); gap: calc(var(--u) * 8); padding: 0 calc(var(--u) * 8); }
+.hud-bar .sec.mid { flex: 1; background: #111; border-left: 1px solid #3a3a3a; border-right: 1px solid #3a3a3a; overflow: hidden; }
+.hud-bar .sec.right { flex: none; width: calc(var(--u) * 300); flex-direction: column; justify-content: center; align-items: stretch; gap: calc(var(--u) * 3); padding: 0 calc(var(--u) * 8); font-variant-numeric: tabular-nums; }
+.hud-bar .menu { width: calc(var(--u) * 22); height: calc(var(--u) * 22); }
+.hud-bar .sess { display: flex; flex-direction: column; gap: calc(var(--u) * 3); min-width: 0; }
+.hud-bar .sess-top { display: flex; align-items: baseline; gap: calc(var(--u) * 8); white-space: nowrap; }
+.hud-bar .sess-name { font-family: "Formula1 Wide", system-ui, sans-serif; font-size: calc(var(--u) * 15); letter-spacing: 0.22em; }
+.hud-bar .sess-name[data-len='long'] { font-size: calc(var(--u) * 10); letter-spacing: 0.12em; }
+.hud-bar .sess-lap { font-size: calc(var(--u) * 10); }
+.hud-bar .sess-lap b { font-size: calc(var(--u) * 16); }
+.hud-bar .sess-mini { display: flex; align-items: center; gap: calc(var(--u) * 5); height: calc(var(--u) * 11); white-space: nowrap; }
+.hud-bar .sess-mini .ers { display: flex; align-items: center; gap: calc(var(--u) * 4); }
+.hud-bar .sess-mini .ers .mode { font-size: calc(var(--u) * 7); padding: calc(var(--u) * 1) calc(var(--u) * 4); min-width: calc(var(--u) * 22); }
+.hud-bar .sess-mini .ers .batt { width: calc(var(--u) * 28); height: calc(var(--u) * 5); }
+.hud-bar .sess-mini .fuel-delta { font-family: "Formula1 Bold", system-ui, sans-serif; font-size: calc(var(--u) * 7); }
+.hud-bar .sess-mini .tow, .hud-bar .sess-mini .weather { font-size: calc(var(--u) * 7); padding: calc(var(--u) * 1) calc(var(--u) * 4); }
+.hud-bar .sess-mini .tow { display: none; }
+.hud-bar .sess-mini .tow.on { display: inline; visibility: visible; }
+
+.hud-bar .r-row { display: flex; align-items: center; gap: calc(var(--u) * 7); white-space: nowrap; height: calc(var(--u) * 18); }
+.hud-bar .r-row small { font-size: calc(var(--u) * 6.5); opacity: 0.6; margin-right: calc(var(--u) * 2); letter-spacing: 0.05em; }
+.hud-bar .r-pos { font-family: "Formula1 Bold", system-ui, sans-serif; font-size: calc(var(--u) * 15); min-width: calc(var(--u) * 44); }
+.hud-bar .r-pos small { font-size: calc(var(--u) * 8); opacity: 0.7; margin: 0; }
+.hud-bar .r-iv { font-size: calc(var(--u) * 8.5); min-width: calc(var(--u) * 50); }
+.hud-bar .r-time { font-size: calc(var(--u) * 12); margin-left: auto; min-width: calc(var(--u) * 52); text-align: right; }
+.hud-bar .r-time.invalid { color: var(--invalid-live); }
+.hud-bar .r-tiles { display: flex; gap: calc(var(--u) * 2); }
+.hud-bar .mtile { width: calc(var(--u) * 21); text-align: center; font-size: calc(var(--u) * 7); padding: calc(var(--u) * 2) 0; border-radius: calc(var(--u) * 3); background: var(--tile); }
+.hud-bar .mtile[data-color='purple'] { background: var(--purple); }
+.hud-bar .mtile[data-color='green'] { background: var(--green); }
+.hud-bar .mtile[data-color='yellow'] { background: var(--yellow); }
+.hud-bar .mtile[data-color='invalid'] { background: var(--invalid); }
+.hud-bar .r-kv { font-size: calc(var(--u) * 8.5); }
+.hud-bar .r-speed { margin-left: auto; }
+.hud-bar .r-speed b { font-size: calc(var(--u) * 11); margin-right: calc(var(--u) * 2); }
+.hud-bar .r-tyre { display: flex; align-items: center; gap: calc(var(--u) * 3); font-family: "Formula1 Bold", system-ui, sans-serif; }
+.hud-bar .r-tyre .compound { width: calc(var(--u) * 13); height: calc(var(--u) * 13); line-height: calc(var(--u) * 9); border-width: calc(var(--u) * 2); font-size: calc(var(--u) * 7); }
+.hud-bar .r-pit { padding: calc(var(--u) * 1) calc(var(--u) * 3); border-radius: calc(var(--u) * 3); transition: background 0.3s; }
+.hud-bar .r-pit .next { margin-left: calc(var(--u) * 4); font-family: "Formula1 Bold", system-ui, sans-serif; }
+.hud-bar .r-pit .next i { font-style: normal; color: var(--c); }
+.hud-bar .r-pit.flash { background: rgba(255, 204, 51, 0.35); }

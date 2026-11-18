@@ -113,3 +113,35 @@ export function qualiEntries(world: WorldState, catalog: CarCatalog): OrderEntry
 export function sessionOrder(world: WorldState, catalog: CarCatalog): OrderEntry[] {
   return world.race ? runningOrder(world, catalog) : qualiEntries(world, catalog);
 }
+
+/**
+ * Practice (HUD v2 card): the session's best laps, fastest first. `best[car]` = that car's best valid lap
+ * this session (0 / undefined = no time yet; cars without a time are left out).
+ */
+export function practiceEntries(world: WorldState, catalog: CarCatalog, best: ReadonlyArray<number | undefined>): OrderEntry[] {
+  const timed = world.cars.map((_, car) => car).filter((car) => (best[car] ?? 0) > 0).sort((a, b) => best[a]! - best[b]! || a - b);
+  const top = timed.length ? best[timed[0]!]! : 0;
+  return timed.map((car, k) => {
+    const team = catalog.teams.find((t) => t.id === world.cars[car]!.build.team);
+    return {
+      pos: k + 1,
+      car,
+      ...carIdentity(car, team?.name),
+      swatch: team?.colors.primary ?? '#888',
+      gap: k === 0 ? lapText(best[car]!) : `+${(best[car]! - top).toFixed(3)}`,
+      state: world.cars[car]!.inPitLane ? 'pit' : '',
+      me: car === 0,
+    };
+  });
+}
+
+/** Where the player stands in a best-lap order (practice / qualifying): place and the gaps either side. */
+export function bestLapStanding(order: OrderEntry[], best: (car: number) => number): { pos: number; of: number; ahead: string; behind: string } | undefined {
+  const k = order.findIndex((e) => e.me);
+  if (k < 0) return undefined;
+  const mine = best(0);
+  const ahead = k > 0 && mine > 0 ? `+${(mine - best(order[k - 1]!.car)).toFixed(3)}` : '';
+  const nb = order[k + 1] ? best(order[k + 1]!.car) : 0;
+  const behind = nb > 0 && mine > 0 ? `-${(nb - mine).toFixed(3)}` : '';
+  return { pos: k + 1, of: order.length, ahead, behind };
+}

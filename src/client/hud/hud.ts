@@ -91,37 +91,57 @@ export class Hud {
   private markup(): string {
     const tiles = ['Sector 1', 'Sector 2', 'Sector 3', 'Lap'];
     return `
-      <div class="reset-note" data-id="resetNote"></div>
-      <div class="pit-board" data-id="pitBoard"></div>
-      <div class="damage-mini" data-id="damageMini" title="Damage: front wing, rear wing, left and right suspension">
-        <svg viewBox="0 0 40 70" width="100%" height="100%">
-          <rect x="4" y="2" width="32" height="7" rx="1.5" data-zone="frontWing" />
-          <rect x="11" y="11" width="18" height="48" rx="6" class="body" />
-          <rect x="3" y="18" width="6" height="34" rx="1.5" data-zone="left" />
-          <rect x="31" y="18" width="6" height="34" rx="1.5" data-zone="right" />
-          <rect x="6" y="61" width="28" height="7" rx="1.5" data-zone="rearWing" />
-        </svg>
-      </div>
       <div class="hud-bar" data-id="bar">
-        <button class="hud-icon menu" data-id="menuBtn" title="Menu"></button>
-        <div class="lap-speed">Lap:<b data-id="lap">0</b>Speed:<b data-id="speed">--</b>kph</div>
-        <div class="current">Time:<b data-id="time">---</b></div>
-        <div class="tow" data-id="tow" title="Slipstream: less drag behind another car">TOW</div>
-        <div class="weather" data-id="weather" title="Weather: rain now, or when it's coming"></div>
-        <div class="ers" title="Engine mode (E) and battery: hold Shift or / to deploy">
-          <span class="compound" data-id="compound" title="Tyre compound (pit board: 1 / 2 / 3)">M</span>
-          <span class="mode" data-id="ersMode">STD</span>
-          <span class="batt"><span data-id="battFill"></span></span>
-          <span class="fuel-delta" data-id="fuelDelta" title="Laps of fuel left minus laps to go"></span>
+        <div class="sec left">
+          <button class="hud-icon menu" data-id="menuBtn" title="Menu (Esc)"></button>
+          <div class="sess">
+            <div class="sess-top"><b class="sess-name" data-id="sessName">PRACTICE</b><span class="sess-lap" data-id="lapWrap">Lap <b data-id="lap">0</b></span></div>
+            <div class="sess-mini">
+              <span class="ers" title="Engine mode (E) and battery: hold Shift or / to deploy"><span class="mode" data-id="ersMode">STD</span><span class="batt"><span data-id="battFill"></span></span></span>
+              <span class="fuel-delta" data-id="fuelDelta" title="Laps of fuel left minus laps to go"></span>
+              <span class="tow" data-id="tow" title="Slipstream: less drag behind another car">TOW</span>
+              <span class="weather" data-id="weather" title="Weather: rain now, or when it's coming"></span>
+            </div>
+          </div>
+          <div class="damage-mini" data-id="damageMini" title="Damage: front wing, rear wing, left and right suspension">
+            <svg viewBox="0 0 40 70" width="100%" height="100%">
+              <rect x="4" y="2" width="32" height="7" rx="1.5" data-zone="frontWing" />
+              <rect x="11" y="11" width="18" height="48" rx="6" class="body" />
+              <rect x="3" y="18" width="6" height="34" rx="1.5" data-zone="left" />
+              <rect x="31" y="18" width="6" height="34" rx="1.5" data-zone="right" />
+              <rect x="6" y="61" width="28" height="7" rx="1.5" data-zone="rearWing" />
+            </svg>
+          </div>
         </div>
+        <div class="sec mid" data-id="mid">
+          <div class="reset-note" data-id="resetNote"></div>
+        </div>
+        <div class="sec right" data-id="right">
+          <div class="r-row">
+            <span class="r-pos" data-id="pos" title="Position">P-</span>
+            <span class="r-iv" title="Interval to the car ahead"><small>AHD</small><span data-id="ahead">---</span></span>
+            <span class="r-iv" title="Interval to the car behind"><small>BHD</small><span data-id="behind">---</span></span>
+            <b class="r-time" data-id="time">---</b>
+            <span class="r-tiles">${[0, 1, 2].map((i) => `<span class="mtile" data-id="mtile${i}">S${i + 1}</span>`).join('')}</span>
+          </div>
+          <div class="r-row">
+            <span class="r-kv"><small>LAST</small><span data-id="lastLap">---</span></span>
+            <span class="r-kv"><small>BEST</small><span data-id="bestLap">---</span></span>
+            <span class="r-kv r-speed"><b data-id="speed">0</b><small>KPH</small></span>
+            <span class="r-kv r-tyre" title="Tyre compound and the most worn tyre's wear"><span class="compound" data-id="compound">M</span><span data-id="wear">0%</span></span>
+            <span class="r-kv r-pit" data-id="pitInfo" title="Pit stops made, and what the next stop does (pit board keys)"><small>PIT</small><span data-id="stops">0</span><span class="next" data-id="nextStop"></span></span>
+          </div>
+        </div>
+        <button class="hud-icon time" data-id="timeBtn" title="Timing: splits, personal bests"></button>
+      </div>
+      <div class="hud-drop timing" data-id="timingPanel">
+        <div class="title">THIS LAP</div>
         <table class="sectors">
           <tr class="idents">${tiles.map((t) => `<td>${t}</td>`).join('')}</tr>
           <tr>${tiles.map((_, i) => `<td><div class="tile${i === 3 ? ' lap' : ''}" data-id="tile${i}">---</div></td>`).join('')}</tr>
           <tr class="splits">${tiles.map((_, i) => `<td data-id="split${i}">---</td>`).join('')}</tr>
         </table>
-        <button class="hud-icon time" data-id="timeBtn" title="Timing"></button>
-      </div>
-      <div class="hud-drop timing" data-id="timingPanel">
+        <hr />
         <div class="title">PERSONAL BESTS</div>
         <table class="pb">
           <tr class="idents"><td>Sector 1</td><td>Sector 2</td><td>Sector 3</td><td>Best Lap</td></tr>
@@ -137,6 +157,7 @@ export class Hud {
         <div class="hint" data-id="noLines"></div>
       </div>
       <div class="hud-drop car" data-id="carPanel">
+        <div class="pit-board" data-id="pitBoard"></div>
         <div class="title">Vehicle Information</div>
         <div class="vehicle">
           <div class="tyres">${['FL', 'FR', 'RL', 'RR'].map((n, i) => `<div class="tyre" data-id="tyre${i}"><small>${n}</small><span data-id="tyrePct${i}">100%</span></div>`).join('')}</div>
@@ -223,12 +244,41 @@ export class Hud {
     this.el[`split${i}`]!.textContent = t.split === undefined ? '---' : fmt(t.split, true);
   }
 
+  /** The middle section of the bar (the race overlay puts the lights and the ticker in it). */
+  get middle(): HTMLElement {
+    return this.el.mid!;
+  }
+
+  private text(id: string, t: string): void {
+    const e = this.el[id]!;
+    if (e.textContent !== t) e.textContent = t;
+  }
+
+  /**
+   * HUD v2 bar, left and right: the session name, its lap line, and where you stand.
+   * `standing`: race = place + intervals; qualifying / practice = place by best lap + gaps (undefined = none).
+   */
+  setSession(name: string, lap: string, standing?: { pos: number; of: number; ahead: string; behind: string; aheadLabel?: string; behindLabel?: string }): void {
+    this.text('sessName', name);
+    this.el.sessName!.dataset.len = name.length > 8 ? 'long' : '';
+    this.el.lapWrap!.innerHTML = lap;
+    this.el.pos!.innerHTML = standing ? `P${standing.pos}<small>/${standing.of}</small>` : 'P<small>-</small>';
+    this.text('ahead', standing?.ahead || '---');
+    this.text('behind', standing?.behind || '---');
+    const labels = this.el.right!.querySelectorAll<HTMLElement>('.r-iv small');
+    labels[0]!.textContent = standing?.aheadLabel ?? 'AHD';
+    labels[1]!.textContent = standing?.behindLabel ?? 'BHD';
+  }
+
   /** `race`: race laps and the car's own box (1-based) while racing; undefined in practice. */
-  update(car: CarState, simTime: number, session: Session, hasLines: boolean, inBoxStopped: boolean, race?: { laps: number; box: number }, reset?: { holdFrac: number; penaltySec: number }, power?: { batteryFrac: number; fuelMargin?: number | undefined }, pit?: { letter: string; color: string; board?: string | undefined }): void {
-    // Race strategy: the compound on the car, and the pit board when it's up.
+  update(car: CarState, simTime: number, session: Session, hasLines: boolean, inBoxStopped: boolean, race?: { laps: number; box: number }, reset?: { holdFrac: number; penaltySec: number }, power?: { batteryFrac: number; fuelMargin?: number | undefined }, pit?: { letter: string; color: string; stops: number; next: string; flash: boolean; board?: string | undefined }): void {
+    // Race strategy: the compound on the car; stops made and the pit board's next stop (lit after a pit key).
     if (pit) {
-      this.el.compound!.textContent = pit.letter;
+      this.text('compound', pit.letter);
       this.el.compound!.style.setProperty('--c', pit.color);
+      this.text('stops', String(pit.stops));
+      if (this.el.nextStop!.dataset.html !== pit.next) { this.el.nextStop!.innerHTML = pit.next; this.el.nextStop!.dataset.html = pit.next; }
+      this.el.pitInfo!.classList.toggle('flash', pit.flash);
     }
     const board = this.el.pitBoard!;
     board.style.display = pit?.board ? 'block' : 'none';
@@ -252,10 +302,7 @@ export class Hud {
     note.style.display = pen > 0 || hold > 0 ? 'block' : 'none';
     if (pen > 0) note.innerHTML = `RESET PENALTY <b>${pen.toFixed(1)}</b>`;
     else if (hold > 0) note.innerHTML = `HOLD R TO RESET <span class="fill"><span style="width:${Math.round(Math.min(1, hold) * 100)}%"></span></span>`;
-    this.el.lap!.textContent = race
-      ? `${Math.min(race.laps, car.timing.started ? car.timing.laps + 1 : 0)}/${race.laps}`
-      : String(car.timing.started ? car.timing.laps + 1 : 0);
-    this.el.speed!.textContent = Math.abs(car.speed * 3.6).toFixed(0);
+    this.text('speed', Math.abs(car.speed * 3.6).toFixed(0));
     const time = this.el.time!;
     if (!hasLines) time.textContent = 'no lines';
     else if (!car.timing.started) time.textContent = 'OUT LAP';
@@ -266,6 +313,21 @@ export class Hud {
     tow.classList.toggle('on', car.tow > 0.02);
     if (car.tow > 0.02) tow.textContent = `TOW ${Math.round(car.tow * 100)}%`;
     session.tiles.forEach((t, i) => this.tile(i, t));
+    // The bar's small sector tiles (S1-S3), last and best lap.
+    for (let i = 0; i < 3; i++) {
+      const t = session.tiles[i]!, e = this.el[`mtile${i}`]!;
+      this.text(`mtile${i}`, t.time === undefined ? `S${i + 1}` : t.time.toFixed(t.time < 100 ? 1 : 0));
+      e.dataset.color = t.color;
+      e.title = `Sector ${i + 1}${t.time === undefined ? '' : `: ${t.time.toFixed(3)}${t.split === undefined ? '' : ` (${fmt(t.split, true)})`}`}`;
+    }
+    this.text('lastLap', fmt(session.lastLap));
+    this.text('bestLap', fmt(session.personalBest.lap));
+    // Tyres: the most worn tyre's wear, coloured by the grip it has left.
+    let worst = 0;
+    car.wheels.forEach((w, i) => { if (w.wear > car.wheels[worst]!.wear) worst = i; });
+    const ww = car.wheels[worst]!.wear;
+    this.text('wear', `${Math.round((1 - tyreLife(ww)) * 100)}%`);
+    this.el.wear!.style.color = `hsl(${Math.round(120 * wearGrip(ww))}, 75%, 60%)`;
 
     const pb = session.personalBest;
     pb.sectors.forEach((s, i) => (this.el[`pb${i}`]!.textContent = s === undefined ? '---' : s.toFixed(3)));

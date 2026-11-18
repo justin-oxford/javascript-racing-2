@@ -34,11 +34,11 @@ import teamsFile from '../../config/teams.json';
 import audioConfig from '../../config/audio.json';
 import hudConfig from '../../config/hud.json';
 import { Hud, SETUP_LABELS } from './hud/hud';
-import { pitBoardHtml } from './hud/pit-board';
+import { fuelText, pitBoardHtml } from './hud/pit-board';
 import { BalanceTracker } from './hud/balance';
 import { RaceHud } from './hud/race-hud';
 import { drawCarLabels, LABEL_MODES, nextLabelMode, type LabelMode } from './hud/car-labels';
-import { carIdentity, sessionOrder, setCarDrivers, setPlayerIdentity } from './hud/running-order';
+import { bestLapStanding, carIdentity, playerIntervals, practiceEntries, qualiEntries, sessionOrder, setCarDrivers, setPlayerIdentity } from './hud/running-order';
 import { MainMenu, type RecordRow } from './menu/main-menu';
 import { DEFAULT_SETTINGS, nameCode, pbPrefix, ProfileStore, type Profile, type ProfileSettings } from './menu/profile';
 import { Liveries } from './livery';
@@ -216,6 +216,10 @@ async function main(): Promise<void> {
   };
   /** Player's fuel use per lap (HUD fuel margin): fuel and lap count at the last line crossing. */
   const fuelLap = { laps: -1, kg: 0, perLap: 0 };
+  /** Practice (HUD v2 ticker): each car's best valid lap this session, and the player's stops. Reset per session. */
+  let practiceBest: number[] = [];
+  let practiceStops = 0;
+  const newSessionStats = (): void => { practiceBest = []; practiceStops = 0; };
   /** The race being run (for Restart), undefined in practice. */
   let raceSetup: { laps: number; grid: 'random' | 'pole' | 'back'; order?: number[] | undefined } | undefined;
   /** The race weekend in progress (practice -> qualifying -> race), undefined otherwise. */
@@ -252,6 +256,7 @@ async function main(): Promise<void> {
     return s ? { ...rest, surface: s } : rest;
   };
   const startPractice = (keepWeekend = false): void => {
+    newSessionStats();
     raceSetup = undefined;
     if (!keepWeekend) weekend = undefined;
     const me = withStrategy(withPerf(curr?.cars[0]?.build ?? startBuild));
@@ -275,6 +280,7 @@ async function main(): Promise<void> {
       return startPractice();
     }
     raceSetup = { laps, grid, order };
+    newSessionStats();
     const carried = curr?.surface;
     if (!order) weekend = undefined; // a quick race leaves any weekend
     const me = withStrategy(withPerf(curr?.cars[0]?.build ?? startBuild));
@@ -354,13 +360,13 @@ async function main(): Promise<void> {
     },
     onMenu: () => openPause(),
   }, () => renderer.trackHeight, siteUrl);
-  const raceHud: RaceHud = new RaceHud(hud.element, ctx.catalog, {
+  const raceHud: RaceHud = new RaceHud(hud.element, hud.middle, ctx.catalog, {
     onRestart: () => (online ? online.restart() : raceSetup && startRace(raceSetup.laps, raceSetup.grid, raceSetup.order)),
     onMenu: () => { if (online) return online.menu(); startPractice(); menu.open('main'); },
     onQualify: () => startQuali(),
     onEndSession: () => endSession(),
     onStartRace: () => startWeekendRace(),
-  }, () => ({ height: renderer.trackHeight, pxPerMeter: json.pxPerMeter }), () => ctx.race);
+  }, () => ctx.race);
 
   // Car labels: from the profile; position by default.
   let labelMode: LabelMode = profile.settings.labels;
@@ -785,7 +791,10 @@ async function main(): Promise<void> {
       vfx.onTick(ownPredicted ? { ...prev, cars: [undefined as unknown as WorldState['cars'][number], ...prev.cars.slice(1)] } : prev, curr, ctx.track, physics);
       const me = curr.cars[0], was = prev.cars[0];
       if (me && was && !ownPredicted) carSound(was, me);
+      // Practice: the player's stops (a new service starting) for the bar.
+      if (me?.servicing && !was?.servicing && !curr.race) practiceStops++;
       for (const e of curr.events) {
+        if (e.type === 'lap' && !e.invalid && !curr.race && !curr.quali && (!practiceBest[e.car] || e.time < practiceBest[e.car]!)) practiceBest[e.car] = e.time;
         if (e.type === 'sector' || e.type === 'lap') {
           session.onEvent(e, e.car === 0);
           if (e.car === 0) {
@@ -904,14 +913,31 @@ async function main(): Promise<void> {
           } else if (wx === 'wet' || curr.surface?.water) text = 'WET';
           hud.setWeather(text, rainNow > 0.01);
         }
+        // HUD v2 bar: session + lap (left), where you stand (right), the pit summary.
+        const q = curr.quali;
+        const pBest = !race && !q ? practiceEntries(curr, ctx.catalog, practiceBest) : [];
+        if (race) {
+          const lap = race.phase === 'results' || race.cars[0]?.finished ? 'FINISH' : `Lap <b>${Math.max(race.phase === 'grid' || race.phase === 'lights' ? 0 : 1, Math.min(race.laps, me.timing.started ? me.timing.laps + 1 : 0))}/${race.laps}</b>`;
+          const iv = playerIntervals(curr);
+          hud.setSession('RACE', lap, iv && { ...iv, ahead: iv.ahead || (iv.pos === 1 && race.phase === 'racing' ? 'LEADER' : '') });
+        } else if (q) {
+          hud.setSession('QUALIFYING', `<b>${RaceHud.qualiClock(curr)}</b>`, bestLapStanding(qualiEntries(curr, ctx.catalog), (c) => q.cars[c]!.bestLap));
+        } else {
+          hud.setSession('PRACTICE', `Lap <b>${me.timing.started ? me.timing.laps + 1 : 0}</b>`, bestLapStanding(pBest, (c) => practiceBest[c] ?? 0));
+        }
+        const plan = me.pitPlan, cmp = ctx.strategy.compounds[plan.compound];
+        const nextStop = `&rsaquo; ${plan.tyres && cmp ? `<i style="--c:${cmp.color}">${cmp.letter}</i>` : 'KEEP'} ${fuelText(plan)}${damageMode === 'realistic' && plan.repair ? ' +FIX' : ''}`;
         hud.update(me, (online?.racing ? prev.tick + alpha * (curr.tick - prev.tick) : curr.tick + alpha) * TICK_DT, session, !!json.timingLines.startFinish, stoppedInBox(), race ? { laps: race.laps, box: (race.cars[0]?.box ?? -1) + 1 } : undefined, { holdFrac: me.rejoin.holdTicks / Math.max(1, ctx.race.reset.holdSec * TICK_HZ), penaltySec: me.rejoin.penaltyTicks / TICK_HZ }, { batteryFrac: me.ers.batteryKJ / Math.max(1, ctx.ers.battery.capacityKJ), fuelMargin }, {
           letter: ctx.strategy.compounds[me.compound].letter,
           color: ctx.strategy.compounds[me.compound].color,
-          // The pit board: up for 3 s after a pit key, and all the time in the pit lane.
-          board: me.inPitLane || performance.now() - pitBoardAt < 3000 ? pitBoardHtml(me.pitPlan, ctx.strategy, profile.keybinds, me, damageMode === 'realistic') : undefined,
+          stops: race ? race.cars[0]?.pitStops ?? 0 : practiceStops,
+          next: nextStop,
+          flash: performance.now() - pitBoardAt < 3000, // a pit key: the bar's pit item lights up (no board over the track)
+          // The full pit board: in the car panel at your box.
+          board: me.inPitLane ? pitBoardHtml(me.pitPlan, ctx.strategy, profile.keybinds, me, damageMode === 'realistic') : undefined,
         });
         raceHud.weekend = weekend;
-        raceHud.update(curr, race?.sharedBoxes ? `${ctx.track.boxes.length} pit boxes for ${curr.cars.length} cars: shared` : '');
+        raceHud.update(curr, race?.sharedBoxes ? `${ctx.track.boxes.length} pit boxes for ${curr.cars.length} cars: shared` : '', pBest);
       }
     }
   }

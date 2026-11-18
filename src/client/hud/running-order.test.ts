@@ -6,8 +6,8 @@ import physicsJson from '../../../tools/fixtures/physics-baseline.json';
 import slipstreamJson from '../../../tools/fixtures/slipstream-baseline.json';
 import raceJson from '../../../config/race.json';
 import { catalog, loadTrackNode, simContextNode } from '../../../tools/load-track-node';
-import { createRaceWorld, type PhysicsConfig, type SimContext, type WorldState } from '../../sim';
-import { lapHead, playerIntervals, runningOrder, teamCode } from './running-order';
+import { createRaceWorld, createWorld, type PhysicsConfig, type SimContext, type WorldState } from '../../sim';
+import { bestLapStanding, lapHead, playerIntervals, practiceEntries, runningOrder, teamCode } from './running-order';
 
 const ctx: SimContext = { ...simContextNode(loadTrackNode('oxford'), structuredClone(physicsJson as unknown as PhysicsConfig)), contact: contactJson, race: raceJson, slipstream: slipstreamJson };
 const builds = [0, 1, 2, 3].map((i) => ({ ...ctx.physics.defaultCar, team: catalog.teams[i]!.id }));
@@ -49,5 +49,18 @@ describe('running order', () => {
     expect(runningOrder(w, catalog).every((e) => e.gap === '')).toBe(true);
     expect(lapHead(w)).toBe('GRID');
     expect(lapHead(midRace())).toBe('LAP 1/5');
+  });
+});
+
+describe('practice best laps (HUD v2 ticker)', () => {
+  it('fastest first, cars without a time left out, gaps to the fastest, the player standing', () => {
+    const w = createWorld(ctx, builds);
+    const best = [31.5, 0, 30.25, 32];
+    const order = practiceEntries(w, catalog, best);
+    expect(order.map((e) => e.car)).toEqual([2, 0, 3]);
+    expect(order.map((e) => e.gap)).toEqual(['30.250', '+1.250', '+1.750']);
+    expect(order[1]!.me).toBe(true);
+    expect(bestLapStanding(order, (c) => best[c]!)).toEqual({ pos: 2, of: 3, ahead: '+1.250', behind: '-0.500' });
+    expect(practiceEntries(w, catalog, [])).toEqual([]);
   });
 });
