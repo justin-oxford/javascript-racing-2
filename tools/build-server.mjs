@@ -27,7 +27,7 @@ const result = await build({
 });
 // What this build is, for /health (deploy:server checks the box runs it).
 const git = (c) => { try { return execSync(`git ${c}`, { cwd: root, encoding: 'utf8' }).trim(); } catch { return ''; } };
-const commit = (git('rev-parse --short HEAD') || 'unknown') + (git('status --porcelain -- src config tracks') ? '-dirty' : '');
+const commit = (git('rev-parse --short HEAD') || 'unknown') + (git('status --porcelain --untracked-files=no -- src config tracks') ? '-dirty' : '');
 writeFileSync(join(out, 'release.json'), JSON.stringify({ commit, builtAt: new Date().toISOString() }) + '\n');
 const bytes = Object.values(result.metafile.outputs).reduce((a, o) => a + o.bytes, 0);
 console.info(`[build:server] dist-server/server.mjs ${commit} (${(bytes / 1024 / 1024).toFixed(1)} MB with source map)`);

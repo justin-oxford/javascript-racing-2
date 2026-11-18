@@ -58,7 +58,7 @@ if (args.has('--setup')) {
 }
 
 // 2. Build here (nothing builds on the box).
-const dirty = execFileSync('git', ['status', '--porcelain', '--', 'src', 'config', 'tracks', 'package.json', 'package-lock.json'], { cwd: root, encoding: 'utf8' }).trim();
+const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=no', '--', 'src', 'config', 'tracks', 'package.json', 'package-lock.json'], { cwd: root, encoding: 'utf8' }).trim();
 if (dirty) say(`warning: uncommitted changes go out with this deploy (marked -dirty on /health):\n${dirty}`);
 say('build');
 execFileSync(process.execPath, [join(root, 'tools/build-server.mjs')], { cwd: root, stdio: 'inherit' });
