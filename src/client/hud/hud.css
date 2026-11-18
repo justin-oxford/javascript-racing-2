@@ -76,8 +76,6 @@
 .pbtile { padding: calc(var(--u) * 3) 0; font-size: calc(var(--u) * 13); border-radius: calc(var(--u) * 6); background: var(--tile); }
 .pb .desc td { font-size: calc(var(--u) * 7); opacity: 0.7; padding-top: calc(var(--u) * 4); vertical-align: top; }
 
-/* Car panel (middle) and timing (right) can both be open without overlapping. */
-.hud-drop.car { left: calc(var(--u) * 405); width: calc(var(--u) * 380); }
 .vehicle { display: flex; justify-content: space-around; align-items: center; }
 .tyres { display: grid; grid-template-columns: repeat(2, calc(var(--u) * 60)); gap: calc(var(--u) * 10) calc(var(--u) * 14); }
 .tyre {
@@ -234,3 +232,28 @@
 .hud-bar .r-pit .next { margin-left: calc(var(--u) * 4); font-family: "Formula1 Bold", system-ui, sans-serif; }
 .hud-bar .r-pit .next i { font-style: normal; color: var(--c); }
 .hud-bar .r-pit.flash { background: rgba(255, 204, 51, 0.35); }
+
+/* Pit panel (HUD v2 card): car, pit board and setup as ONE compact panel, placed by main.ts just below
+   YOUR pit box (clear of the pit lane, on the canvas). Results-panel look. */
+.pit-panel { display: none; position: absolute; left: 0; top: 0; z-index: 2; pointer-events: auto;
+  grid-template-columns: auto auto; gap: calc(var(--u) * 10); padding: calc(var(--u) * 8) calc(var(--u) * 10);
+  background: rgba(20, 20, 20, 0.94); border-radius: calc(var(--u) * 4); box-shadow: 0 0 calc(var(--u) * 10) rgba(0, 0, 0, 0.5);
+  font-size: calc(var(--u) * 8); }
+.pit-panel.open { display: grid; }
+.pit-panel .title { font-family: "Formula1 Bold", system-ui, sans-serif; font-size: calc(var(--u) * 8); letter-spacing: 0.08em; opacity: 0.7; margin-bottom: calc(var(--u) * 4); }
+.pit-panel .hint { font-size: calc(var(--u) * 7); opacity: 0.7; margin-top: calc(var(--u) * 4); max-width: calc(var(--u) * 300); }
+.pit-panel .pit-board { display: block; margin: 0 0 calc(var(--u) * 6); padding: 0; background: none; font-size: calc(var(--u) * 8); min-width: calc(var(--u) * 160); }
+.pit-panel .pp-car { display: flex; gap: calc(var(--u) * 8); align-items: flex-end; }
+.pit-panel .tyres { grid-template-columns: repeat(2, calc(var(--u) * 34)); gap: calc(var(--u) * 4) calc(var(--u) * 6); }
+.pit-panel .tyre { height: calc(var(--u) * 30); border-radius: calc(var(--u) * 6); font-size: calc(var(--u) * 8); text-align: center; }
+.pit-panel .tyre small { font-size: calc(var(--u) * 6); }
+.pit-panel .fuel { display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 2); }
+.pit-panel .fuel small { font-size: calc(var(--u) * 6); opacity: 0.7; }
+.pit-panel .gauge { width: calc(var(--u) * 34); height: calc(var(--u) * 54); margin: 0; font-size: calc(var(--u) * 10); }
+.pit-panel .setup.notched { grid-template-columns: repeat(2, calc(var(--u) * 150)); gap: calc(var(--u) * 4) calc(var(--u) * 10); }
+.pit-panel .nslot { grid-template-columns: calc(var(--u) * 58) calc(var(--u) * 12) 1fr calc(var(--u) * 12) calc(var(--u) * 26); gap: calc(var(--u) * 3); font-size: calc(var(--u) * 6.5); }
+.pit-panel .nslot button { font-size: calc(var(--u) * 9); padding: calc(var(--u) * 1) 0; }
+.pit-panel .pp-balance { display: flex; align-items: center; gap: calc(var(--u) * 6); margin-top: calc(var(--u) * 5); }
+.pit-panel .pp-balance small { font-size: calc(var(--u) * 6); opacity: 0.7; }
+.pit-panel .balance { font-size: calc(var(--u) * 6.5); gap: calc(var(--u) * 3); }
+.pit-panel .balance .corner { min-width: calc(var(--u) * 20); padding: calc(var(--u) * 1) calc(var(--u) * 2); }

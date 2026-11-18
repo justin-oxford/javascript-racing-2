@@ -156,25 +156,27 @@ export class Hud {
         </table>
         <div class="hint" data-id="noLines"></div>
       </div>
-      <div class="hud-drop car" data-id="carPanel">
-        <div class="pit-board" data-id="pitBoard"></div>
-        <div class="title">Vehicle Information</div>
-        <div class="vehicle">
-          <div class="tyres">${['FL', 'FR', 'RL', 'RR'].map((n, i) => `<div class="tyre" data-id="tyre${i}"><small>${n}</small><span data-id="tyrePct${i}">100%</span></div>`).join('')}</div>
-          <div class="fuel"><div>FUEL LEVEL</div><div class="gauge"><div class="level" data-id="fuelLevel"></div><span data-id="fuelPct">100</span></div></div>
+      <div class="pit-panel" data-id="carPanel">
+        <div class="pp-left">
+          <div class="pit-board" data-id="pitBoard"></div>
+          <div class="pp-car">
+            <div class="tyres">${['FL', 'FR', 'RL', 'RR'].map((n, i) => `<div class="tyre" data-id="tyre${i}"><small>${n}</small><span data-id="tyrePct${i}">100%</span></div>`).join('')}</div>
+            <div class="fuel"><small>FUEL</small><div class="gauge"><div class="level" data-id="fuelLevel"></div><span data-id="fuelPct">100</span></div></div>
+          </div>
         </div>
-        <div class="title setup-title">Car Setup Adjustments</div>
-        <div class="setup notched">${SLOTS.map((s) => `
-          <div class="nslot" title="- ${s.minus} / + ${s.plus}"><span class="lbl">${this.catalog.specs.setup.fields[s.slot].label.toUpperCase()}</span>
-            <button class="dn" data-slot="${s.slot}" data-dir="-1">-</button>
-            <span class="track"><span class="mark" data-id="setupMark-${s.slot}"></span></span>
-            <button class="up" data-slot="${s.slot}" data-dir="1">+</button>
-            <span class="value" data-id="setup-${s.slot}">0</span>
-          </div>`).join('')}
+        <div class="pp-right">
+          <div class="title">SETUP</div>
+          <div class="setup notched">${SLOTS.map((s) => `
+            <div class="nslot" title="- ${s.minus} / + ${s.plus}"><span class="lbl">${this.catalog.specs.setup.fields[s.slot].label.toUpperCase()}</span>
+              <button class="dn" data-slot="${s.slot}" data-dir="-1">-</button>
+              <span class="track"><span class="mark" data-id="setupMark-${s.slot}"></span></span>
+              <button class="up" data-slot="${s.slot}" data-dir="1">+</button>
+              <span class="value" data-id="setup-${s.slot}">0</span>
+            </div>`).join('')}
+          </div>
+          <div class="hint" data-id="setupHint">Stop in a pit box to change the setup.</div>
+          <div class="pp-balance" data-id="balanceWrap"><small>BALANCE</small><div class="balance" data-id="balance">Drive a few laps.</div></div>
         </div>
-        <div class="hint" data-id="setupHint">Stop in a pit box to change the setup.</div>
-        <div class="title setup-title">Balance (practice: which axle lets go first)</div>
-        <div class="balance" data-id="balance">Drive a few laps.</div>
       </div>`;
   }
 
@@ -218,13 +220,30 @@ export class Hud {
 
   private toggle(p: keyof Hud['panels']): void {
     this.panels[p] = !this.panels[p];
-    this.carPanelAuto = false;
     this.applyPanels();
   }
 
   private applyPanels(): void {
     this.el.timingPanel!.classList.toggle('open', this.panels.timing);
     this.el.carPanel!.classList.toggle('open', this.panels.car);
+  }
+
+  /** The pit panel is up (stopped in your box). */
+  get pitPanelOpen(): boolean {
+    return this.panels.car;
+  }
+
+  /**
+   * Put the pit panel at YOUR box (HUD v2 card). `place` gets the panel's size in track px and returns its
+   * top-left corner in track px (pit-panel-place.ts); the HUD converts to screen px.
+   */
+  positionPitPanel(place: (w: number, h: number) => { x: number; y: number }): void {
+    const e = this.el.carPanel!, r = this.root.getBoundingClientRect();
+    if (!r.height) return;
+    const k = this.trackHeightPx() / r.height; // track px per CSS px
+    const p = place(e.offsetWidth * k, e.offsetHeight * k);
+    e.style.left = `${p.x / k}px`;
+    e.style.top = `${p.y / k}px`;
   }
 
   /** Sit exactly over the canvas; scale so the bar covers the top `hudBarTrackPx` of the track. */
@@ -262,7 +281,7 @@ export class Hud {
     this.text('sessName', name);
     this.el.sessName!.dataset.len = name.length > 8 ? 'long' : '';
     this.el.lapWrap!.innerHTML = lap;
-    this.el.pos!.innerHTML = standing ? `P${standing.pos}<small>/${standing.of}</small>` : 'P<small>-</small>';
+    this.el.pos!.innerHTML = standing ? `P${standing.pos}<small>/${standing.of}</small>` : 'P<small> -</small>';
     this.text('ahead', standing?.ahead || '---');
     this.text('behind', standing?.behind || '---');
     const labels = this.el.right!.querySelectorAll<HTMLElement>('.r-iv small');
@@ -357,6 +376,7 @@ export class Hud {
       this.el[`setupMark-${s.slot}`]!.style.left = `${((v - f.min) / (f.max - f.min)) * 100}%`;
     }
     this.root.querySelectorAll<HTMLButtonElement>('[data-slot]').forEach((b) => (b.disabled = !inBoxStopped));
+    this.el.balanceWrap!.style.display = race ? 'none' : '';
     this.el.setupHint!.textContent = inBoxStopped ? 'In the box: fresh tyres, refuelling. Setup changes apply now.'
       : race && race.box > 0 ? `Your pit box is ${race.box} (outlined when you're in the pit lane). Only your box services you.`
       : 'Stop in a pit box to change the setup.';

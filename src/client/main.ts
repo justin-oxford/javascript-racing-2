@@ -1,4 +1,4 @@
-import { aiStartCompound, computeExitLine, rainAt, waterAt, wheelPositions, shower, consumableScale, defaultPitPlan, offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, cornerTable, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type CarSetup, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
+import { boxAt, aiStartCompound, computeExitLine, rainAt, waterAt, wheelPositions, shower, consumableScale, defaultPitPlan, offsetPath, racecraftOffsets, normalizeSetup, nextSession, newSurfaceGrid, seedRubber, type SurfaceGrid, aiInputSource, assignDrivers, driverPreset, type DriverDef, bodyOffsetM, buildRacingLine, buildStats, cornerTable, optimizeRacingLine, speedProfile, type LineOptimizerConfig, createQualiWorld, createRaceWorld, createWorld, pitBoxPose, pitQueuePoses, retireFromQuali, resetCar, setCarBuild, step, timingSequence, TICK_DT, TICK_HZ, type AiConfig, type CarBuild, type CarSetup, type DamageMode, type SessionSettings, type InputSource, type RacingLine, type SimContext, type WorldState } from '../sim';
 import { drawMask, drawTrackData, drawTrails, drawWalls, drawWheels } from './debug-draw';
 import { DonutInput } from './input/dummy';
 import { KeyboardInput } from './input/keyboard';
@@ -36,6 +36,7 @@ import hudConfig from '../../config/hud.json';
 import { Hud, SETUP_LABELS } from './hud/hud';
 import { fuelText, pitBoardHtml } from './hud/pit-board';
 import { BalanceTracker } from './hud/balance';
+import { placePitPanel } from './hud/pit-panel-place';
 import { RaceHud } from './hud/race-hud';
 import { drawCarLabels, LABEL_MODES, nextLabelMode, type LabelMode } from './hud/car-labels';
 import { bestLapStanding, carIdentity, playerIntervals, practiceEntries, qualiEntries, sessionOrder, setCarDrivers, setPlayerIdentity } from './hud/running-order';
@@ -219,6 +220,8 @@ async function main(): Promise<void> {
   /** Practice (HUD v2 ticker): each car's best valid lap this session, and the player's stops. Reset per session. */
   let practiceBest: number[] = [];
   let practiceStops = 0;
+  /** Where the pit panel went last (cached per box and panel size). */
+  let pitPanelAt = { key: '', x: 0, y: 0 };
   const newSessionStats = (): void => { practiceBest = []; practiceStops = 0; };
   /** The race being run (for Restart), undefined in practice. */
   let raceSetup: { laps: number; grid: 'random' | 'pole' | 'back'; order?: number[] | undefined } | undefined;
@@ -649,6 +652,12 @@ async function main(): Promise<void> {
         drivers: () => drivers,
         /** Dev: replace who drives car i (e.g. a scripted test driver). */
         setDriver: (i: number, d: InputSource) => (drivers[i] = d),
+        /** Dev (practice): park your car in pit box n (0-based), e.g. to check the pit panel. */
+        toBox: (n: number) => {
+          const pose = pitBoxPose(racingLine, n, json.pxPerMeter);
+          if (pose && !curr.race && !curr.quali) { curr = resetCar(curr, 0, pose, ctx); prev = curr; }
+          return ctx.track.boxes.length;
+        },
         grid: (n: number) => {
           const slot = json.grid[n];
           if (slot) { curr = resetCar(curr, 0, slot, ctx); prev = curr; }
@@ -936,6 +945,26 @@ async function main(): Promise<void> {
           // The full pit board: in the car panel at your box.
           board: me.inPitLane ? pitBoardHtml(me.pitPlan, ctx.strategy, profile.keybinds, me, damageMode === 'realistic') : undefined,
         });
+        // Pit panel (HUD v2 card): just below YOUR box, clear of the pit lane, on the canvas.
+        if (hud.pitPanelOpen) {
+          const ppm = json.pxPerMeter;
+          const boxNo = race ? race.cars[0]?.box ?? -1 : boxAt(ctx.track, me.x * ppm, me.y * ppm);
+          const box = ctx.track.boxes[boxNo];
+          if (box) hud.positionPitPanel((w, h) => {
+            const key = `${boxNo}|${Math.round(w)}|${Math.round(h)}`;
+            if (pitPanelAt.key !== key) {
+              const t = ctx.track, { width, height, data } = t.mask;
+              const isPit = (x: number, y: number): boolean => {
+                const px = Math.floor(x), py = Math.floor(y);
+                if (px < 0 || py < 0 || px >= width || py >= height) return false;
+                const v = data[py * width + px];
+                return v === t.index.pitLane || v === t.index.pitBox;
+              };
+              pitPanelAt = { key, ...placePitPanel({ box, w, h, width, height, top: hudConfig.hudBarTrackPx, isPit }) };
+            }
+            return pitPanelAt;
+          });
+        }
         raceHud.weekend = weekend;
         raceHud.update(curr, race?.sharedBoxes ? `${ctx.track.boxes.length} pit boxes for ${curr.cars.length} cars: shared` : '', pBest);
       }
