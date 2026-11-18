@@ -1,0 +1,14 @@
+{
+  "_comment": "Multiplayer (card 07). interpDelayMs: remote cars are drawn this far behind the server clock (between snapshots). inputBuffer: the server's queue of each player's inputs (each tick uses the next one). It runs dry when inputs arrive late (the last input repeats) and grows when they bunch up. Inputs are only dropped when the queue has stayed deeper than `spare` for a whole `windowSec` (so a burst drains by itself), or past `cap`. Every repeat or drop shifts your car a tick against its prediction (one tick of travel, blended out). correction: how a prediction correction is shown on your own car: blended out over blendSec (never snapped), unless it's bigger than snapM metres / snapRad radians (a reset to track, a teleport), which jumps at once.",
+  "interpDelayMs": 100,
+  "inputBuffer": {
+    "spare": 1,
+    "windowSec": 2,
+    "cap": 30
+  },
+  "correction": {
+    "blendSec": 0.12,
+    "snapM": 4,
+    "snapRad": 1.0
+  }
+}

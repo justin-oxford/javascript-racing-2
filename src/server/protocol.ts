@@ -75,7 +75,8 @@ export interface InputMsg extends CarInput {
 /**
  * One car in a snapshot, flattened and quantised (msgpack sends small integers in 1-5 bytes):
  * x, y (cm), heading (mrad), vx, vy (cm/s), angVel (mrad/s), steerAngle (mrad), speed (cm/s),
- * throttle, brake (0..1000), flags, then per wheel: surface, usage (x1000), slipDeg (x100), loadN, wear (x10000).
+ * throttle, brake (0..1000), flags, then per wheel: surface, usage (x1000), slipDeg (x100), loadN, wear (x10000),
+ * then steer (x1000: the driver's ramped steer, so a client can carry the car on in its prediction).
  */
 export type CarKin = number[];
 
@@ -86,6 +87,7 @@ export function encodeCar(c: CarState): CarKin {
   const flags = (c.wallContact ? F_WALL : 0) | (c.barrierContact ? F_BARRIER : 0) | (c.carContact ? F_CAR : 0) | (c.inPitLane ? F_PIT : 0) | (c.offTrack ? F_OFF : 0) | (c.rejoin.ghost ? F_GHOST : 0) | (c.inPitBox ? F_BOX : 0);
   const out = [r(c.x * 100), r(c.y * 100), r(c.heading * 1000), r(c.vx * 100), r(c.vy * 100), r(c.angVel * 1000), r(c.steerAngle * 1000), r(c.speed * 100), r(c.controls.throttle * 1000), r(c.controls.brake * 1000), flags];
   for (const w of c.wheels) out.push(w.surface, r(w.usage * 1000), r(w.slipDeg * 100), r(w.loadN), r(w.wear * 10000));
+  out.push(r(c.controls.steer * 1000));
   return out;
 }
 
@@ -102,7 +104,7 @@ export function decodeCar(k: CarKin, base: CarState): CarState {
     x: g(0) / 100, y: g(1) / 100, heading: g(2) / 1000,
     vx: g(3) / 100, vy: g(4) / 100, angVel: g(5) / 1000,
     steerAngle: g(6) / 1000, speed: g(7) / 100,
-    controls: { ...base.controls, throttle: g(8) / 1000, brake: g(9) / 1000 },
+    controls: { ...base.controls, throttle: g(8) / 1000, brake: g(9) / 1000, steer: g(31) / 1000 },
     wallContact: !!(flags & F_WALL), barrierContact: !!(flags & F_BARRIER), carContact: !!(flags & F_CAR),
     inPitLane: !!(flags & F_PIT), offTrack: !!(flags & F_OFF), inPitBox: !!(flags & F_BOX),
     rejoin: { ...base.rejoin, ghost: !!(flags & F_GHOST) },

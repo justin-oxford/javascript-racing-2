@@ -41,7 +41,7 @@ export interface RoomOptions {
 
 export class RaceRoom extends Room {
   /** Tests: sees the server's world after every tick (the truth the clients are checked against). */
-  static tap: ((code: string, world: WorldState) => void) | undefined;
+  static tap: ((code: string, world: WorldState, host: RaceHost) => void) | undefined;
   override maxClients = MAX_CARS;
   private code = '';
   private hostId = '';
@@ -206,7 +206,7 @@ export class RaceRoom extends Room {
         next += tickMs;
         n++;
         host.step();
-        RaceRoom.tap?.(this.code, host.world);
+        RaceRoom.tap?.(this.code, host.world, host);
         this.retireDropped();
         if (host.world.tick % SNAP_EVERY === 0) {
           const snap = host.takeSnapshot();

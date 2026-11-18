@@ -3,9 +3,10 @@
 // InputSource, right here on the server. No Colyseus in this file, so tests can drive it directly.
 import aiJson from '../../config/ai.json' with { type: 'json' };
 import driversJson from '../../config/drivers.json' with { type: 'json' };
+import netCfg from '../../config/net.json' with { type: 'json' };
 import {
-  aiInputSource, aiStartCompound, assignDrivers, buildRacingLine, consumableScale, createRaceWorld, driverPreset, normalizeSetup, step,
-  NEUTRAL_INPUT, type AiConfig, type CarBuild, type CarInput, type DriverDef, type InputSource, type RacingLine, type SimContext, type SimEvent, type WorldState,
+  aiInputSource, aiStartCompound, cornerTable, assignDrivers, buildRacingLine, consumableScale, createRaceWorld, driverPreset, normalizeSetup, step,
+  NEUTRAL_INPUT, TICK_HZ, type AiConfig, type CarBuild, type CarInput, type DriverDef, type InputSource, type RacingLine, type SimContext, type SimEvent, type WorldState,
 } from '../sim';
 import { encodeCar, fullCar, type CarDriver, type InputMsg, type RoomSettings, type SnapMsg } from './protocol';
 
@@ -28,7 +29,14 @@ export class RaceHost {
   world: WorldState;
   readonly line: RacingLine | undefined;
   readonly drivers: CarDriver[];
-  /** Latest input per car from its player, and the seq it came with. */
+  /** Inputs from each car's player, oldest first, not yet used (a small jitter buffer: one per tick). */
+  private readonly queue: Array<Array<{ input: CarInput; seq: number }>>;
+  /** Per car: ticks the queue ran dry (last input repeated) and inputs dropped to catch up. Each shifts the
+   *  player's timeline a tick against their prediction (a correction of one tick of travel). */
+  readonly inputStats: Array<{ repeats: number; drops: number }>;
+  /** Per car: the shortest the queue has been since the window began, and when it began (tick). */
+  private readonly qMin: Array<{ min: number; since: number }>;
+  /** The input each player's car used last tick (repeated when the queue runs dry). */
   private readonly latest: Array<{ input: CarInput; seq: number } | undefined>;
   /** Seq of the input applied on the last tick, per car (the snapshot's ack). */
   private readonly applied: number[];
@@ -60,8 +68,15 @@ export class RaceHost {
       return e.player ? b : { ...b, compound: aiStartCompound(settings.laps, scale, ctx.strategy, (((seed ^ ((i + 1) * 2654435761)) >>> 0) % 1000) / 1000) };
     });
     this.world = createRaceWorld(ctx, builds, { laps: settings.laps, seed });
+    // The AI measures each car's cornering limits the first time it drives it (~0.8 s per build), which
+    // would freeze the whole room at lights out. Measure them now, before the race clock runs (cached per
+    // build, so a rerun of the same grid is free). Players' cars too: the AI takes over if they drop.
+    if (aiCfg.measuredLimits) for (const b of builds) cornerTable(ctx, b);
     this.drivers = entrants.map((e) => ({ code: e.code, name: e.name, ...(e.player ? { player: e.player } : {}) }));
     this.latest = entrants.map(() => undefined);
+    this.queue = entrants.map(() => []);
+    this.inputStats = entrants.map(() => ({ repeats: 0, drops: 0 }));
+    this.qMin = entrants.map(() => ({ min: Infinity, since: 0 }));
     this.applied = entrants.map(() => -1);
     const base = aiCfg.presets[settings.aiPreset] ?? aiCfg.presets[aiCfg.defaultPreset]!;
     const presetFor = (i: number) => () => (entrants[i]!.player ? base : driverPreset(base, lineup[i - players.length], aiCfg.skill?.spread ?? 0));
@@ -80,24 +95,30 @@ export class RaceHost {
     return this.drivers.findIndex((d) => d.player === player);
   }
 
-  /** A player's latest input. Older seqs (reordered or duplicated) are ignored. */
+  /**
+   * A player's input, queued: each tick uses the next one, so the server applies exactly the inputs the
+   * client numbered, one per tick, as the client's prediction replays them (card 07 step 6; step 3 used
+   * the latest only, which skips and repeats inputs under jitter). Older seqs are ignored.
+   */
   setInput(car: number, msg: InputMsg): void {
-    const was = this.latest[car];
-    if (was && msg.seq <= was.seq) return;
+    const q = this.queue[car]!;
+    const last = q[q.length - 1] ?? this.latest[car];
+    if (last && msg.seq <= last.seq) return;
     const { seq, ...input } = msg;
-    this.latest[car] = { input: { throttle: clamp01(input.throttle), brake: clamp01(input.brake), steer: Math.max(-1, Math.min(1, input.steer || 0)), ...pick(input) }, seq };
+    q.push({ input: { throttle: clamp01(input.throttle), brake: clamp01(input.brake), steer: Math.max(-1, Math.min(1, input.steer || 0)), ...pick(input) }, seq });
   }
 
   /** Hand a player's car to the AI (dropped) or back to the player (rejoined). */
   setAiDriving(car: number, on: boolean): void {
     if (on && !this.ai[car]) this.ai[car] = this.makeAi(car, this.presetFor(car));
     this.aiDriven[car] = on;
-    if (!on) this.latest[car] = undefined; // wait for the player's next input, not the one before the drop
+    if (!on) { this.latest[car] = undefined; this.queue[car]!.length = 0; } // the player's next input, not the ones before the drop
   }
 
   /** Retired (dropped too long): parked where it is, no driver. It keeps its laps in the results. */
   retire(car: number): void {
     this.aiDriven[car] = false;
+    this.queue[car]!.length = 0;
     this.latest[car] = { input: { ...NEUTRAL_INPUT, brake: 1 }, seq: Number.MAX_SAFE_INTEGER };
   }
 
@@ -105,12 +126,34 @@ export class RaceHost {
   step(): void {
     const inputs = this.world.cars.map((_, i) => {
       if (this.aiDriven[i]) return this.ai[i]!.read(this.world.tick);
+      const q = this.queue[i]!;
+      this.trimQueue(i);
+      const next = q.shift();
+      if (!next && this.latest[i]) this.inputStats[i]!.repeats++;
+      if (next) this.latest[i] = next;
       const l = this.latest[i];
       if (l && l.seq !== Number.MAX_SAFE_INTEGER) this.applied[i] = l.seq;
-      return l?.input ?? NEUTRAL_INPUT;
+      // Ran dry: the last input again, minus one-shot requests.
+      return next ? next.input : l ? { throttle: l.input.throttle, brake: l.input.brake, steer: l.input.steer, ...(l.input.deploy ? { deploy: true } : {}), ...(l.input.reset ? { reset: true } : {}) } : NEUTRAL_INPUT;
     });
     this.world = step(this.world, inputs, this.ctx);
     for (const e of this.world.events) this.pending.push({ ...e, tick: this.world.tick });
+  }
+
+  /**
+   * Keep each player's input queue as short as their link allows: drop inputs only when it has stayed deeper
+   * than `spare` for a whole window (lag that's built up and stayed), never for a burst that drains itself.
+   */
+  private trimQueue(i: number): void {
+    const q = this.queue[i]!, w = this.qMin[i]!, cfg = netCfg.inputBuffer, stats = this.inputStats[i]!;
+    const drop = (n: number) => { if (n > 0) { q.splice(0, n); stats.drops += n; } };
+    drop(q.length - cfg.cap);
+    w.min = Math.min(w.min, q.length);
+    if (this.world.tick - w.since >= cfg.windowSec * TICK_HZ) {
+      drop(Math.min(q.length, w.min) - cfg.spare);
+      w.min = Infinity;
+      w.since = this.world.tick;
+    }
   }
 
   /** Snapshots for every client: call once per snapshot tick, then send `forCar(i)` to each. */

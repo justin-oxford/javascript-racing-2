@@ -1,6 +1,6 @@
 // Online mode (card 07, ?online): the lobby, the connection and the latency simulator, glued to the game.
 // main.ts keeps drawing worlds exactly as offline; online, the worlds come from the server's snapshots.
-import type { CarInput, WorldState } from '../../sim';
+import type { CarInput, CarState, SimContext, WorldState } from '../../sim';
 import { DEFAULT_PORT, type CarDriver, type LobbyMsg, type StartMsg } from '../../server/protocol';
 import { LAG_PRESETS, LatencySim } from './latency';
 import { LobbyUi } from './lobby-ui';
@@ -11,6 +11,8 @@ export interface OnlineDeps {
   trackId: string;
   teams: ReadonlyArray<{ id: string; name: string; color: string }>;
   me: { name: string; team: string };
+  /** The client's sim context: my own car is predicted with it (step 6). */
+  ctx: SimContext;
   /** Keys go to the lobby while it's open. */
   setKeysSuspended(on: boolean): void;
   /** A race (re)started: its first world with my car as car 0, and who drives each car (same order). */
@@ -48,6 +50,9 @@ export class OnlineMode {
         this.deps.onLobby();
       },
     });
+    // ?predict=0: no prediction (my car drawn from snapshots like the rest: step 5 behaviour, for comparing).
+    this.net.predict = params.get('predict') !== '0';
+    this.net.predictCtx = deps.ctx;
     this.ui = new LobbyUi({
       create: (me) => void this.connect(undefined, me),
       join: (code, me) => void this.connect(code, me),
@@ -67,9 +72,9 @@ export class OnlineMode {
 
   get racing(): boolean { return this.net.racing; }
 
-  /** Every client tick: my input up to the server. */
-  tick(input: CarInput): void {
-    if (this.racing && !this.ui.open) this.net.sendInput(input);
+  /** Every client tick: my input up to the server (and into my predicted car: returns it before/after). */
+  tick(input: CarInput): { was: CarState; me: CarState } | undefined {
+    return this.racing && !this.ui.open ? this.net.sendInput(input) : undefined;
   }
 
   /** Results screen buttons. */
@@ -89,7 +94,9 @@ export class OnlineMode {
     const l = this.net.lobby;
     if (!this.racing || !l) return this.ui.setBadge(undefined);
     const kb = (this.net.snapRate.perSec / 1024).toFixed(0);
-    this.ui.setBadge(`ONLINE ${l.code} · ping ${Math.round(this.net.rttMs)} ms · lag sim ${this.lag.pingMs ? `${this.lag.pingMs} ms` : 'off'} · ${kb} KB/s`);
+    const p = this.net.predictor, c = this.net.corr;
+    const pred = p ? `predict ${p.pendingCount} ahead, fix ${(c.last * 100).toFixed(0)} cm (max ${(c.max * 100).toFixed(0)})` : 'no prediction';
+    this.ui.setBadge(`ONLINE ${l.code} · ping ${Math.round(this.net.rttMs)} ms · lag sim ${this.lag.pingMs ? `${this.lag.pingMs} ms` : 'off'} · ${kb} KB/s · ${pred}`);
   }
 
   private setLag(ms: number): void {

@@ -528,6 +528,7 @@ async function main(): Promise<void> {
   if (params.has('online')) {
     online = new OnlineMode({
       trackId: json.id,
+      ctx,
       teams: ctx.catalog.teams.map((t) => ({ id: t.id, name: t.name, color: t.colors.primary })),
       me: { name: profile.name, team: curr0Build().team },
       setKeysSuspended: (on) => { keyboard.suspended = on; keyboard.release(); },
@@ -751,7 +752,11 @@ async function main(): Promise<void> {
 
   const loopHooks = {
     tick() {
-      if (online) return online.tick(keyboard.read(curr.tick)); // online: inputs up, the server steps the world
+      if (online) { // online: inputs up, the server steps the world; my own car is predicted here
+        const own = online.tick(keyboard.read(curr.tick));
+        if (own) ownTick(own.was, own.me);
+        return;
+      }
       if (paused) return; // pause menu: the world stands still (rendering carries on)
       const q = curr.quali;
       const n = q && q.phase !== 'results' && q.cars[0]?.done ? Math.max(1, Math.round(ctx.race.qualiFastForward)) : 1;
@@ -765,20 +770,21 @@ async function main(): Promise<void> {
     },
     render(alpha: number, frameSeconds: number) {
       if (frameSeconds > 0) fps += (1 / frameSeconds - fps) * 0.05;
-      if (online) { alpha = onlineFrame(alpha); online.updateBadge(); }
+      if (online) { alpha = onlineFrame(alpha, frameSeconds); online.updateBadge(); }
       vfx.update(frameSeconds);
       drawFrame(alpha, frameSeconds);
     },
   };
   /** Online: hand every snapshot that's now in the past to react() (events, effects, sound), then draw between the two either side of now. */
-  function onlineFrame(alpha: number): number {
+  function onlineFrame(alpha: number, frameSeconds: number): number {
     if (!online?.racing) return alpha;
-    const v = online.net.view(performance.now());
+    const v = online.net.view(performance.now(), alpha, frameSeconds);
     if (!v) return alpha;
+    const predicting = !!online.net.predictor;
     for (const s of v.passed) {
       prev = netLast ?? s.world;
       curr = s.world;
-      react();
+      react(predicting);
       netLast = s.world;
     }
     prev = v.prev;
@@ -786,12 +792,12 @@ async function main(): Promise<void> {
     return v.alpha;
   }
   /** After the world moved on (a local tick, or a snapshot online): ghost, effects, sound, timing events. */
-  function react(): void {
-    {
-      afterTick();
-      vfx.onTick(prev, curr, ctx.track, physics);
-      const me = curr.cars[0], was = prev.cars[0];
-      if (me && was) {
+  /** Online with prediction: my car's own tick (effects and sound from where I'm driving, not 100 ms ago). */
+  function ownTick(was: WorldState['cars'][number], me: WorldState['cars'][number]): void {
+    vfx.onTick({ ...curr, cars: [was] }, { ...curr, cars: [me] }, ctx.track, physics);
+    carSound(was, me);
+  }
+  function carSound(was: WorldState['cars'][number], me: WorldState['cars'][number]): void {
         // Wet weather: the rain now and the standing water under the wheels (rain sound, tyre hiss).
         const wet = curr.surface?.water ? wheelPositions(me, physics).reduce((a, p) => a + waterAt(curr.surface, p.x, p.y), 0) / 4 : 0;
         const rainNow = rainAt(curr.tick * TICK_DT, curr.settings?.weather, curr.settings?.weatherSeed ?? 0, ctx.weather);
@@ -799,7 +805,18 @@ async function main(): Promise<void> {
         // Wind: grows with speed; tucked into a tow it drops and darkens (slipstream.json wind).
         const wd = slipstream.wind, sp = Math.min(1, (Math.abs(me.speed) * 3.6) / wd.fullKph), tuck = me.tow / Math.max(0.01, slipstream.tow.maxDragReduction);
         audio.setWind(wd.gain * sp * sp * (1 - wd.towDuck * tuck), wd.baseHz * (0.6 + 0.6 * sp) * (1 - wd.towHzDrop * tuck));
-      }
+  }
+  /**
+   * After the world moved on (a local tick, or a snapshot online): ghost, effects, sound, timing events.
+   * `ownPredicted`: my car's effects and sound come from ownTick() instead (online, predicting).
+   */
+  function react(ownPredicted = false): void {
+    {
+      afterTick();
+      // Online and predicting, the snapshot's car 0 is the server's (in the past): leave it to ownTick().
+      vfx.onTick(ownPredicted ? { ...prev, cars: [undefined as unknown as WorldState['cars'][number], ...prev.cars.slice(1)] } : prev, curr, ctx.track, physics);
+      const me = curr.cars[0], was = prev.cars[0];
+      if (me && was && !ownPredicted) carSound(was, me);
       for (const e of curr.events) {
         if (e.type === 'sector' || e.type === 'lap') {
           session.onEvent(e, e.car === 0);
