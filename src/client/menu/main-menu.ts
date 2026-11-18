@@ -8,7 +8,7 @@ import { BIND_ACTIONS, bindKey, completeKeybinds, DEFAULT_KEYBINDS, keyConflicts
 import { cleanName, nameCode, NAME_MAX, type Profile, type ProfileStore } from './profile';
 import './main-menu.css';
 
-export type StartKind = 'practice' | 'race' | 'weekend';
+export type StartKind = 'practice' | 'race' | 'weekend' | 'online';
 export interface RecordRow { spec: string; team: string; equal: boolean; lap: number }
 
 export interface MenuDeps {
@@ -155,8 +155,9 @@ export class MainMenu {
         <button class="go" data-start="practice">PRACTICE</button>
         <button class="go" data-start="race">QUICK RACE</button>
         <button class="go" data-start="weekend">RACE WEEKEND</button>
+        <button class="go" data-start="online">ONLINE RACE</button>
       </div>
-      <p class="note">Race weekend: practice, then qualifying (best lap sets the grid), then the race. Quick race goes straight to the grid.</p>
+      <p class="note">Race weekend: practice, then qualifying (best lap sets the grid), then the race. Quick race goes straight to the grid. Online race: make a room and send friends its code, or join theirs.</p>
       <div class="rows">
         ${this.d.tracks && this.d.tracks.length > 1 ? `<label>Track</label><select data-field="track">${this.d.tracks.map((t) => `<option value="${esc(t.id)}"${t.id === this.d.trackId ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>` : ''}
         <label>Team</label><select data-field="team"><option value="">Default</option>${this.d.catalog.teams.map((t) => `<option value="${t.id}"${t.id === p.team ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>

@@ -501,6 +501,7 @@ async function main(): Promise<void> {
     onProfile: (p) => applyProfile(p),
     onStart: (kind) => {
       const s = profile.settings;
+      if (kind === 'online') { const q = new URLSearchParams(location.search); q.set('online', ''); location.search = q.toString().replace(/(^|&)online=(?=&|$)/, '$1online'); return; }
       if (kind === 'practice') startPractice();
       else if (kind === 'race') startRace(s.race.laps, s.race.grid);
       else startWeekend(s.race.laps);

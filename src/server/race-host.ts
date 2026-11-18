@@ -25,6 +25,17 @@ export interface Entrant {
 /** Three letters from a name: "Justin" -> JUS. */
 export const nameCode = (name: string): string => (name.replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase() || 'PLY').padEnd(3, 'X');
 
+/**
+ * Measure the AI's corner tables for every team on one track + spec ahead of time (the server does this at
+ * boot for the default race), so pressing Start doesn't wait ~0.6 s per car build. Cached per build.
+ */
+export function warmCornerTables(ctx: SimContext, spec: string): number {
+  if (!aiCfg.measuredLimits) return 0;
+  const p = ctx.physics, setup = normalizeSetup(ctx.track.json.baseSetup ?? p.defaultCar.setup, ctx.catalog.specs.setup);
+  for (const t of ctx.catalog.teams) cornerTable(ctx, { ...p.defaultCar, setup, spec, team: t.id });
+  return ctx.catalog.teams.length;
+}
+
 export class RaceHost {
   world: WorldState;
   readonly line: RacingLine | undefined;

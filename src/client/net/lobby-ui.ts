@@ -103,7 +103,7 @@ export class LobbyUi {
       const max = 10 - m.players.length;
       const racing = m.phase === 'race';
       this.root.innerHTML = `<div class="box"><h2>ROOM <span class="code">${m.code}</span></h2>
-        <div class="dim">Friends join with this code. ${racing ? 'A race is running: you join the next one.' : host ? 'You are the host.' : 'Waiting for the host to start.'}</div>
+        <div class="dim">Friends join with this code. ${m.starting ? '<b>Starting the race…</b>' : racing ? 'A race is running: you join the next one.' : host ? 'You are the host.' : 'Waiting for the host to start.'}</div>
         <ul>${m.players.map((p) => `<li><span class="sw" style="background:${color(p.team)}"></span>${esc(p.name)}${p.id === m.hostId ? ' <span class="dim">(host)</span>' : ''}${p.id === m.you ? ' <span class="dim">(you)</span>' : ''}${p.connected ? '' : ' <span class="dim">(reconnecting)</span>'}<span class="dim" style="margin-left:auto">${esc(this.teams.find((t) => t.id === p.team)?.name ?? p.team)}</span></li>`).join('')}
           ${s.aiCount ? `<li class="dim">+ ${Math.min(s.aiCount, max)} AI (${esc(s.aiPreset)})</li>` : ''}</ul>
         <label>Name <input data-k="name" maxlength="16" value="${esc(me?.name ?? this.me.name)}"></label>
@@ -116,7 +116,7 @@ export class LobbyUi {
           <label>AI level <select data-k="aiPreset">${m.presets.map((v) => `<option${v === s.aiPreset ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
         </fieldset>
         ${this.lagSelect()}
-        <div class="row"><button data-a="start" ${host && !racing ? '' : 'disabled'}>Start race</button><button data-a="leave" class="ghost">Leave</button></div>
+        <div class="row"><button data-a="start" ${host && !racing && !m.starting ? '' : 'disabled'}>${m.starting ? 'Starting…' : 'Start race'}</button><button data-a="leave" class="ghost">Leave</button></div>
         <div class="err">${esc(this.error)}</div></div>`;
     }
     this.wire();

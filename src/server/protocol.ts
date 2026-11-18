@@ -39,6 +39,8 @@ export interface LobbyMsg {
   hostId: string;
   you: string;
   phase: RoomPhase;
+  /** The host pressed Start and the race is being built (a new track/spec can take a few seconds). */
+  starting?: boolean;
   settings: RoomSettings;
   players: LobbyPlayer[];
   /** Tracks a host can pick, and the specs / AI levels / teams this server knows. */

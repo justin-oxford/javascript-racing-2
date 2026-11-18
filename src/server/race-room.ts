@@ -57,6 +57,7 @@ export class RaceRoom extends Room {
   private timer: ReturnType<typeof setInterval> | undefined;
   private timeScale = 1;
   private resultsAt = 0;
+  private starting = false;
 
   override onCreate(options: RoomOptions): void {
     this.code = newCode();
@@ -94,8 +95,11 @@ export class RaceRoom extends Room {
       this.sendLobby();
     });
     this.onMessage('start', (client) => {
-      if (client.sessionId !== this.hostId) return;
-      this.startRace();
+      if (client.sessionId !== this.hostId || this.starting) return;
+      // Say so first (building the race can take seconds for a car the AI hasn't measured yet), then build.
+      this.starting = true;
+      this.sendLobby();
+      setTimeout(() => { try { this.startRace(); } finally { this.starting = false; this.sendLobby(); } }, 50);
     });
     this.onMessage('lobby', (client) => {
       if (client.sessionId !== this.hostId) return;
@@ -245,7 +249,7 @@ export class RaceRoom extends Room {
   private sendLobby(): void {
     const players: LobbyPlayer[] = [...this.players.values()].map(({ id, name, team, car, connected }) => ({ id, name, team, car, connected }));
     for (const p of this.players.values())
-      if (p.connected) p.client.send('lobby', { code: this.code, hostId: this.hostId, you: p.id, phase: this.phase, settings: this.settings, players, ...this.lobbyExtras } satisfies LobbyMsg);
+      if (p.connected) p.client.send('lobby', { code: this.code, hostId: this.hostId, you: p.id, phase: this.phase, starting: this.starting, settings: this.settings, players, ...this.lobbyExtras } satisfies LobbyMsg);
   }
 }
 

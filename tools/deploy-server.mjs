@@ -69,7 +69,8 @@ const trackFiles = execFileSync('git', ['ls-files', 'tracks'], { cwd: root, enco
 const tmp = mkdtempSync(join(tmpdir(), 'racing-deploy-'));
 const list = join(tmp, 'files.txt'), tgz = join(tmp, 'release.tgz');
 writeFileSync(list, ['dist-server/server.mjs', 'dist-server/server.mjs.map', 'dist-server/release.json', ...trackFiles].join('\n') + '\n');
-execFileSync('tar', ['-czf', tgz, '-C', root, '-T', list], { stdio: 'inherit' });
+// A relative archive name (run from the temp folder): GNU tar reads "C:\..." as a remote host.
+execFileSync('tar', ['-czf', 'release.tgz', '-C', root, '-T', list], { cwd: tmp, stdio: 'inherit' });
 say(`packed ${release}: server + ${trackFiles.length} track files`);
 
 // 4. Copy + switch + restart.

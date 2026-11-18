@@ -20,6 +20,7 @@ APP_DIR=/opt/racing
 
 [ "$(id -u)" = 0 ] || { echo "run as root (sudo bash -s < server/setup.sh)"; exit 1; }
 export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a # Ubuntu's needrestart: restart services itself, never ask
 say() { echo "[setup] $*"; }
 
 say "packages: update + upgrade"
@@ -64,15 +65,11 @@ fi
 cat > /etc/caddy/Caddyfile <<EOF
 ${DOMAIN} {
 	reverse_proxy 127.0.0.1:${GAME_PORT}
-	log {
-		output file /var/log/caddy/access.log {
-			roll_size 10MiB
-			roll_keep 5
-		}
-	}
 }
 EOF
+# (No access log: the journal has what's needed, and it keeps no record of visitors' addresses.)
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+chown -R caddy:caddy /var/log/caddy # anything validate made as root
 systemctl enable --now caddy >/dev/null
 systemctl reload caddy
 
