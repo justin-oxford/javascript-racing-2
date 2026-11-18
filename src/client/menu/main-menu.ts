@@ -46,9 +46,19 @@ export interface MenuDeps {
   onQuit(): void;
   /** While a menu is open, the game shouldn't drive (keyboard suspended; the pause menu stops the sim). */
   onOpenChange(open: boolean, mode: 'main' | 'pause'): void;
+  /**
+   * What the pause menu is pausing (HUD v2 card: the menu icon and Esc open it). 'practice': session
+   * settings apply at once; 'session' (race / qualifying): they apply on restart; 'online': no session
+   * settings at all (the server runs the race, and it keeps running while the menu is open).
+   */
+  pauseKind?(): 'practice' | 'session' | 'online';
+  /** Practice: put the car back in the pits. */
+  onPits?(): void;
+  /** Practice: the setup balance readout (per corner: front / rear first). */
+  balance?(): Array<{ name: string; front: number; rear: number; passes: number }>;
 }
 
-type Tab = 'play' | 'profile' | 'settings' | 'records' | 'garage';
+type Tab = 'play' | 'session' | 'profile' | 'settings' | 'records' | 'garage';
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const lapText = (t: number) => { const m = Math.floor(t / 60); const s = (t - m * 60).toFixed(3).padStart(6, '0'); return m ? `${m}:${s}` : t.toFixed(3); };
 
@@ -108,8 +118,10 @@ export class MainMenu {
   private render(): void {
     if (this.mode === 'closed') return;
     const p = this.p;
+    const kind = this.pauseKind;
+    if (this.mode === 'pause' && kind === 'online' && this.tab === 'session') this.tab = 'play';
     const tabs: Array<[Tab, string]> = this.mode === 'pause'
-      ? [['play', 'Paused'], ['settings', 'Settings']]
+      ? [['play', kind === 'online' ? 'Menu' : 'Paused'], ...(kind === 'online' ? [] : [['session', 'Session'] as [Tab, string]]), ['settings', 'Settings']]
       : [['play', 'Play'], ['profile', 'Profile'], ['settings', 'Settings'], ['records', 'Records'], ['garage', 'Garage']];
     this.root.innerHTML = `
       <div class="panel">
@@ -119,7 +131,7 @@ export class MainMenu {
           ${tabs.map(([t, label]) => `<button class="tab${t === this.tab ? ' on' : ''}" data-tab="${t}">${label}</button>`).join('')}
           <div class="track">${esc(this.d.trackName)}</div>
         </div>
-        <div class="body">${this.mode === 'pause' && this.tab === 'play' ? this.pauseBody() : this.body(p)}</div>
+        <div class="body">${this.mode === 'pause' && this.tab === 'play' ? this.pauseBody() : this.mode === 'pause' && this.tab === 'session' ? this.sessionBody(p) : this.body(p)}</div>
       </div>`;
   }
 
@@ -133,21 +145,44 @@ export class MainMenu {
     }
   }
 
+  private get pauseKind(): 'practice' | 'session' | 'online' {
+    return this.d.pauseKind?.() ?? 'session';
+  }
+
   private pauseBody(): string {
+    const kind = this.pauseKind;
+    if (kind === 'online') return `<h2>Menu</h2>
+      <div class="big"><button class="go" data-act="resume">RESUME</button></div>
+      <p class="note">Online: the race keeps running while this is open (your car gets no input). Session settings belong to the room. Car labels, sound and keys are under Settings.</p>`;
     return `<h2>Paused</h2>
       <div class="big">
         <button class="go" data-act="resume">RESUME</button>
         <button data-act="restart">RESTART</button>
+        ${kind === 'practice' ? '<button data-act="pits">BACK TO PITS</button>' : ''}
         <button data-act="quit">MAIN MENU</button>
       </div>
-      <p class="note">Esc resumes. Session settings (AI, laps, damage...) are on the main menu and apply to the next session.</p>`;
+      <p class="note">Esc resumes. Session: team, spec, AI, damage, a new race. Settings: car labels (L), sound, effects, keys.${kind === 'practice' ? ' Stuck? Hold R for a second to rejoin the track behind where you left it (lap invalidated).' : ' Stuck? Hold R for a second to rejoin the track (you wait out a short penalty).'}</p>`;
+  }
+
+  /** Pause menu, Session tab: the main menu's session setup, applied now in practice (old HUD drop-down). */
+  private sessionBody(p: Profile): string {
+    const practice = this.pauseKind === 'practice';
+    const rows = this.d.balance?.().filter((r) => r.passes > 0) ?? [];
+    const balance = practice && this.d.balance ? `<h3>Balance (which axle lets go first)</h3>${rows.length ? `<div class="inline">${rows.map((r) => {
+      const f = Math.round((100 * r.front) / r.passes), rr = Math.round((100 * r.rear) / r.passes);
+      const tag = f >= 50 && f > rr ? `under F ${f}%` : rr >= 50 && rr > f ? `over R ${rr}%` : 'ok';
+      return `<span class="code" title="${r.passes} passes: front first ${f}%, rear first ${rr}%">${esc(r.name)} <small>${tag}</small></span>`;
+    }).join('')}</div>` : '<p class="note">Drive a few laps.</p>'}` : '';
+    return this.playBody(p, true).replace('<h2>Play</h2>', `<h2>Session</h2><p class="note">${practice
+      ? 'Practice: changes apply now. Changing spec, AI, damage or performance restarts practice; changing team puts you back in the pits but keeps your times, so you can compare teams.'
+      : 'In a race or qualifying these apply to the next session (Restart on the Paused tab, or a new one below). Your car stays as it is until then.'}</p>`) + balance;
   }
 
   private choice<T extends string | number>(key: string, value: T, options: ReadonlyArray<readonly [T, string]>): string {
     return `<div class="choices">${options.map(([v, label]) => `<button data-set="${key}" data-val="${v}" class="${v === value ? 'on' : ''}">${label}</button>`).join('')}</div>`;
   }
 
-  private playBody(p: Profile): string {
+  private playBody(p: Profile, pause = false): string {
     const s = p.settings, specs = Object.keys(this.d.catalog.specs.specs);
     const preset = s.ai.preset || this.d.defaultPreset;
     return `<h2>Play</h2>
@@ -155,7 +190,7 @@ export class MainMenu {
         <button class="go" data-start="practice">PRACTICE</button>
         <button class="go" data-start="race">QUICK RACE</button>
         <button class="go" data-start="weekend">RACE WEEKEND</button>
-        <button class="go" data-start="online">ONLINE RACE</button>
+        ${pause ? '' : '<button class="go" data-start="online">ONLINE RACE</button>'}
       </div>
       <p class="note">Race weekend: practice, then qualifying (best lap sets the grid), then the race. Quick race goes straight to the grid. Online race: make a room and send friends its code, or join theirs.</p>
       <div class="rows">
@@ -246,6 +281,7 @@ export class MainMenu {
     if (ds.act === 'resume') { this.close(); return this.d.onResume(); }
     if (ds.act === 'restart') { this.close(); return this.d.onRestart(); }
     if (ds.act === 'quit') { this.d.onQuit(); return this.open('main'); }
+    if (ds.act === 'pits') { this.close(); return this.d.onPits?.(); }
     if (ds.act === 'newProfile') { const n = this.d.profiles.create(`Player ${this.d.profiles.list().length + 1}`, p); this.d.onProfile(n); this.tab = 'profile'; return this.render(); }
     if (ds.act === 'deleteProfile') { if (confirm(`Delete the profile "${p.name}" and its settings? (Its lap records stay in this browser.)`)) { this.d.onProfile(this.d.profiles.remove(p.id)); this.render(); } return; }
     if (ds.act === 'export') return this.exportProfile(p);

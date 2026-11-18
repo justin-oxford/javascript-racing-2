@@ -266,7 +266,6 @@ async function main(): Promise<void> {
     if (keepWeekend && weekend) weekend = { ...weekend, started: true };
     prev = curr;
     drivers = aiCount === 0 ? [playerDriver(), ...Array.from({ length: extra }, (_, k) => new DonutInput(k + 1))] : [playerDriver(), ...aiDrivers(aiCount)];
-    hud.setAi(aiCount, aiPreset);
     raceHud?.hide();
   };
   /** (Re)start a race (card 06): grid, lights, own pit boxes, flag. Uses the menu's AI count (at least 1). */
@@ -291,7 +290,6 @@ async function main(): Promise<void> {
     curr = withSurface(curr, order && carried ? nextSession(carried, ctx.evolution) : freshSurface());
     prev = curr;
     drivers = [playerDriver(), ...aiDrivers(count)];
-    hud.setAi(aiCount, aiPreset);
     if (curr.race!.sharedBoxes) console.warn(`[race] ${ctx.track.boxes.length} pit box(es) for ${builds.length} cars: boxes are shared round-robin`);
   };
 
@@ -334,29 +332,19 @@ async function main(): Promise<void> {
     startRace(weekend.laps, 'random', grid);
   };
 
-  // Online (card 07, ?online): the server runs the race; the HUD's session menu and the main menu are off.
+  // Online (card 07, ?online): the server runs the race; session settings and the main menu are off.
   let online: OnlineMode | undefined;
   /** The world from the last snapshot handed to react() (online). */
   let netLast: WorldState | undefined;
-  const offlineOnly = <T extends object>(cbs: T): T =>
-    Object.fromEntries(Object.entries(cbs).map(([k, f]) => [k, (...a: unknown[]) => (online ? undefined : (f as (...x: unknown[]) => unknown)(...a))])) as T;
-  const hud = new Hud(canvas, hudConfig, ctx.catalog, offlineOnly({
-    onSpec: (spec) => {
-      const b = curr.cars[0]!.build;
-      if (b.spec === spec) return;
-      rebuildCar({ ...b, spec });
-      session.changeSpec(pbSpec(spec)); // spec change resets times
-      persist((s) => ({ ...s, spec }));
-    },
-    onTeam: (team) => {
-      const b = curr.cars[0]!.build;
-      if (b.team === team) return;
-      rebuildCar({ ...b, team });
-      session.changeTeam(team); // team change keeps times so teams can be compared
-      profile = profiles.save({ ...profile, team });
-    },
+  // HUD v2 card: the bar's menu icon opens the pause menu, the same one Esc opens. (The old spec/team
+  // drop-down is gone; its settings are on the pause menu's Session and Settings tabs.)
+  const openPause = (): void => {
+    if (menu.isOpen || (online && !online.racing)) return; // online: only during a race (the lobby has its own UI)
+    menu.open('pause');
+  };
+  const hud = new Hud(canvas, hudConfig, ctx.catalog, {
     onSetup: (slot, value) => {
-      if (!stoppedInBox()) return; // setup changes only while stopped in a pit box
+      if (online || !stoppedInBox()) return; // setup changes only while stopped in a pit box (offline)
       const b = curr.cars[0]!.build;
       const build = { ...b, setup: normalizeSetup({ ...normalizeSetup(b.setup, ctx.catalog.specs.setup), [slot]: value }, ctx.catalog.specs.setup) };
       profile = profiles.save({ ...profile, setups: { ...profile.setups, [json.id]: { ...build.setup } } }); // this track's preset
@@ -364,42 +352,11 @@ async function main(): Promise<void> {
       curr = setCarBuild(curr, 0, build);
       prev = setCarBuild(prev, 0, build);
     },
-    onAi: (count, preset) => {
-      aiCount = count;
-      aiPreset = preset;
-      persist((s) => ({ ...s, ai: { count, preset } }));
-      if (raceSetup && !raceSetup.order) startRace(raceSetup.laps, raceSetup.grid);
-      else if (!curr.quali && !raceSetup) startPractice(weekend?.stage === 'practice'); // mid-weekend: applies to the next session
-    },
-    onRace: (laps, grid) => startRace(laps, grid),
-    onDamage: (mode) => {
-      damageMode = mode;
-      persist((s) => ({ ...s, damage: mode }));
-      hud.setDamage(mode);
-      if (raceSetup && !raceSetup.order) startRace(raceSetup.laps, raceSetup.grid);
-      else if (!curr.quali && !raceSetup) startPractice(weekend?.stage === 'practice');
-    },
-    onPerf: (mode) => {
-      perfMode = mode;
-      session.changeSpec(pbSpec(curr.cars[0]!.build.spec)); // a different set of PBs
-      persist((s) => ({ ...s, perf: mode }));
-      hud.setPerf(mode);
-      if (raceSetup && !raceSetup.order) startRace(raceSetup.laps, raceSetup.grid);
-      else if (!curr.quali && !raceSetup) startPractice(weekend?.stage === 'practice');
-    },
-    onPractice: () => startPractice(),
-    onPits: () => {
-      if (curr.race || curr.quali) return;
-      curr = resetCar(curr, 0, json.spawn, ctx);
-      prev = curr;
-    },
-    onWeekend: (laps) => startWeekend(laps),
-    onLabels: (m) => setLabels(m),
-  }), () => renderer.trackHeight, siteUrl, Object.keys(aiCfg.presets));
-  hud.setRaceDefaults(ctx.race.defaultLaps);
+    onMenu: () => openPause(),
+  }, () => renderer.trackHeight, siteUrl);
   const raceHud: RaceHud = new RaceHud(hud.element, ctx.catalog, {
     onRestart: () => (online ? online.restart() : raceSetup && startRace(raceSetup.laps, raceSetup.grid, raceSetup.order)),
-    onMenu: () => { if (online) return online.menu(); startPractice(); hud.openMenu(); },
+    onMenu: () => { if (online) return online.menu(); startPractice(); menu.open('main'); },
     onQualify: () => startQuali(),
     onEndSession: () => endSession(),
     onStartRace: () => startWeekendRace(),
@@ -409,11 +366,8 @@ async function main(): Promise<void> {
   let labelMode: LabelMode = profile.settings.labels;
   function setLabels(m: LabelMode): void {
     labelMode = m;
-    hud.setLabels(m);
     if (profile.settings.labels !== m) persist((s) => ({ ...s, labels: m }));
   }
-  hud.setLabels(labelMode);
-  hud.setPerf(perfMode);
   hud.setDamage(damageMode);
 
   // ---- Night (Night races card): the track's night art, or ?night=preview faking it from the day art ----
@@ -437,6 +391,10 @@ async function main(): Promise<void> {
   const applyProfile = (p: Profile): void => {
     const switched = p.id !== profile.id;
     const carChanged = p.team !== profile.team || p.settings.spec !== profile.settings.spec || JSON.stringify(p.setups[json.id]) !== JSON.stringify(profile.setups[json.id]);
+    const was = profile.settings;
+    /** Spec, AI, damage or performance changed: practice restarts with them when the pause menu changed them. */
+    const sessionChanged = p.settings.spec !== was.spec || p.settings.perf !== was.perf || p.settings.damage !== was.damage || p.settings.ai.count !== was.ai.count || p.settings.ai.preset !== was.ai.preset;
+    const bBefore = curr0Build();
     profile = p;
     setPlayerIdentity(nameCode(p.name), p.name);
     keyboard.setBindings(p.keybinds);
@@ -449,17 +407,19 @@ async function main(): Promise<void> {
     aiPreset = aiCfg.presets[want] ? want : aiCfg.defaultPreset;
     perfMode = p.settings.perf;
     damageMode = p.settings.damage;
-    hud.setAi(aiCount, aiPreset);
-    hud.setPerf(perfMode);
     hud.setDamage(damageMode);
     const b = curr0Build();
     if (switched) session = new Session(pbStore(p), recKey, pbSpec(b.spec), b.team);
+    const practice = !curr.race && !curr.quali && !online;
     // A different car (team/spec) shows at once outside a session; a session keeps its cars until restarted.
-    if ((switched || carChanged) && !curr.race && !curr.quali) {
-      session.changeSpec(pbSpec(b.spec));
-      session.changeTeam(b.team);
+    // A spec (or performance) change resets the session times; a team change keeps them (v0.16).
+    if ((switched || carChanged || p.settings.perf !== was.perf) && practice) {
+      if (switched || b.spec !== bBefore.spec || p.settings.perf !== was.perf) session.changeSpec(pbSpec(b.spec));
+      if (switched || b.team !== bBefore.team) session.changeTeam(b.team);
       rebuildCar(b);
     }
+    // Pause menu, Session tab, in practice: AI / damage / performance / spec apply now (the old drop-down did).
+    if (paused && practice && sessionChanged && !switched) startPractice(weekend?.stage === 'practice');
   };
   /** Local PBs on this track for the active profile (Records tab). */
   const records = (): RecordRow[] => {
@@ -516,8 +476,15 @@ async function main(): Promise<void> {
     onOpenChange: (open, mode) => {
       keyboard.suspended = open;
       keyboard.release();
-      paused = open && mode === 'pause'; // the main menu leaves the world running behind it
+      paused = open && mode === 'pause' && !online; // the main menu leaves the world running behind it; online never pauses
     },
+    pauseKind: () => (online ? 'online' : curr.race || curr.quali ? 'session' : 'practice'),
+    onPits: () => {
+      if (online || curr.race || curr.quali) return;
+      curr = resetCar(curr, 0, json.spawn, ctx);
+      prev = curr;
+    },
+    balance: () => (balance ? balance.corners.map((_, k) => ({ name: `T${k + 1}`, ...balance!.stats[k]!, passes: balance!.stats[k]!.front + balance!.stats[k]!.rear + balance!.stats[k]!.neither })) : []),
   });
 
   let prev: WorldState = createWorld(ctx, [startBuild]); // the profile's car, on this track's base setup unless the profile has its own
@@ -554,14 +521,14 @@ async function main(): Promise<void> {
   let fps = TICK_HZ; // display smoothing starts at the expected rate, not 0
 
   keyboard.onAction((a) => {
-    if (online && (a.type === 'pause' || a.type === 'gridSlot')) return; // online: no pause, no teleports
+    if (online && a.type === 'gridSlot') return; // online: no teleports (Esc opens the menu, but the race doesn't pause)
     // In a race, 0-9 (grid slots) are off: they'd teleport you round the lap. (R is reset to track now:
     // held, in the sim; back to the pits is a menu button.)
     if ((curr.race || curr.quali) && a.type === 'gridSlot') return;
     if (a.type === 'pitBoard') pitBoardAt = performance.now();
     else if (a.type === 'ghost') ghost.visible = !ghost.visible;
     else if (a.type === 'pause') {
-      if (!menu.isOpen) menu.open('pause');
+      openPause();
     } else if (a.type === 'toggleDebug') {
       debug = !debug;
     } else if (a.type === 'mute') {
